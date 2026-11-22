@@ -375,7 +375,7 @@ func TestGitLabAPI(t *testing.T) {
 	}
 	f.mu.Lock()
 	for _, tk := range f.tok {
-		if !strings.Contains(tk, testToken) || strings.Contains(tk, "placeholder") {
+		if tk != "|Bearer "+testToken {
 			t.Errorf("upstream saw credentials %q", tk)
 		}
 	}
@@ -517,7 +517,7 @@ func TestLoadOrCreateCA(t *testing.T) {
 // sbx mode: plain HTTP on one port per provider, any Host, a session token.
 func TestSbxMode(t *testing.T) {
 	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("Private-Token") != testToken {
+		if r.Header.Get("Authorization") != "Bearer "+testToken || r.Header.Get("Private-Token") != "" {
 			http.Error(w, "bad token", 401)
 			return
 		}

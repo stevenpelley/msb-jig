@@ -372,7 +372,7 @@ func (g *GitLab) sameProject(r *http.Request, pid, target string) bool {
 	if err != nil {
 		return false
 	}
-	q.Header.Set("Private-Token", tok)
+	setAPIToken(q.Header, tok)
 	resp, err := g.Client.Do(q)
 	if err != nil {
 		return false
@@ -402,7 +402,7 @@ func (g *GitLab) existingSourceBranch(r *http.Request, pid, iid string) *string 
 	if err != nil {
 		return nil
 	}
-	q.Header.Set("Private-Token", tok)
+	setAPIToken(q.Header, tok)
 	resp, err := g.Client.Do(q)
 	if err != nil {
 		return nil
@@ -584,8 +584,16 @@ func (g *GitLab) apiAuth(h http.Header) error {
 	if err != nil {
 		return err
 	}
-	h.Set("Private-Token", tok)
+	setAPIToken(h, tok)
 	return nil
+}
+
+// setAPIToken sends the user's token the OAuth way, which GitLab accepts
+// for personal access tokens too; PRIVATE-TOKEN takes only PATs, so an
+// OAuth token (glab's, from its web login) got 401 there.
+func setAPIToken(h http.Header, tok string) {
+	h.Del("Private-Token")
+	h.Set("Authorization", "Bearer "+tok)
 }
 
 func (g *GitLab) forward(w http.ResponseWriter, r *http.Request, body io.Reader, auth func(http.Header) error, rewrite func(*http.Response) (io.Reader, error)) {
