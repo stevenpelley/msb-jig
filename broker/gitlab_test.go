@@ -273,6 +273,10 @@ func (f *fakeGitLab) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case r.Method == http.MethodGet && strings.HasSuffix(p, "/merge_requests/1"):
 		_ = json.NewEncoder(w).Encode(map[string]any{"iid": 1, "source_branch": "agent/alice/x", "source_project_id": 7, "target_project_id": 7})
+	case r.Method == http.MethodGet && p == "/api/v4/projects/grp%2Fproj":
+		_ = json.NewEncoder(w).Encode(map[string]any{"id": 7, "path_with_namespace": "grp/proj"})
+	case r.Method == http.MethodGet && p == "/api/v4/projects/grp%2Funknown":
+		w.WriteHeader(http.StatusNotFound)
 	case r.Method == http.MethodGet && strings.HasSuffix(p, "/merge_requests/2"):
 		_ = json.NewEncoder(w).Encode(map[string]any{"iid": 2, "source_branch": "feature", "source_project_id": 7, "target_project_id": 7})
 	case strings.HasSuffix(p, "/info/lfs/objects/batch"):
@@ -326,6 +330,11 @@ func TestGitLabAPI(t *testing.T) {
 		{"POST", "/api/v4/projects/grp%2Fproj/merge_requests", `{"title":"Fix","source_branch":"agent/alice/x","target_branch":"main"}`, false},
 		{"POST", "/api/v4/projects/grp%2Fproj/merge_requests", `{"title":"[agent/alice] Fix","source_branch":"main","target_branch":"x"}`, false},
 		{"POST", "/api/v4/projects/grp%2Fproj/merge_requests", `{"title":"[agent/alice] Fix","source_branch":"agent/alice/x","target_branch":"main","target_project_id":99}`, false},
+		// glab sends the numeric ID of the URL's own project.
+		{"POST", "/api/v4/projects/grp%2Fproj/merge_requests", `{"title":"[agent/alice] Fix","source_branch":"agent/alice/x","target_branch":"main","target_project_id":7}`, true},
+		{"POST", "/api/v4/projects/grp%2Fproj/merge_requests", `{"title":"Fix","source_branch":"agent/alice/x","target_branch":"main","target_project_id":7}`, false},
+		{"POST", "/api/v4/projects/7/merge_requests", `{"title":"[agent/alice] Fix","source_branch":"agent/alice/x","target_branch":"main","target_project_id":8}`, false},
+		{"POST", "/api/v4/projects/grp%2Funknown/merge_requests", `{"title":"[agent/alice] Fix","source_branch":"agent/alice/x","target_branch":"main","target_project_id":7}`, false},
 		{"POST", "/api/v4/projects/grp%2Fproj/merge_requests", `{"title":"[agent/alice] Fix","source_branch":"agent/alice/x","target_branch":"main","merge_when_pipeline_succeeds":true}`, false},
 		{"PUT", "/api/v4/projects/grp%2Fproj/merge_requests/1", `{"description":"more"}`, true},
 		{"PUT", "/api/v4/projects/grp%2Fproj/merge_requests/1", `{"title":"untagged"}`, false},

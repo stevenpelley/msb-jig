@@ -97,6 +97,10 @@ the lifecycle checks, since `investigator-net` removes its network from
 `networks.yaml` when Lima stops it; a SIGKILL still leaves the entry, and
 then a hand-typed `limactl start` fails open (step 6 in
 `prototype-plan.md`).
+With the broker and the user's own fine-grained PAT (from the Keychain),
+step 5's live checks pass on Lima against `<user>/test`: git push rules,
+glab MR create, update, merge and approve, and the hosted MCP filter
+(after a fix: glab sends `target_project_id` as a number).
 The agent now runs on the Mac itself, and asks before running commands.
 Steps 2, 5 and 6 now run on the user's Mac. Then step 4. The Lima spike questions are answered on paper
 (2026-11-22, "Option C on Lima" in `investigator-design.md`), and the

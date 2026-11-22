@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/vektah/gqlparser/v2/ast"
@@ -315,7 +316,7 @@ func (g *GitLab) classifyWrite(r *http.Request, segs []string, params map[string
 			if v, ok := params["source_branch"]; ok {
 				req.SourceBranch = strp(v)
 			}
-			if t, ok := params["target_project_id"]; ok && t != pid {
+			if t, ok := params["target_project_id"]; ok && !g.sameProject(r, pid, t) {
 				req.Op, req.Detail = OpWrite, "merge request into another project"
 			}
 		case n == 4 && m == http.MethodPut:
@@ -346,6 +347,49 @@ func (g *GitLab) classifyWrite(r *http.Request, segs []string, params map[string
 
 // existingSourceBranch fetches the merge request, so an update is checked
 // against the branch it already has. A fork's branch never counts.
+// sameProject reports whether target, a numeric project ID, names the
+// project pid (a path or an ID). glab always sends target_project_id as a
+// number while the URL names the project by path, so resolve the path's ID
+// upstream. Anything that can't be resolved counts as another project.
+func (g *GitLab) sameProject(r *http.Request, pid, target string) bool {
+	if target == pid {
+		return true
+	}
+	if _, err := strconv.ParseInt(target, 10, 64); err != nil {
+		return false
+	}
+	if _, err := strconv.ParseInt(pid, 10, 64); err == nil {
+		return false // two different numbers
+	}
+	tok, err := g.Token()
+	if err != nil {
+		return false
+	}
+	u := *g.Upstream
+	u.Path = "/api/v4/projects/" + pid
+	u.RawPath = "/api/v4/projects/" + url.PathEscape(pid)
+	q, err := http.NewRequestWithContext(r.Context(), http.MethodGet, u.String(), nil)
+	if err != nil {
+		return false
+	}
+	q.Header.Set("Private-Token", tok)
+	resp, err := g.Client.Do(q)
+	if err != nil {
+		return false
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return false
+	}
+	var p struct {
+		ID int64 `json:"id"`
+	}
+	if json.NewDecoder(io.LimitReader(resp.Body, maxAPIBody)).Decode(&p) != nil || p.ID == 0 {
+		return false
+	}
+	return strconv.FormatInt(p.ID, 10) == target
+}
+
 func (g *GitLab) existingSourceBranch(r *http.Request, pid, iid string) *string {
 	tok, err := g.Token()
 	if err != nil {
