@@ -101,6 +101,11 @@ With the broker and the user's own fine-grained PAT (from the Keychain),
 step 5's live checks pass on Lima against `<user>/test`: git push rules,
 glab MR create, update, merge and approve, and the hosted MCP filter
 (after a fix: glab sends `target_project_id` as a number).
+Claude Code's credential is behind the broker on Lima too
+(`anthropic.broker.internal`; `api.anthropic.com` is off the allowlist).
+**microsandbox replaces Lima as the VM layer** (2026-11-22,
+`microsandbox.md`): `investigator-msb` runs the broker and the VM in one
+process, fails closed, and passes the live GitLab and Claude checks.
 The agent now runs on the Mac itself, and asks before running commands.
 Steps 2, 5 and 6 now run on the user's Mac. Then step 4. The Lima spike questions are answered on paper
 (2026-11-22, "Option C on Lima" in `investigator-design.md`), and the
@@ -125,8 +130,11 @@ user run on the user's Mac: this sandbox can't run sbx, Lima or VS Code.
 | `cli/`, `cmd/investigator/` | The CLI: per-sandbox SSH keys, pinned host key, SSH config, VS Code settings; `allowlist` compiles the layers |
 | `filter/` | The domain filter: allowlist groups and layers (`lists/*.yaml`, embedded), the ACL, our explicit proxy (direct or chained to an upstream) |
 | `net/` | Package `netstack`: the VM's only network (gvisor stack on gvisor-tap-vsock's switch, no forwarders), DHCP, our DNS, Lima's user-v2 sockets and endpoint API |
-| `cmd/investigator-net/` | The per-sandbox network process: `lima` (netstack, filter, broker), `sbx` (the broker on the Mac's loopback) or `filter` (the filter on TCP) |
+| `cmd/investigator-net/` | The per-sandbox network process: `lima` (netstack, filter, broker), `sbx` (the broker on the Mac's loopback), `broker` (the broker on a Unix socket) or `filter` (the filter on TCP) |
 | `broker/` | The broker: policy (`Decide`), receive-pack parsing, the GitLab adapter (git, LFS, REST, GraphQL, the hosted-MCP filter), the name-constrained CA, the shared server checks |
+| `brokerd/` | The broker as the per-sandbox processes run it: providers from flags, the TLS server under the sandbox's CA, the Unix-socket listener, token commands |
+| `cmd/investigator-msb/` | microsandbox: one supervisor per sandbox holding the broker and the VM (Go SDK, attached), `up\|run\|down\|shell\|ssh-config\|rm <name>` (`microsandbox.md`) |
+| `microsandbox.md` | microsandbox as the VM layer (2026-11-22, msb 0.7.16): checks on the Mac, the broker over vsock, the supervisor |
 | `lima/` | Step 6: the instance template (`investigator.yaml.in`) and `sandbox.sh up\|check\|shell\|down\|delete <name>`, run on the Mac with its own `LIMA_HOME` (`~/.inv`) |
 | `checks/` | `bridges.sh` (run in the editor's terminal), `step1-docker.sh` (step 1 against a container), `lima-net.sh` (in a Lima guest: only the filter and the broker are reachable) |
 | `enforcement.md` | Making the harness required (2026-11-22): threats, model-gated chain of trust, network and provider-side options, small provider asks |

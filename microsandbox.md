@@ -5,7 +5,8 @@ microsandbox 0.7.16, released 2026-11-18 and installed through Homebrew
 (`superradcompany/tap`). The results are under "What we checked". "Verify"
 marks what's still open.
 
-**Verdict:** it works as the VM layer, and the broker fits behind it
+**Verdict:** it works as the VM layer (and `investigator-msb`, below, runs
+it end to end), and the broker fits behind it
 unchanged. The broker can live in the same process that owns the VM: the
 coupling we wanted, without Lima's fail-open problems. Recommended as the
 replacement for Lima plus `investigator-net`'s netstack and filter.
@@ -165,6 +166,70 @@ Found on the way, not microsandbox's:
 - **The broker refuses git URLs without `.git`** (`/<user>/test/info/refs`):
   "request not recognized". GitLab accepts both, and this happens on Lima
   too. Worth fixing in `broker/`.
+
+## The supervisor, built: `investigator-msb`
+
+`cmd/investigator-msb` (2026-11-22) is the shape above, about 450 lines.
+The broker setup it shares with `investigator-net` lives in `brokerd/`.
+
+- `up <name>` starts `run <name>` in the background (setsid, log in
+  `~/.investigator/<name>/run.log`) and waits for it to be ready.
+- `run` takes a lock, then does the following in order:
+  1. serves the broker on `broker.sock`;
+  2. creates the sandbox the first time (`ubuntu:26.04`, 4 GiB, 4 vCPUs);
+  3. provisions it the first time;
+  4. starts the bridge;
+  5. waits.
+
+  It creates the sandbox through the SDK, attached, with:
+  - the allowlist compiled from `filter/lists` (`INV_PROFILE`, `INV_LAYERS`);
+  - strict mode off;
+  - the vsock route;
+  - the CA written in as a patch.
+
+  To provision, it runs `provision.sh` (embedded, as `sandbox.ProvisionScript`)
+  as root, with `base git broker claude` plus socat. A marker in the guest
+  means this happens once.
+
+  The bridge (socat, plus the `/etc/hosts` line) runs as a root exec job,
+  restarted if it ends.
+- `down` sends the supervisor SIGTERM, which stops the sandbox, then
+  closes the broker and removes the socket.
+- `shell` is `msb exec -t -u agent`.
+- `ssh-config` prints a Host block with `ProxyCommand msb ssh serve`.
+- `rm` is `down` plus removing the sandbox.
+- Configuration comes from the same variables as `lima/sandbox.sh`:
+  - `INV_GITLAB_USER`;
+  - glab's login as the GitLab token by default;
+  - the `inv-claude` Keychain item for Claude.
+
+Checked on the Mac with `INV_GITLAB_USER=<user> investigator-msb up inv2`:
+
+| Check | Result |
+|---|---|
+| First `up` | Created and provisioned in about a minute; the VM process is the supervisor's child (`--parent-watch-fd`) |
+| Claude Code as `agent` | `claude -p` answers through the broker |
+| glab | `glab api user` returns `<user>` |
+| git | A clone of `https://gitlab.com/<user>/test` (no `.git`) works. A push to `agent/<user>/msb` is accepted, a push to `main` is rejected with the broker's reason, and the branch is deleted again. |
+| Egress | `proxy.golang.org` and `ports.ubuntu.com:80` work. `pastebin.com` and `api.anthropic.com` fail. |
+| **DNS** | **An explicit `AllowDNS` rule made every name resolve**, so the denial came only at connect, and DNS stayed open as a channel out. Without it, a denied name gets no answer (curl exit 6). The rule is gone. |
+| The agent | It can't write `/etc/hosts`, and `sudo` asks for a password |
+| SIGKILL of the supervisor | The VM is gone (`stopped`). `up` starts it again over the stale pid and ready files. |
+| `down` and `up` | The home directory is kept, there's no reprovisioning, and the socket, pid and ready files are removed |
+| `ssh-config` | Logs in as `agent` with no agent socket |
+
+Still open:
+
+- **Environment outside login shells.** A non-login SSH command doesn't
+  get `ANTHROPIC_BASE_URL` (profile.d). The same is true on Lima, and it
+  matters for VS Code's terminals and its server. Write the variables
+  somewhere every shell reads too, e.g. `/etc/bash.bashrc` or
+  `/etc/environment`.
+- **One authorization for every sandbox.** `msb ssh authorize` adds the key
+  to `~/.microsandbox/ssh/authorized_keys`, which covers all sandboxes, not
+  one. Fine for one user's Mac.
+- **Docker in the guest** isn't provisioned yet (there's no systemd).
+- **Rules are fixed at create time.** Changing the layers needs `rm` and `up`.
 
 ## What we'd lose or have to settle
 

@@ -6,6 +6,7 @@ require (
 	github.com/containers/gvisor-tap-vsock v0.9.0
 	github.com/insomniacslk/dhcp v0.0.0-20240710054256-ddd8a41251c9
 	github.com/miekg/dns v1.1.73
+	github.com/superradcompany/microsandbox/sdk/go v0.7.16
 	github.com/vektah/gqlparser/v2 v2.5.64
 	golang.org/x/crypto v0.59.0
 	golang.org/x/sys v0.50.0

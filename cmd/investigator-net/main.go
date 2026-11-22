@@ -16,7 +16,6 @@ package main
 import (
 	"context"
 	"crypto/rand"
-	"crypto/tls"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -27,10 +26,8 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"os/exec"
 	"os/signal"
 	"path/filepath"
-	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -38,6 +35,7 @@ import (
 	"time"
 
 	"mcp-restrict/broker"
+	"mcp-restrict/brokerd"
 	"mcp-restrict/filter"
 	netstack "mcp-restrict/net"
 )
@@ -126,68 +124,6 @@ func main() {
 	}
 }
 
-type brokerFlags struct {
-	glUser, glURL, glTokenCmd, glMCPTokenCmd, anTokenCmd, anURL *string
-}
-
-func addBrokerFlags(fs *flag.FlagSet) *brokerFlags {
-	return &brokerFlags{
-		glUser:        fs.String("gitlab-user", "", "the GitLab user the agent acts for (no GitLab provider if empty)"),
-		glURL:         fs.String("gitlab-url", "https://gitlab.com", "the GitLab the broker forwards to"),
-		glTokenCmd:    fs.String("gitlab-token-command", "", "a command printing the user's GitLab token (default: $INVESTIGATOR_GITLAB_TOKEN)"),
-		glMCPTokenCmd: fs.String("gitlab-mcp-token-command", "", "a command printing the token for GitLab's MCP server, a fine-grained PAT (default: $INVESTIGATOR_GITLAB_MCP_TOKEN, else the GitLab token)"),
-		anTokenCmd:    fs.String("anthropic-token-command", "", "a command printing the Claude credential (`claude setup-token`'s OAuth token, or an API key); serves anthropic.broker.internal"),
-		anURL:         fs.String("anthropic-url", "https://api.anthropic.com", "the Anthropic API the broker forwards to"),
-	}
-}
-
-// providers builds the broker's providers by hostname; empty if none is configured.
-func (b *brokerFlags) providers(log *slog.Logger) map[string]http.Handler {
-	providers := map[string]http.Handler{}
-	if *b.glUser != "" {
-		up, err := url.Parse(*b.glURL)
-		if err != nil || up.Scheme != "https" {
-			fail("gitlab-url %q: want https://", *b.glURL)
-		}
-		const glHost = "gitlab.broker.internal"
-		gl := &broker.GitLab{User: *b.glUser, Token: tokenSource(*b.glTokenCmd, "INVESTIGATOR_GITLAB_TOKEN"),
-			Upstream: up, PublicHost: glHost, Client: broker.NewUpstreamClient(), Log: log}
-		if *b.glMCPTokenCmd != "" || os.Getenv("INVESTIGATOR_GITLAB_MCP_TOKEN") != "" {
-			gl.MCPToken = tokenSource(*b.glMCPTokenCmd, "INVESTIGATOR_GITLAB_MCP_TOKEN")
-		}
-		providers[glHost] = gl
-	}
-	if *b.anTokenCmd != "" {
-		up, err := url.Parse(*b.anURL)
-		if err != nil || up.Scheme != "https" {
-			fail("anthropic-url %q: want https://", *b.anURL)
-		}
-		const anHost = "anthropic.broker.internal"
-		providers[anHost] = &broker.Anthropic{Token: tokenSource(*b.anTokenCmd, ""), Upstream: up,
-			PublicHost: anHost, Client: broker.NewUpstreamClient(), Log: log}
-	}
-	return providers
-}
-
-// serveBroker serves the providers over TLS on l, under the sandbox's CA.
-func serveBroker(l net.Listener, providers map[string]http.Handler, state, name string, log *slog.Logger) *http.Server {
-	ca, err := broker.LoadOrCreateCA(filepath.Join(state, "broker-ca"), name)
-	if err != nil {
-		fail("ca: %v", err)
-	}
-	hosts := make([]string, 0, len(providers))
-	for h := range providers {
-		hosts = append(hosts, h)
-	}
-	sort.Strings(hosts)
-	// No WriteTimeout: model responses stream for minutes.
-	srv := &http.Server{Handler: &broker.Server{Providers: providers, Log: log},
-		ReadHeaderTimeout: 30 * time.Second}
-	go func() { _ = srv.Serve(tls.NewListener(l, ca.TLSConfig(hosts))) }()
-	log.Info("broker ready", "hosts", hosts, "ca", filepath.Join(state, "broker-ca", "ca.pem"))
-	return srv
-}
-
 // brokerOnSocket serves the broker alone on a Unix socket, for a runtime
 // that owns the VM's network and exposes host sockets to the guest
 // (microsandbox's vsock routes). The socket's path is the sandbox's
@@ -197,7 +133,8 @@ func brokerOnSocket(args []string, log *slog.Logger) {
 	name := fs.String("name", "", "the sandbox's name (the CA's name)")
 	state := fs.String("state", "", "this sandbox's state directory (the broker's CA lives here)")
 	sock := fs.String("socket", "", "the Unix socket to serve on (default <state>/broker.sock)")
-	bf := addBrokerFlags(fs)
+	var bf brokerd.Flags
+	bf.Register(fs)
 	_ = fs.Parse(args)
 	if *name == "" || *state == "" {
 		fail("broker: -name and -state are required")
@@ -205,27 +142,23 @@ func brokerOnSocket(args []string, log *slog.Logger) {
 	if *sock == "" {
 		*sock = filepath.Join(*state, "broker.sock")
 	}
-	providers := bf.providers(log)
-	if len(providers) == 0 {
-		fail("broker: no provider configured (-gitlab-user, -anthropic-token-command)")
-	}
-	if err := os.MkdirAll(*state, 0o700); err != nil {
-		fail("%v", err)
-	}
-	if err := os.Chmod(*state, 0o700); err != nil {
-		fail("%v", err)
-	}
-	_ = os.Remove(*sock)
-	l, err := net.Listen("unix", *sock)
+	providers, err := bf.Providers(log)
 	if err != nil {
 		fail("%v", err)
 	}
-	if err := os.Chmod(*sock, 0o600); err != nil {
+	if len(providers) == 0 {
+		fail("broker: no provider configured (-gitlab-user, -anthropic-token-command)")
+	}
+	l, err := brokerd.ListenUnix(*sock)
+	if err != nil {
 		fail("%v", err)
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
-	srv := serveBroker(l, providers, *state, *name, log)
+	srv, err := brokerd.Serve(l, providers, *state, *name, log)
+	if err != nil {
+		fail("%v", err)
+	}
 	log.Info("broker listening", "socket", *sock)
 	<-ctx.Done()
 	_ = srv.Close()
@@ -241,7 +174,8 @@ func lima(args []string, log *slog.Logger) {
 	state := fs.String("state", "", "this sandbox's state directory (the broker's CA lives here)")
 	pidfile := fs.String("pidfile", "", "write our PID here (Lima's usernet_<name>.pid, until lima#5818)")
 	networksYAML := fs.String("networks-yaml", "", "on exit, remove -name from this networks.yaml ($LIMA_HOME/_config/networks.yaml), so Lima can't start its own daemon for it")
-	bf := addBrokerFlags(fs)
+	var bf brokerd.Flags
+	bf.Register(fs)
 	ff := addFilterFlags(fs)
 	_ = fs.Parse(args)
 	if *name == "" || *limaDir == "" || *state == "" {
@@ -264,12 +198,18 @@ func lima(args []string, log *slog.Logger) {
 	}
 	go func() { _ = (&http.Server{Handler: ff.proxy(log), ReadHeaderTimeout: 30 * time.Second}).Serve(ln) }()
 
-	if providers := bf.providers(log); len(providers) > 0 {
+	providers, err := bf.Providers(log)
+	if err != nil {
+		fail("%v", err)
+	}
+	if len(providers) > 0 {
 		bl, err := n.ListenTCP(443)
 		if err != nil {
 			fail("%v", err)
 		}
-		serveBroker(bl, providers, *state, *name, log)
+		if _, err := brokerd.Serve(bl, providers, *state, *name, log); err != nil {
+			fail("%v", err)
+		}
 	}
 
 	if err := n.ServeLima(ctx, *limaDir, *name); err != nil {
@@ -326,10 +266,10 @@ func sbx(args []string, log *slog.Logger) {
 	if err != nil || up.Scheme != "https" {
 		fail("gitlab-url %q: want https://", *glURL)
 	}
-	gl := &broker.GitLab{User: *glUser, Token: tokenSource(*glTokenCmd, "INVESTIGATOR_GITLAB_TOKEN"),
+	gl := &broker.GitLab{User: *glUser, Token: brokerd.TokenSource(*glTokenCmd, "INVESTIGATOR_GITLAB_TOKEN"),
 		Upstream: up, PublicHost: *public, PublicScheme: "http", Client: broker.NewUpstreamClient(), Log: log}
 	if *glMCPTokenCmd != "" || os.Getenv("INVESTIGATOR_GITLAB_MCP_TOKEN") != "" {
-		gl.MCPToken = tokenSource(*glMCPTokenCmd, "INVESTIGATOR_GITLAB_MCP_TOKEN")
+		gl.MCPToken = brokerd.TokenSource(*glMCPTokenCmd, "INVESTIGATOR_GITLAB_MCP_TOKEN")
 	}
 	srv := &http.Server{Addr: *listen, Handler: &broker.Server{Only: gl, SessionToken: session, Log: log},
 		ReadHeaderTimeout: 30 * time.Second}
@@ -357,36 +297,6 @@ func sessionToken(file string) (string, error) {
 
 // tokenSource returns the user's token from a command (run at most once a
 // minute) or an environment variable.
-func tokenSource(command, env string) func() (string, error) {
-	if command == "" {
-		return func() (string, error) {
-			if t := os.Getenv(env); t != "" {
-				return t, nil
-			}
-			return "", errors.New(env + " is not set")
-		}
-	}
-	var mu sync.Mutex
-	var tok string
-	var at time.Time
-	return func() (string, error) {
-		mu.Lock()
-		defer mu.Unlock()
-		if tok != "" && time.Since(at) < time.Minute {
-			return tok, nil
-		}
-		out, err := exec.Command("/bin/sh", "-c", command).Output()
-		if err != nil {
-			return "", fmt.Errorf("token command: %w", err)
-		}
-		tok, at = strings.TrimSpace(string(out)), time.Now()
-		if tok == "" {
-			return "", errors.New("token command printed nothing")
-		}
-		return tok, nil
-	}
-}
-
 func loadACL(file, profile string, layers []string) (*filter.ACL, error) {
 	var es []filter.Entry
 	if file != "" {
