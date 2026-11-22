@@ -1,0 +1,74 @@
+# Lima template for one investigator sandbox. lima/sandbox.sh fills the
+# @...@ placeholders and creates the instance from the result. See
+# investigator-design.md, "Leaving sbx: Lima", and prototype-plan.md step 6.
+minimumLimaVersion: 2.3.0
+
+base:
+- template:_images/ubuntu-26.04   # systemd 256+, so SSH runs over vsock
+
+vmType: @VMTYPE@                  # vz; krunkit for spike check 7
+mounts: []                        # nothing of the Mac is shared
+containerd:
+  system: false
+  user: false
+
+# The VM's only NIC: investigator-net's user-v2 network. On vz, listing a
+# user-v2 network replaces Lima's built-in (unfiltered) network.
+networks:
+- lima: @NETWORK@
+
+user:
+  name: @USER@
+
+ssh:
+  overVsock: true
+  loadDotSSHPubKeys: false
+  forwardAgent: false
+  forwardX11: false
+
+# Don't hand the Mac's proxy settings or resolver to the guest; DNS is
+# investigator-net's, which answers only proxy.internal and *.broker.internal.
+propagateProxyEnv: false
+hostResolver:
+  enabled: false
+dns:
+- @GATEWAY@
+
+# Forward no guest ports to the Mac. The first matching rule wins, so this
+# one shadows Lima's built-in loopback rule.
+portForwards:
+- guestIP: 0.0.0.0
+  guestIPMustBeZero: false
+  proto: any
+  ignore: true
+
+provision:
+# Lima's own boot scripts may install packages before ours run: point apt
+# at the filter first, since nothing else is reachable.
+- mode: dependency
+  script: |
+    #!/bin/sh
+    printf 'Acquire::http::Proxy "http://proxy.internal:3128";\nAcquire::https::Proxy "http://proxy.internal:3128";\n' \
+      >/etc/apt/apt.conf.d/90investigator-proxy
+- mode: data
+  path: /usr/local/sbin/investigator-provision.sh
+  permissions: "755"
+  file:
+    url: @PROVISION_SH@
+- mode: system
+  script: |
+    #!/bin/bash
+    set -euo pipefail
+    export SANDBOX_USER=@USER@
+    export PROVISION_PROXY=http://proxy.internal:3128
+    export BROKER_GITLAB_URL=https://gitlab.broker.internal
+    export BROKER_GITHUB_URL=https://github.broker.internal
+    export BROKER_CA_FILE=/usr/local/share/ca-certificates/investigator-broker-src.crt
+    cat >"$BROKER_CA_FILE" <<'CA'
+@BROKER_CA_PEM@
+    CA
+    # Once per instance: provisioning reruns at every boot.
+    if [[ ! -e /var/lib/investigator-provisioned ]]; then
+      /usr/local/sbin/investigator-provision.sh
+      touch /var/lib/investigator-provisioned
+    fi
