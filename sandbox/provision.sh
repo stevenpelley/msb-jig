@@ -16,6 +16,11 @@
 #   BROKER_CA_FILE       the broker's CA certificate, installed as trusted if given
 #   BROKER_SESSION_TOKEN sbx mode only: the token investigator-net sbx requires,
 #                        sent by git (extraHeader), glab (its token) and the MCP client
+#   BROKER_GITLAB_USER   the GitLab user the agent acts for: writes the broker's
+#                        rules into the agent's instructions (~/.claude/CLAUDE.md)
+#   BROKER_GITLAB_MCP    1 to register GitLab's MCP server (through the broker's
+#                        MCP filter) with Claude Code; it needs a token with the
+#                        mcp scope. Default: glab only.
 #   PROVISION_PROXY      optional explicit proxy URL (e.g. http://proxy.internal:3128)
 #                        written for apt, dockerd and login shells. Leave unset
 #                        where the runtime sets proxies itself (sbx).
@@ -27,6 +32,8 @@ BROKER_GITLAB_URL="${BROKER_GITLAB_URL:-https://gitlab.broker.internal}"
 BROKER_GITHUB_URL="${BROKER_GITHUB_URL:-https://github.broker.internal}"
 BROKER_CA_FILE="${BROKER_CA_FILE:-}"
 BROKER_SESSION_TOKEN="${BROKER_SESSION_TOKEN:-}"
+BROKER_GITLAB_USER="${BROKER_GITLAB_USER:-}"
+BROKER_GITLAB_MCP="${BROKER_GITLAB_MCP:-}"
 PROVISION_PROXY="${PROVISION_PROXY:-}"
 export DEBIAN_FRONTEND=noninteractive
 
@@ -176,8 +183,53 @@ if want claude; then
   log "claude code"
   su - "$SANDBOX_USER" -c 'curl -fsSL https://claude.ai/install.sh | bash' >/dev/null
   su - "$SANDBOX_USER" -c '~/.local/bin/claude --version'
-  # GitLab's MCP server, through the broker's MCP filter (which injects the token).
-  su - "$SANDBOX_USER" -c "~/.local/bin/claude mcp remove --scope user gitlab >/dev/null 2>&1; ~/.local/bin/claude mcp add --scope user --transport http gitlab '$BROKER_GITLAB_URL/api/v4/mcp' ${BROKER_SESSION_TOKEN:+--header 'X-Investigator-Session: $BROKER_SESSION_TOKEN'}" >/dev/null
+  # GitLab's MCP server, through the broker's MCP filter (which injects the
+  # token), only when asked: glab through the broker does everything it does,
+  # with one credential fewer (prototype-plan.md, step 6).
+  su - "$SANDBOX_USER" -c "~/.local/bin/claude mcp remove --scope user gitlab >/dev/null 2>&1" || true
+  if [[ "$BROKER_GITLAB_MCP" == 1 ]]; then
+    su - "$SANDBOX_USER" -c "~/.local/bin/claude mcp add --scope user --transport http gitlab '$BROKER_GITLAB_URL/api/v4/mcp' ${BROKER_SESSION_TOKEN:+--header 'X-Investigator-Session: $BROKER_SESSION_TOKEN'}" >/dev/null
+  fi
+  # The broker's rules, so the agent follows them instead of learning them
+  # from 403s. Ours to rewrite only while it carries our first line.
+  if [[ -n "$BROKER_GITLAB_USER" ]]; then
+    home="$(getent passwd "$SANDBOX_USER" | cut -d: -f6)"
+    md="$home/.claude/CLAUDE.md"
+    marker="<!-- Written by investigator provision.sh; edits are lost on reprovisioning. -->"
+    if [[ ! -e $md ]] || [[ "$(head -n1 "$md")" == "$marker" ]]; then
+      install -d -o "$SANDBOX_USER" -g "$SANDBOX_USER" "$home/.claude"
+      u="$BROKER_GITLAB_USER"
+      cat >"$md" <<EOF
+$marker
+# Working in the investigator sandbox
+
+GitLab is reached only through the investigator broker, which holds the
+credentials and enforces these rules. Requests that break them get a 403
+from "investigator broker" that says why.
+
+- Use \`git\` and \`glab\` as usual: gitlab.com URLs are routed to the broker,
+  and \`glab\` is already configured (\`GITLAB_HOST\`). Don't log in, and
+  don't ask for tokens.
+- Push only to branches under \`agent/$u/\`, e.g. \`agent/$u/fix-timeout\`.
+  Pushes to any other branch, and push options (\`git push -o\`), are refused.
+- Merge request titles must start with \`[agent/$u]\`, after an optional
+  \`Draft:\`. Only merge requests from \`agent/$u/\` branches can be edited
+  or commented on.
+- Never merge, approve or set auto-merge: a human does that.
+- Run \`glab\` non-interactively: pass \`--yes\`, titles and descriptions as
+  flags, and \`-R <group>/<project>\` when outside a clone.
+- For anything \`glab\` has no command for, use \`glab api\` (REST, or
+  \`glab api graphql\` for queries). Save large responses to a file and read
+  what you need with \`jq\`, \`head\` or \`grep\`.
+- Other hosts go through a domain filter. A 403 from it names the host;
+  ask the user to allow it rather than working around it.
+EOF
+      chown "$SANDBOX_USER:$SANDBOX_USER" "$md"
+      chmod 0644 "$md"
+    else
+      log "$md exists and isn't ours: left alone"
+    fi
+  fi
 fi
 
 log "done"

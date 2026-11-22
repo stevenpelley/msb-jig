@@ -20,8 +20,15 @@
 #   INV_VMTYPE      vz (default) or krunkit
 #   INV_USER        the guest user (default: your Mac user name, as Lima does)
 #   INV_GITLAB_USER the GitLab user the agent acts for; empty runs no broker
-#   INV_GITLAB_URL, INV_GITLAB_TOKEN_COMMAND, INV_GITLAB_MCP_TOKEN_COMMAND
-#                   passed to investigator-net (see its -help)
+#   INV_GITLAB_URL  the GitLab the broker forwards to (default https://gitlab.com)
+#   INV_GITLAB_TOKEN_COMMAND
+#                   prints the user's GitLab token (default: glab's own login,
+#                   `glab api user >/dev/null && glab config get token --host <host>`;
+#                   the first call lets glab refresh its 2-hour OAuth token)
+#   INV_GITLAB_MCP_TOKEN_COMMAND
+#                   prints a token with the mcp scope (a fine-grained PAT). Only
+#                   when set is GitLab's MCP server registered in the VM; glab's
+#                   token lacks that scope. Read at create time.
 #   INV_PROFILE     the filter's profile layer (default investigator)
 #   INV_LAYERS      space-separated org or user layer files
 set -euo pipefail
@@ -42,6 +49,9 @@ usage() { sed -n '2,25p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 2; }
 [[ $# -eq 2 ]] || usage
 cmd=$1 name=$2
 [[ $name =~ ^[a-z][a-z0-9-]{0,14}$ ]] || die "name must be lowercase letters, digits and dashes, at most 15 characters"
+# It goes into the template, provisioning and the broker's branch rule.
+[[ -z "${INV_GITLAB_USER:-}" || $INV_GITLAB_USER =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,254}$ ]] ||
+  die "INV_GITLAB_USER isn't a GitLab username"
 
 state="$state_root/$name"
 netdir="$LIMA_HOME/_networks/$name"
@@ -114,8 +124,14 @@ start_net() {
   local l
   for l in ${INV_LAYERS:-}; do args+=(-layer "$l"); done
   if [[ -n "${INV_GITLAB_USER:-}" ]]; then
-    args+=(-gitlab-user "$INV_GITLAB_USER" -gitlab-url "${INV_GITLAB_URL:-https://gitlab.com}")
-    [[ -n "${INV_GITLAB_TOKEN_COMMAND:-}" ]] && args+=(-gitlab-token-command "$INV_GITLAB_TOKEN_COMMAND")
+    local gl_url="${INV_GITLAB_URL:-https://gitlab.com}"
+    local gl_host=${gl_url#*://}
+    gl_host=${gl_host%%/*}
+    local tok_cmd="${INV_GITLAB_TOKEN_COMMAND:-glab api --hostname $gl_host user >/dev/null && glab config get token --host $gl_host}"
+    if [[ -z "${INV_GITLAB_TOKEN_COMMAND:-}" ]] && ! command -v glab >/dev/null; then
+      die "glab not found: install it and run 'glab auth login --hostname $gl_host --web', or set INV_GITLAB_TOKEN_COMMAND"
+    fi
+    args+=(-gitlab-user "$INV_GITLAB_USER" -gitlab-url "$gl_url" -gitlab-token-command "$tok_cmd")
     [[ -n "${INV_GITLAB_MCP_TOKEN_COMMAND:-}" ]] && args+=(-gitlab-mcp-token-command "$INV_GITLAB_MCP_TOKEN_COMMAND")
   else
     log "no INV_GITLAB_USER: running without the broker"
@@ -199,6 +215,8 @@ render() {
       line=${line//@NETWORK@/$name}
       line=${line//@USER@/$guest_user}
       line=${line//@GATEWAY@/$prefix.2}
+      line=${line//@GITLAB_USER@/${INV_GITLAB_USER:-}}
+      line=${line//@GITLAB_MCP@/${INV_GITLAB_MCP_TOKEN_COMMAND:+1}}
       printf '%s\n' "$line"
       ;;
     esac
