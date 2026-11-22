@@ -340,7 +340,7 @@ Keep the current pattern:
 
 *Added 2026-11-22; revised twice the same day.* The broker's policy covers **only the providers we manage**. Egress filtering by domain is a separate, simpler policy, with off-the-shelf code behind it:
 - **the runtime's own policy where it has one** (sbx, OpenShell);
-- on Lima, **an embedded explicit proxy** (Stripe's smokescreen, used as a Go library) with a hostname ACL. It runs inside `investigator-net`, the same process as the network stack and the broker, but as its own component with its own ACL (see [Packaging: one process per sandbox](#packaging-one-process-per-sandbox)).
+- on Lima, **an embedded explicit proxy** with a hostname ACL: our own, in `filter/` (about 400 lines). Stripe's smokescreen was the first choice, but it always resolves the destination itself and checks the address it gets, including when it dials an upstream proxy, so it can't chain to a proxy with a private address or run where external names don't resolve (both true in sbx and behind corporate proxies; decided 2026-11-22). It runs inside `investigator-net`, the same process as the network stack and the broker, but as its own component with its own ACL (see [Packaging: one process per sandbox](#packaging-one-process-per-sandbox)).
 
 **The same harness serves as a general dev sandbox.** The investigator is one configuration of the allowlist. A broader one adds documentation sites for common tools and services, and the hosts that serve development and production tools (package registries, release downloads, container registries). It becomes the everyday sandbox for developers.
 
@@ -362,9 +362,11 @@ The `investigator` profile stays narrow because it runs unattended on alerts. A 
 
 **What we do close, because it's cheap and accidents happen:**
 - **The Mac's other local services.** Otherwise the agent reaches dev servers, MCP gateways, or a Docker or Podman API listening on TCP. On Lima, the netstack closes this by construction: the broker and the proxy listen on the VM's virtual network, not on the Mac, and the netstack forwards nothing ([why](#why-the-broker-and-the-filter-listen-on-the-netstack)). But **the filter dials from the Mac**, so it must refuse the Mac's own addresses itself:
-  - keep smokescreen's default deny of private, loopback and link-local ranges (never set `UnsafeAllowPrivateRanges`);
-  - deny a request that names an upstream proxy (`X-Upstream-Https-Proxy`, which sets `ConnectProxyHost`), since a custom `Decider` for our layers could otherwise let it through;
-  - refuse to start without an ACL, since a nil `EgressACL` allows everything;
+  - take host names only, never IP literals, and match them against the ACL;
+  - when dialing directly, resolve the name itself, drop loopback, private, link-local, CGNAT, ULA and other non-public addresses, and dial the address it checked (so DNS can't change the answer in between);
+  - when chaining, send `CONNECT <name>` to the upstream proxy and let it resolve;
+  - deny a request that names an upstream proxy (`X-Upstream-Https-Proxy`);
+  - refuse to start without an ACL;
   - allow ports 80 and 443 only.
 
   On sbx, "allow the Mac" means the broker's port only.
@@ -390,7 +392,7 @@ Mac
   investigator-net <sandbox>      (ours; one per sandbox; runs only while the VM runs)
     gvisor-tap-vsock netstack ── the VM's only NIC (a Lima user-v2 network)
       ├─ gateway:53    DNS: answers only proxy.internal and *.broker.internal
-      ├─ gateway:3128  domain filter: embedded smokescreen, our generated ACL
+      ├─ gateway:3128  domain filter: our explicit proxy, our generated ACL
       ├─ gateway:443   broker: git, REST and GraphQL, hosted-MCP proxy, AWS MCP; policy; logs
       └─ anything else: reset (no forwarders, no NAT to the Mac)
     reads the user's credentials (Keychain, AWS SSO cache); dials out only for the filter and the broker
@@ -406,7 +408,7 @@ Mac
 | Piece | Ours or stock | Role |
 |---|---|---|
 | `investigator` CLI | Ours | `setup`, `login`, `open`, `stop`, `allow`, `denied`, `logout`, `uninstall`. Generates the ACL, the policy settings (user name, allowed repos), the SSH config and the editor settings. Starts `investigator-net`, then the VM, and cleans up on delete. |
-| `investigator-net` | Ours, built on gvisor-tap-vsock and smokescreen | The VM's network, the domain filter and the broker, in one Go binary with separate packages for each |
+| `investigator-net` | Ours, built on gvisor-tap-vsock | The VM's network, the domain filter and the broker, in one Go binary with separate packages for each |
 | VM image | Ours (`sandbox/provision.sh`) on a stock Ubuntu cloud image | Everything the agent and the tests need. `HTTPS_PROXY` points at `proxy.internal`; git `insteadOf`, `gh`, `glab` and the MCP client point at the `*.broker.internal` hosts. |
 | Lima | Stock | Boots and runs the VM: disks, cloud-init, vsock SSH, the guest agent |
 | Editor settings | Ours (configuration) | Close the credential bridges ([the IDE connection](#the-new-trust-boundary-the-ide-connection)) |
@@ -538,7 +540,7 @@ Unknown hosts: sbx has an approval queue, which the CLI shows the user. Where th
 | Our image as the sandbox | **One provisioning script, two packagings.** `sandbox/provision.sh` installs everything (sshd settings, git, Docker, the agent, toolchains). The sbx image's Dockerfile runs it, and so does the Lima template's `provision` step on a stock Ubuntu cloud image. Later, `devcontainer build` output can feed both. |
 | Docker inside | `dockerd` installed by the provisioning script, as in Lima's Docker template |
 | SSH for the editor | Built in. `limactl show-ssh` (or the VM's `ssh.config`) gives the host entry, which the CLI copies into its own SSH config with our settings. Our sshd settings keep Lima's own user and key working. |
-| Domain allowlist and approvals | smokescreen, embedded in `investigator-net` and served on the VM's network, with a hostname ACL generated from our layers. Unknown hosts are denied and logged. `investigator denied` lists recent denials, and `investigator allow <host>` adds one to the user layer. That's simpler than sbx's queue and good enough. |
+| Domain allowlist and approvals | Our filter (`filter/`), in `investigator-net` and served on the VM's network, with a hostname ACL generated from our layers. Unknown hosts are denied and logged. `investigator denied` lists recent denials, and `investigator allow <host>` adds one to the user layer. That's simpler than sbx's queue and good enough. |
 | Forcing traffic through the filter | sbx: its user-mode network stack does it ([How sbx enforces egress](#how-sbx-enforces-egress-observed-2026-11-22)). Lima: `investigator-net` serving a `user-v2` network, the VM's only NIC ([Option C on Lima](#option-c-on-lima-the-answers-researched-2026-11-22)). |
 | Credential injection, MCP gateway | Not needed from the runtime: the broker does both |
 | Clone mode (no host mounts) | The CLI clones repos inside the VM, through the broker. Lima's default host mounts are turned off (`mounts: []`). |
@@ -646,7 +648,7 @@ Upstream filtering is coming too, but not soon enough to wait for: gvisor-tap-vs
   - `dockerd`, through a systemd drop-in, for image pulls;
   - containers, through Docker's client `proxies` setting, plus the broker's CA in images that need the broker;
   - the base allowlist layer: the Ubuntu mirrors, Docker's apt repository, and the hosts that serve `glab`, `gh` and Claude Code.
-- **The filter needs an upstream of its own sometimes:** in this sandbox, which has no direct egress, it chains to sbx's proxy; at work, to the corporate proxy. smokescreen supports an upstream proxy (`UpstreamProxySelector`), so it's one mechanism for both.
+- **The filter needs an upstream of its own sometimes:** in this sandbox, which has no direct egress, it chains to sbx's proxy; at work, to the corporate proxy. Our filter takes an upstream proxy (`-upstream`), so it's one mechanism for both. Tested 2026-11-22 here, chained to sbx's proxy: curl, `go mod download`, `pip download`, `npm view`, `git ls-remote` and a Docker Hub pull done by hand with curl (token, manifest, blob) all work, and denials are logged.
 - The broker's code doesn't change between runtimes. Only how it's served does: on the netstack on Lima, on `127.0.0.1` on sbx.
 
 ## VM runtimes beyond sbx and OpenShell
@@ -741,9 +743,9 @@ The spec doesn't need a runtime that understands it:
 
 ## Open questions
 
-- Lima: do lima#5818 (`external: true`) or lima#5813 (`daemon:`) merge, and when? Until then we carry the pidfile workaround. Does `sbx rm` remove per-sandbox policy rules? Do work Macs give developers `sudo`? Tart: does its license allow our use at work? Apple `container`: does Docker run inside, and can we attach our own netstack? Does our `user-v2` network work with `vmType: krunkit`? (Answered 2026-11-22: smokescreen is maintained and importable as a Go library; work Macs run macOS 27.)
+- Lima: do lima#5818 (`external: true`) or lima#5813 (`daemon:`) merge, and when? Until then we carry the pidfile workaround. Does `sbx rm` remove per-sandbox policy rules? Do work Macs give developers `sudo`? Tart: does its license allow our use at work? Apple `container`: does Docker run inside, and can we attach our own netstack? Does our `user-v2` network work with `vmType: krunkit`? (Answered 2026-11-22: work Macs run macOS 27; smokescreen can't chain to a private upstream, so the filter is our own.)
 - **The model credential:** can the broker hold and inject the agent's model credential (Claude Code's API key or OAuth token; Kiro's sign-in), so no model token sits in the VM, as sbx's kits do?
-- **Corporate networks:** how do `investigator-net`'s filter and broker chain to a corporate proxy or SASE client on work Macs, and handle VPN split DNS? smokescreen's upstream proxy covers the filter; the broker needs the same.
+- **Corporate networks:** how do `investigator-net`'s filter and broker chain to a corporate proxy or SASE client on work Macs, and handle VPN split DNS? The filter's upstream proxy covers it; the broker uses `HTTPS_PROXY` (`NewUpstreamClient`).
 - **sbx mode:** do requests to `host.docker.internal:<port>` reach the broker intact through sbx's proxy, and does `gh` accept a host with a port over plain HTTP?
 - **Building the netstack:** can gvisor-tap-vsock's tap switch be used with a stack we build ourselves, or do we vendor a patched copy?
 - **Prebuilt images:** how do we build and ship a Lima disk image so a sandbox starts in seconds rather than provisioning at first boot?
@@ -810,7 +812,7 @@ The spec doesn't need a runtime that understands it:
 - [Code-Hex/vz](https://github.com/Code-Hex/vz)
 - [gvisor-tap-vsock v0.9.0: `virtualnetwork` services](https://github.com/containers/gvisor-tap-vsock/blob/v0.9.0/pkg/virtualnetwork/services.go) and [DNS](https://github.com/containers/gvisor-tap-vsock/blob/v0.9.0/pkg/services/dns/dns.go)
 - [Lima v2.3.0: default template](https://github.com/lima-vm/lima/blob/v2.3.0/templates/default.yaml) (`vmType: krunkit`, `propagateProxyEnv`, `portForwards`)
-- [smokescreen](https://github.com/stripe/smokescreen)
+- [smokescreen](https://github.com/stripe/smokescreen) (considered, not used)
 - [git: `push.c`](https://github.com/git/git/blob/master/builtin/push.c) (push mappings applied to explicit refspecs)
 - [GitLab docs: push options](https://docs.gitlab.com/topics/git/commit/#push-options)
 - [GitLab: LFS API controller](https://gitlab.com/gitlab-org/gitlab/-/blob/master/app/controllers/repositories/lfs_api_controller.rb)

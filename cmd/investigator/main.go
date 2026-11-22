@@ -8,15 +8,18 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"mcp-restrict/cli"
+	"mcp-restrict/filter"
 )
 
 func usage() {
 	fmt.Fprintln(os.Stderr, `usage: investigator <command> [flags]
 
 commands:
-  ssh-setup   generate a sandbox's SSH keys and write its SSH config`)
+  ssh-setup   generate a sandbox's SSH keys and write its SSH config
+  allowlist   compile the allowlist layers into the filter's ACL or sbx policy commands`)
 	os.Exit(2)
 }
 
@@ -27,6 +30,8 @@ func main() {
 	switch os.Args[1] {
 	case "ssh-setup":
 		sshSetup(os.Args[2:])
+	case "allowlist":
+		allowlist(os.Args[2:])
 	default:
 		usage()
 	}
@@ -71,4 +76,37 @@ func sshSetup(args []string) {
 	fmt.Printf("config=%s\nhost=%s\nsandbox-keys=%s\nvscode-settings=%s\n", p.Config, e.Alias, p.SandboxDir, vs)
 	fmt.Printf("open with: code --user-data-dir %q --extensions-dir %q --remote ssh-remote+%s /home/%s\n",
 		filepath.Join(*state, "vscode"), filepath.Join(*state, "vscode-ext"), e.Alias, *user)
+}
+
+// layerFlags collects repeated -layer flags.
+type layerFlags []string
+
+func (l *layerFlags) String() string     { return strings.Join(*l, ",") }
+func (l *layerFlags) Set(v string) error { *l = append(*l, v); return nil }
+
+func allowlist(args []string) {
+	fs := flag.NewFlagSet("allowlist", flag.ExitOnError)
+	profile := fs.String("profile", "investigator", "profile layer: "+strings.Join(filter.Profiles, " or "))
+	format := fs.String("format", "acl", "acl (the filter's ACL file) or sbx (sbx policy commands)")
+	var layers layerFlags
+	fs.Var(&layers, "layer", "an org or user layer file, in order (repeatable)")
+	_ = fs.Parse(args)
+	ls, err := filter.Layers(*profile, layers...)
+	if err == nil {
+		var es []filter.Entry
+		if es, err = filter.Compile(ls); err == nil {
+			switch *format {
+			case "acl":
+				fmt.Print(filter.FormatACL(es))
+			case "sbx":
+				fmt.Print(filter.FormatSbx(es))
+			default:
+				err = fmt.Errorf("unknown format %q", *format)
+			}
+		}
+	}
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "allowlist:", err)
+		os.Exit(1)
+	}
 }

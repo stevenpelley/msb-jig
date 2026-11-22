@@ -74,17 +74,16 @@ The agent writes scripts for each Mac step, and the user runs them and pastes th
 
 - The layered allowlist (base, profile `investigator` or `dev`, org, user) as data, grouped by tool or service.
 - A CLI command that turns the layers into `sbx policy` rules (for the prototype), and into the ACL for the filter.
-- **The filter:** smokescreen embedded as a Go library (maintained and importable as `/v2`, checked 2026-11-22), serving an explicit HTTP proxy. Keep its private-range deny, deny client-chosen upstream proxies, refuse to start without an ACL, allow ports 80 and 443 only.
-- **Upstream chaining:** the filter dials through an upstream proxy when one is configured (`UpstreamProxySelector`). Here it chains to sbx's proxy, since this sandbox has no direct egress; at work, to the corporate proxy.
+- **The filter:** our own explicit HTTP proxy in `filter/` (smokescreen can't chain; see below). Host names only, ports 80 and 443 only, the ACL from the layers, private addresses refused when dialing directly, client-chosen upstream proxies denied, no start without an ACL.
+- **Upstream chaining:** the filter dials through an upstream proxy when one is configured (`-upstream`). Here it chains to sbx's proxy, since this sandbox has no direct egress; at work, to the corporate proxy.
 - **The netstack:** gvisor-tap-vsock's tap switch with a gvisor stack we build ourselves, **without its TCP, UDP and ICMP forwarders and without a NAT table** (its `virtualnetwork.New` always installs the forwarders, and Lima's `gvproxy.go` maps the gateway to the Mac's loopback). Use `gvproxy.go` only as the reference for Lima's sockets. It serves the data and endpoint sockets (0700 directory, peer check), its own DNS for `proxy.internal` and `*.broker.internal` only, the filter on the gateway's port 3128 and the broker on its port 443. If building the stack ourselves is too awkward, vendor a patched copy.
 - Test it here with a fake guest: a second gvisor stack on the socket. Check that the proxy and broker answer; that a SYN to any other address or port gets a reset, UDP and ICMP go nowhere, and other names get NXDOMAIN.
-- **In progress (2026-11-22), nothing written yet.** Findings so far:
-  - **smokescreen is awkward to chain.** v0.1.0 (2026-09-18; master 2026-11-11) always resolves the destination itself and applies its range checks, and it dials an upstream proxy through the same check. Here the upstream (sbx's proxy) has a private address and external names don't resolve, and a corporate proxy would hit the same problems. **Proposed, needs the user's OK:** use the design's fallback, our own small explicit proxy in `filter/`:
-    - CONNECT and absolute-form HTTP, ports 80 and 443 only;
-    - the hostname ACL from the layers, with IP-literal destinations refused;
-    - direct mode resolves the name, drops loopback, private, link-local, CGNAT and ULA addresses, and dials the address it checked;
-    - upstream mode sends CONNECT to the configured proxy;
-    - refuses `X-Upstream-Https-Proxy`, and logs denials for `investigator denied`.
+- **Filter: done (2026-11-22).**
+  - `filter/lists/` holds the groups and the base, `investigator` and `dev` layers, embedded in the binary; org and user layers are files that may define groups of their own. `investigator allowlist -profile <p> [-layer f]... -format acl|sbx` prints the ACL or `sbx policy allow network` commands.
+  - `filter.Proxy` is our own explicit proxy. **smokescreen was dropped** (user, 2026-11-22): v0.1.0 always resolves the destination itself and applies its range checks, also when it dials an upstream proxy, so it can't chain to sbx's proxy (a private address, no external DNS here) or to a corporate one.
+  - `go test ./filter` covers the ACL, the layers, the address check (loopback, private, metadata, mapped and NAT64 forms), denials, and chaining through an upstream that checks `Proxy-Authorization` without resolving names locally.
+  - Real tools, through `investigator-net -filter-listen 127.0.0.1:13128 -upstream env -profile dev` chained to sbx's proxy: curl, `go mod download`, `pip download`, `npm view`, `git ls-remote` work; pastebin, `169.254.169.254` and bitbucket.org are denied and logged. A Docker Hub pull done by hand with curl (token, manifest, blob) found blobs on `production.cloudfront.docker.com`, now in the `docker-hub` group. **Set the lowercase `https_proxy` too:** curl prefers it to `HTTPS_PROXY`. `docker pull` itself is untested here (this sandbox's `dockerd` has its own proxy); check it on Lima.
+- **Netstack: next.** Notes:
   - **gvisor-tap-vsock v0.9.0's API** (it pins gvisor `v0.0.0-20260413194555-9680d69bf798`):
     - `tap.NewLinkEndpoint(debug, mtu, gwMAC, gwIP, virtualIPs)` and `tap.NewSwitch(debug)`, connected to each other with `Connect`;
     - `Switch.Accept(ctx, conn, types.QemuProtocol)` (or `VfkitProtocol` for Lima's vz socket);
@@ -93,7 +92,6 @@ The agent writes scripts for each Mac step, and the user runs them and pastes th
     - reuse `services/dhcp.New(config, stack, ipPool)`, which advertises the gateway as router and DNS, after reserving the gateway in `tap.NewIPPool`;
     - listeners via `gonet` on the gateway's ports 53/udp, 3128 and 443.
   - **Fake guest for the tests:** a second gvisor stack on a `channel` endpoint, its packets pumped over a Unix stream socket with QEMU framing (a 4-byte big-endian length).
-- Test `go`, `npm`, `pip`, `curl` and `docker pull` against the filter directly (with `HTTPS_PROXY` pointed at it), not through the fake guest. Record which tools ignore `HTTPS_PROXY`.
 
 ### 4. The hosted-MCP filter (agent, in its sandbox)
 

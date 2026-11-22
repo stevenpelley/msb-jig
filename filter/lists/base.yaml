@@ -1,0 +1,4 @@
+# Base layer: what every sandbox needs. The broker isn't listed: the
+# sandbox reaches *.broker.internal directly (NO_PROXY), not through the filter.
+description: every sandbox
+groups: [claude-code, ubuntu]

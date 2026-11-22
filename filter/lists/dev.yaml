@@ -1,0 +1,4 @@
+# The dev profile: the general dev sandbox, with documentation and
+# tool-download hosts. Broader, so more exfiltration channels (accepted).
+description: the general dev sandbox (broad)
+groups: [docker-apt, docker-hub, github-public, gitlab-public, go, node, python, terraform, aws-docs, docs-common]
