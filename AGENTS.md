@@ -2,8 +2,8 @@
 
 Exploration project: tools that limit what a coding agent in a sandbox can
 reach, mainly over the network, with finer rules than the providers' own
-roles and tokens allow. No code yet; the deliverables so far are design
-notes.
+roles and tokens allow. Design notes plus the prototype's code (Go module
+`mcp-restrict`, `prototype-plan.md`).
 
 ## Purpose
 
@@ -78,7 +78,10 @@ Keep these parties separate when reasoning about enforcement:
 
 ## Current state
 
-No code yet. The Lima spike questions are answered on paper
+Step 1 of `prototype-plan.md` is built and passes here (2026-11-22): the
+sandbox image (`sandbox/`), the CLI's SSH setup and VS Code settings
+(`cli/`, `cmd/investigator`), `checks/bridges.sh`, and
+`checks/step1-docker.sh`. The Lima spike questions are answered on paper
 (2026-11-22, "Option C on Lima" in `investigator-design.md`), and the
 Mac side is packaged as one process per sandbox, `investigator-net`
 ("Packaging: one process per sandbox"). Lima fails open until lima#5818
@@ -97,10 +100,15 @@ user run on the user's Mac: this sandbox can't run sbx, Lima or VS Code.
 |---|---|
 | `investigator-design.md` | The harness design (2026-11-21; editor over SSH added 2026-11-22): the two tracks, VS Code then Kiro over SSH into the sandbox, egress filtering, packaging as one process per sandbox (`investigator-net`), leaving sbx for Lima and libraries that boot VMs (libkrun and the cloud path), dev containers, the broker (core plus per-provider adapters, GitLab and GitHub, hosted-MCP tool filtering), the sandbox backend interface, whether OpenShell is easier behind an IDE, packaging, open questions |
 | `prototype-plan.md` | The personal track, step by step, ending on Lima: who tests what (this sandbox vs the user's Mac) |
+| `sandbox/` | `provision.sh` (one script for the sbx image and the Lima VM), `install-keys.sh`, the image's `Dockerfile` |
+| `cli/`, `cmd/investigator/` | The CLI: per-sandbox SSH keys, pinned host key, SSH config, VS Code settings |
+| `checks/` | `bridges.sh` (run in the editor's terminal), `step1-docker.sh` (step 1 against a container) |
 | `enforcement.md` | Making the harness required (2026-11-22): threats, model-gated chain of trust, network and provider-side options, small provider asks |
 
 ## Working rules
 
+- Verify: `go vet ./... && go test ./...`, and `checks/step1-docker.sh`
+  (needs Docker; builds `investigator-sandbox:dev`).
 - Research notes carry the date and tool versions they were checked
   against. Mark anything not tested or not confirmed in a source as
   *unverified*, and list sources at the end.
