@@ -8,8 +8,11 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"math/big"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -57,6 +60,56 @@ func NewCA(sandbox string) (*CA, error) {
 		return nil, err
 	}
 	return &CA{Cert: cert, Key: key, leafs: map[string]*tls.Certificate{}}, nil
+}
+
+// LoadOrCreateCA keeps the sandbox's CA in dir (ca.pem, and ca-key.pem
+// with mode 0600), since the VM trusts it from provisioning on. It
+// creates one the first time.
+func LoadOrCreateCA(dir, sandbox string) (*CA, error) {
+	certFile, keyFile := filepath.Join(dir, "ca.pem"), filepath.Join(dir, "ca-key.pem")
+	if certPEM, err := os.ReadFile(certFile); err == nil {
+		keyPEM, err := os.ReadFile(keyFile)
+		if err != nil {
+			return nil, err
+		}
+		cb, _ := pem.Decode(certPEM)
+		kb, _ := pem.Decode(keyPEM)
+		if cb == nil || kb == nil {
+			return nil, fmt.Errorf("%s: bad PEM", dir)
+		}
+		cert, err := x509.ParseCertificate(cb.Bytes)
+		if err != nil {
+			return nil, err
+		}
+		key, err := x509.ParseECPrivateKey(kb.Bytes)
+		if err != nil {
+			return nil, err
+		}
+		if !cert.IsCA || !cert.PermittedDNSDomainsCritical || len(cert.PermittedDNSDomains) != 1 || cert.PermittedDNSDomains[0] != BrokerDomain {
+			return nil, fmt.Errorf("%s: not a broker CA", certFile)
+		}
+		return &CA{Cert: cert, Key: key, leafs: map[string]*tls.Certificate{}}, nil
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return nil, err
+	}
+	ca, err := NewCA(sandbox)
+	if err != nil {
+		return nil, err
+	}
+	der, err := x509.MarshalECPrivateKey(ca.Key)
+	if err != nil {
+		return nil, err
+	}
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return nil, err
+	}
+	if err := os.WriteFile(keyFile, pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: der}), 0o600); err != nil {
+		return nil, err
+	}
+	if err := os.WriteFile(certFile, ca.CertPEM(), 0o644); err != nil {
+		return nil, err
+	}
+	return ca, nil
 }
 
 // CertPEM is what the VM installs as a trusted CA.

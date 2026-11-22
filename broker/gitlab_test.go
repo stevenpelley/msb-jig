@@ -483,3 +483,24 @@ func signRaw(ca *CA, host string) (*x509.Certificate, error) {
 	}
 	return x509.ParseCertificate(der)
 }
+
+func TestLoadOrCreateCA(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "ca")
+	a, err := LoadOrCreateCA(dir, "s")
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := LoadOrCreateCA(dir, "s")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !a.Cert.Equal(b.Cert) || !a.Key.Equal(b.Key) {
+		t.Fatal("CA not reloaded")
+	}
+	if fi, _ := os.Stat(filepath.Join(dir, "ca-key.pem")); fi.Mode().Perm() != 0o600 {
+		t.Errorf("key mode %v", fi.Mode())
+	}
+	if _, err := b.Leaf("gitlab.broker.internal"); err != nil {
+		t.Fatal(err)
+	}
+}

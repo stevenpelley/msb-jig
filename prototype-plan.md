@@ -83,15 +83,12 @@ The agent writes scripts for each Mac step, and the user runs them and pastes th
   - `filter.Proxy` is our own explicit proxy. **smokescreen was dropped** (user, 2026-11-22): v0.1.0 always resolves the destination itself and applies its range checks, also when it dials an upstream proxy, so it can't chain to sbx's proxy (a private address, no external DNS here) or to a corporate one.
   - `go test ./filter` covers the ACL, the layers, the address check (loopback, private, metadata, mapped and NAT64 forms), denials, and chaining through an upstream that checks `Proxy-Authorization` without resolving names locally.
   - Real tools, through `investigator-net -filter-listen 127.0.0.1:13128 -upstream env -profile dev` chained to sbx's proxy: curl, `go mod download`, `pip download`, `npm view`, `git ls-remote` work; pastebin, `169.254.169.254` and bitbucket.org are denied and logged. A Docker Hub pull done by hand with curl (token, manifest, blob) found blobs on `production.cloudfront.docker.com`, now in the `docker-hub` group. **Set the lowercase `https_proxy` too:** curl prefers it to `HTTPS_PROXY`. `docker pull` itself is untested here (this sandbox's `dockerd` has its own proxy); check it on Lima.
-- **Netstack: next.** Notes:
-  - **gvisor-tap-vsock v0.9.0's API** (it pins gvisor `v0.0.0-20260413194555-9680d69bf798`):
-    - `tap.NewLinkEndpoint(debug, mtu, gwMAC, gwIP, virtualIPs)` and `tap.NewSwitch(debug)`, connected to each other with `Connect`;
-    - `Switch.Accept(ctx, conn, types.QemuProtocol)` (or `VfkitProtocol` for Lima's vz socket);
-    - our own `stack.New` with ipv4, arp, tcp and udp, one NIC, the gateway address and a subnet route;
-    - `SetPromiscuousMode(1, true)` so connections to other addresses get a reset, with no forwarders and no `SetSpoofing`;
-    - reuse `services/dhcp.New(config, stack, ipPool)`, which advertises the gateway as router and DNS, after reserving the gateway in `tap.NewIPPool`;
-    - listeners via `gonet` on the gateway's ports 53/udp, 3128 and 443.
-  - **Fake guest for the tests:** a second gvisor stack on a `channel` endpoint, its packets pumped over a Unix stream socket with QEMU framing (a 4-byte big-endian length).
+- **Netstack: done (2026-11-22).** `net/` (package `netstack`) on gvisor-tap-vsock v0.9.0's tap switch and DHCP server, with our own gvisor stack: no forwarders, no NAT.
+  - Promiscuous mode **and spoofing** are on: without spoofing the stack can't send the reset from the address the guest asked for, and a SYN to `1.1.1.1` times out instead of failing at once. Both only shape what goes back to the guest; nothing dials out except the filter and the broker.
+  - DNS (ours, `miekg/dns`, UDP and TCP) answers `proxy.internal` and `*.broker.internal` with the gateway, NXDOMAIN otherwise, and logs refusals.
+  - Lima's sockets: `<name>_fd.sock` (vz: one datagram fd over `SCM_RIGHTS`, run as BESS), `<name>_qemu.sock`, and `<name>_ep.sock`, which serves what Lima v2.3's host agent calls: DHCP leases, `wait_port`, `dns/add` (accepted, ignored), and port forwards **only** from the Mac's loopback to a guest's port 22 (Lima's SSH fallback when vsock isn't available). The directory is 0700 and every socket checks the peer's UID. Socket paths must stay under 104 bytes, so `LIMA_HOME` must be short.
+  - `go test ./net` drives a fake guest (a second gvisor stack, QEMU framing over the real socket): DHCP offers an address with the gateway as router and DNS; the filter and broker ports answer; other gateway ports and off-subnet addresses get a reset; other subnet addresses and loopback don't connect; ping to the gateway answers and to `1.1.1.1` doesn't; DNS as above, and DNS to `8.8.8.8` goes nowhere; the endpoint API, including refused forwards.
+  - `investigator-net lima -name <net> -lima-dir <dir> -state <dir> [-pidfile <usernet_<name>.pid>] [-gitlab-user <u> -gitlab-token-command <cmd>]` serves it all: the filter on the gateway's port 3128, the broker over TLS on 443 with a CA kept in `<state>/broker-ca/` (`ca.pem` goes into the VM). Smoke-tested here; not yet run against a real VM. `investigator-net filter -listen <addr>` serves only the filter.
 
 ### 4. The hosted-MCP filter (agent, in its sandbox)
 
