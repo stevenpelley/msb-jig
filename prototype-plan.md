@@ -124,28 +124,20 @@ The agent writes scripts for each Mac step, and the user runs them and pastes th
 
 The design isn't done until this works. Details are in "Leaving sbx: Lima" in `investigator-design.md`.
 
-**In progress (2026-11-22).** Written so far: `lima/investigator.yaml.in`, the instance template with `@...@` placeholders (`VMTYPE`, `NETWORK`, `USER`, `GATEWAY`, `PROVISION_SH`, `BROKER_CA_PEM`): base `template:_images/ubuntu-26.04`, `mounts: []`, containerd off, one `networks: [{lima: <net>}]`, SSH over vsock with no agent or X11, `propagateProxyEnv: false`, `hostResolver.enabled: false` with `dns: [<gateway>]`, an ignore-all `portForwards` rule, a `dependency` step that points apt at the filter before Lima's own boot scripts run, then `provision.sh` written as `data` and run once by a `system` script with the Lima settings (proxy, broker URLs, broker CA). Not run anywhere yet.
-
-**Next:** `lima/sandbox.sh up|down|check|delete <name>`:
-- `up`:
-  - use a short `LIMA_HOME` of our own (default `~/.inv`), because socket paths must stay under 104 bytes;
-  - start `investigator-net lima -name <n> -lima-dir $LIMA_HOME/_networks/<n> -pidfile $LIMA_HOME/_networks/<n>/usernet_<n>.pid -state <state>/<n> ...` and wait for the endpoint socket to answer `/services/dhcp/leases`;
-  - write `$LIMA_HOME/_config/networks.yaml` with only this network (`mode: user-v2`, `gateway: <subnet>.1`, `netmask`; Lima puts its gateway at `.2`). Whether Lima accepts a file without `paths` and `group` is *unverified*;
-  - check that the pidfile holds our PID;
-  - fill the template (indent the CA PEM four spaces), then `limactl create` and `limactl start`;
-  - check after boot: one NIC besides `lo` and Docker's, and the VM's MAC in our leases.
-- `down`: `limactl stop`, stop `investigator-net`, and remove the network's entry.
-- `check`: copy in `checks/lima-net.sh` and run it in the guest. Not written yet. It checks:
-  - through the filter, an allowed host works and a denied one returns 403;
-  - `curl --noproxy '*' https://1.1.1.1` fails at once;
-  - `getent hosts example.com` fails, and `proxy.internal` resolves to the gateway;
-  - `https://gitlab.broker.internal/` answers with the broker's TLS;
-  - no listening ports are forwarded.
-- `delete`: `limactl delete`, then remove `_networks/<n>`.
-- Unverified Lima details to watch on the Mac:
-  - whether `{{.User}}`-style templating is needed (the script substitutes `@USER@` itself);
-  - whether `mode: data` takes `file.url` as a local path;
-  - whether Lima's `ReadPIDFile` accepts a PID that isn't `limactl usernet`.
+**Written (2026-11-22), not yet run with Lima.** Tested in this sandbox with a fake `limactl` and the real `investigator-net`: up, a second up, down and delete; the pidfile check; `networks.yaml`; the rendered template parses, with `provision.sh` and the CA intact; and the post-boot check catches a VM it can't match to a lease and stops it.
+- `lima/investigator.yaml.in`, the instance template: base `template:_images/ubuntu-26.04`, `mounts: []`, containerd off, one `networks: [{lima: <name>}]`, SSH over vsock with no agent or X11, `propagateProxyEnv: false`, `hostResolver.enabled: false` with `dns: [<gateway>]`, an ignore-all `portForwards` rule, a `dependency` step that points apt at the filter before Lima's own boot scripts run, then `provision.sh` (inlined as `data` content) run once by a `system` script with the Lima settings (proxy, broker URLs, broker CA).
+- `lima/sandbox.sh up|check|shell|down|delete <name>` (environment in its header: `INV_GITLAB_USER`, `INV_GITLAB_TOKEN_COMMAND`, `INV_VMTYPE`, …):
+  - its own `LIMA_HOME` (default `~/.inv`): short, for the 104-byte socket paths, and invisible to a hand-typed `limactl`;
+  - `up` builds `investigator-net` from the repo (or uses `INV_NET`), starts it, waits for the endpoint's leases, checks that `usernet_<name>.pid` holds its PID, writes `networks.yaml` with only the networks whose `investigator-net` is running, fills the template, `limactl create` (once) and `start`, then checks one NIC besides `lo` and Docker's and that the NIC's MAC holds one of our leases; on a failed check it stops everything;
+  - each sandbox keeps a /24 (from 192.168.104.0/24 up, or `INV_SUBNET`) in its state directory (`~/.investigator/<name>`, which also holds the broker's CA, `net.log` and `denials.jsonl`, and survives `delete`);
+  - `check` reruns the boot check, runs `checks/lima-net.sh` in the guest, then from the Mac: a guest listener on all addresses isn't reachable on the Mac's loopback, and `investigator-net` forwards nothing but port 22;
+  - `down` stops the VM and `investigator-net` and drops the network from `networks.yaml`, so a hand-typed `limactl start` has no network to use; `delete` also deletes the instance and `_networks/<name>`.
+- `checks/lima-net.sh <gateway> [broker]`, in the guest: `proxy.internal` and `gitlab.broker.internal` resolve to the gateway, `example.com` doesn't, 8.8.8.8:53 is unreachable; through the filter `api.anthropic.com` and `archive.ubuntu.com:80` work, `example.com` and `1.1.1.1` get 403; a direct connection to 1.1.1.1 fails within 3 s, ping gets nothing, the gateway's other ports are closed; the broker answers over TLS under the installed CA; one NIC, default route via the gateway.
+- **To run on the Mac** (Lima 2.3+): `INV_GITLAB_USER=<user> INV_GITLAB_TOKEN_COMMAND='<prints a token>' lima/sandbox.sh up inv1`, then `lima/sandbox.sh check inv1`, and paste both outputs back. Unverified Lima details to watch:
+  - whether Lima accepts a `networks.yaml` without `paths` and `group`;
+  - whether Lima's `ReadPIDFile` accepts a PID that isn't `limactl usernet` (if not, Lima starts its own daemon and the post-boot lease check fails);
+  - whether `limactl stop` stops `investigator-net` itself (Lima stops a usernet daemon no instance uses), which `down` tolerates;
+  - the guest's NIC name and `ip` output, which the NIC check parses.
 
 1. A Lima template: stock Ubuntu cloud image, `vmType: vz`, `mounts: []`, and `sandbox/provision.sh` as its provisioning step.
 2. Enforce the route with option C: `investigator-net` (step 3b) serves a per-sandbox `user-v2` network, which on `vz` is the VM's only NIC. The filter and the broker are served inside it, and nothing else is reachable. No root needed. `HTTPS_PROXY=http://proxy.internal:3128` in the VM. Details and the Mac checks are in "Option C on Lima" (`investigator-design.md`):

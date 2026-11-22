@@ -1,5 +1,7 @@
 # Lima template for one investigator sandbox. lima/sandbox.sh fills the
-# @...@ placeholders and creates the instance from the result. See
+# @...@ placeholders and creates the instance from the result. A
+# placeholder alone on its line (@PROVISION_SH@, @BROKER_CA_PEM@) is replaced
+# by a file's lines, indented four spaces to sit inside its block scalar. See
 # investigator-design.md, "Leaving sbx: Lima", and prototype-plan.md step 6.
 minimumLimaVersion: 2.3.0
 
@@ -53,8 +55,8 @@ provision:
 - mode: data
   path: /usr/local/sbin/investigator-provision.sh
   permissions: "755"
-  file:
-    url: @PROVISION_SH@
+  content: |
+@PROVISION_SH@
 - mode: system
   script: |
     #!/bin/bash
@@ -67,6 +69,11 @@ provision:
     cat >"$BROKER_CA_FILE" <<'CA'
 @BROKER_CA_PEM@
     CA
+    # No broker (no -gitlab-user): nothing to trust.
+    if ! grep -q 'BEGIN CERTIFICATE' "$BROKER_CA_FILE"; then
+      rm -f "$BROKER_CA_FILE"
+      unset BROKER_CA_FILE
+    fi
     # Once per instance: provisioning reruns at every boot.
     if [[ ! -e /var/lib/investigator-provisioned ]]; then
       /usr/local/sbin/investigator-provision.sh
