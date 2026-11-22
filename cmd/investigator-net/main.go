@@ -130,6 +130,7 @@ func lima(args []string, log *slog.Logger) {
 	subnet := fs.String("subnet", "192.168.104.0/24", "the network's subnet, as in networks.yaml")
 	state := fs.String("state", "", "this sandbox's state directory (the broker's CA lives here)")
 	pidfile := fs.String("pidfile", "", "write our PID here (Lima's usernet_<name>.pid, until lima#5818)")
+	networksYAML := fs.String("networks-yaml", "", "on exit, remove -name from this networks.yaml ($LIMA_HOME/_config/networks.yaml), so Lima can't start its own daemon for it")
 	glUser := fs.String("gitlab-user", "", "the GitLab user the agent acts for (no broker if empty)")
 	glURL := fs.String("gitlab-url", "https://gitlab.com", "the GitLab the broker forwards to")
 	glTokenCmd := fs.String("gitlab-token-command", "", "a command printing the user's GitLab token (default: $INVESTIGATOR_GITLAB_TOKEN)")
@@ -193,6 +194,14 @@ func lima(args []string, log *slog.Logger) {
 	fd, qemu, ep := netstack.SocketPaths(*limaDir, *name)
 	log.Info("network up", "gateway", n.Gateway().String(), "fd", fd, "qemu", qemu, "ep", ep)
 	<-ctx.Done()
+	// First take the network out of Lima's config, then the sockets.
+	if *networksYAML != "" {
+		if err := dropNetwork(*networksYAML, *name); err != nil {
+			log.Error("networks.yaml: network left defined", "file", *networksYAML, "err", err)
+		} else {
+			log.Info("networks.yaml: network removed", "file", *networksYAML)
+		}
+	}
 	for _, p := range []string{fd, qemu, ep} {
 		_ = os.Remove(p)
 	}

@@ -110,7 +110,7 @@ start_net() {
   chmod 700 "$state"
   echo "$subnet" >"$state/subnet"
   local args=(lima -name "$name" -lima-dir "$netdir" -subnet "$subnet" -state "$state" -pidfile "$pidfile"
-    -profile "${INV_PROFILE:-investigator}" -denials "$state/denials.jsonl")
+    -networks-yaml "$networks_yaml" -profile "${INV_PROFILE:-investigator}" -denials "$state/denials.jsonl")
   local l
   for l in ${INV_LAYERS:-}; do args+=(-layer "$l"); done
   if [[ -n "${INV_GITLAB_USER:-}" ]]; then

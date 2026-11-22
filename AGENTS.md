@@ -93,8 +93,10 @@ server. `investigator-net sbx` (the broker for step 5) is built. Step 6's
 pieces are written (`lima/investigator.yaml.in`, `lima/sandbox.sh`,
 `checks/lima-net.sh`) and, since 2026-11-22, run on the user's Mac with
 Lima 2.3.0 (`vz`), without the broker: `up` and `check` pass, and so do
-the lifecycle checks but one: after a hand-typed `limactl stop`, a
-hand-typed `limactl start` fails open (step 6 in `prototype-plan.md`).
+the lifecycle checks, since `investigator-net` removes its network from
+`networks.yaml` when Lima stops it; a SIGKILL still leaves the entry, and
+then a hand-typed `limactl start` fails open (step 6 in
+`prototype-plan.md`).
 The agent now runs on the Mac itself, and asks before running commands.
 Steps 2, 5 and 6 now run on the user's Mac. Then step 4. The Lima spike questions are answered on paper
 (2026-11-22, "Option C on Lima" in `investigator-design.md`), and the
