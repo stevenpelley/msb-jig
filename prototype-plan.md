@@ -78,6 +78,21 @@ The agent writes scripts for each Mac step, and the user runs them and pastes th
 - **Upstream chaining:** the filter dials through an upstream proxy when one is configured (`UpstreamProxySelector`). Here it chains to sbx's proxy, since this sandbox has no direct egress; at work, to the corporate proxy.
 - **The netstack:** gvisor-tap-vsock's tap switch with a gvisor stack we build ourselves, **without its TCP, UDP and ICMP forwarders and without a NAT table** (its `virtualnetwork.New` always installs the forwarders, and Lima's `gvproxy.go` maps the gateway to the Mac's loopback). Use `gvproxy.go` only as the reference for Lima's sockets. It serves the data and endpoint sockets (0700 directory, peer check), its own DNS for `proxy.internal` and `*.broker.internal` only, the filter on the gateway's port 3128 and the broker on its port 443. If building the stack ourselves is too awkward, vendor a patched copy.
 - Test it here with a fake guest: a second gvisor stack on the socket. Check that the proxy and broker answer; that a SYN to any other address or port gets a reset, UDP and ICMP go nowhere, and other names get NXDOMAIN.
+- **In progress (2026-11-22), nothing written yet.** Findings so far:
+  - **smokescreen is awkward to chain.** v0.1.0 (2026-09-18; master 2026-11-11) always resolves the destination itself and applies its range checks, and it dials an upstream proxy through the same check. Here the upstream (sbx's proxy) has a private address and external names don't resolve, and a corporate proxy would hit the same problems. **Proposed, needs the user's OK:** use the design's fallback, our own small explicit proxy in `filter/`:
+    - CONNECT and absolute-form HTTP, ports 80 and 443 only;
+    - the hostname ACL from the layers, with IP-literal destinations refused;
+    - direct mode resolves the name, drops loopback, private, link-local, CGNAT and ULA addresses, and dials the address it checked;
+    - upstream mode sends CONNECT to the configured proxy;
+    - refuses `X-Upstream-Https-Proxy`, and logs denials for `investigator denied`.
+  - **gvisor-tap-vsock v0.9.0's API** (it pins gvisor `v0.0.0-20260413194555-9680d69bf798`):
+    - `tap.NewLinkEndpoint(debug, mtu, gwMAC, gwIP, virtualIPs)` and `tap.NewSwitch(debug)`, connected to each other with `Connect`;
+    - `Switch.Accept(ctx, conn, types.QemuProtocol)` (or `VfkitProtocol` for Lima's vz socket);
+    - our own `stack.New` with ipv4, arp, tcp and udp, one NIC, the gateway address and a subnet route;
+    - `SetPromiscuousMode(1, true)` so connections to other addresses get a reset, with no forwarders and no `SetSpoofing`;
+    - reuse `services/dhcp.New(config, stack, ipPool)`, which advertises the gateway as router and DNS, after reserving the gateway in `tap.NewIPPool`;
+    - listeners via `gonet` on the gateway's ports 53/udp, 3128 and 443.
+  - **Fake guest for the tests:** a second gvisor stack on a `channel` endpoint, its packets pumped over a Unix stream socket with QEMU framing (a 4-byte big-endian length).
 - Test `go`, `npm`, `pip`, `curl` and `docker pull` against the filter directly (with `HTTPS_PROXY` pointed at it), not through the fake guest. Record which tools ignore `HTTPS_PROXY`.
 
 ### 4. The hosted-MCP filter (agent, in its sandbox)

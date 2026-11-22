@@ -83,7 +83,9 @@ sandbox image (`sandbox/`), the CLI's SSH setup and VS Code settings
 (`cli/`, `cmd/investigator`), `checks/bridges.sh`, and
 `checks/step1-docker.sh`. Step 3 too: the broker's GitLab adapter
 (`broker/`), tested with real git against `git-http-backend` and with a
-fake GitLab API; `glab` against the broker is still unchecked. The Lima spike questions are answered on paper
+fake GitLab API; `glab` against the broker is still unchecked. Step 3b
+(filter and netstack) is next; its findings and an open decision (our own
+filter instead of smokescreen) are in `prototype-plan.md`. Then step 4. The Lima spike questions are answered on paper
 (2026-11-22, "Option C on Lima" in `investigator-design.md`), and the
 Mac side is packaged as one process per sandbox, `investigator-net`
 ("Packaging: one process per sandbox"). Lima fails open until lima#5818
