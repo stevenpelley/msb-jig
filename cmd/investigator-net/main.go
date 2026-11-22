@@ -124,6 +124,7 @@ func lima(args []string, log *slog.Logger) {
 	glUser := fs.String("gitlab-user", "", "the GitLab user the agent acts for (no broker if empty)")
 	glURL := fs.String("gitlab-url", "https://gitlab.com", "the GitLab the broker forwards to")
 	glTokenCmd := fs.String("gitlab-token-command", "", "a command printing the user's GitLab token (default: $INVESTIGATOR_GITLAB_TOKEN)")
+	glMCPTokenCmd := fs.String("gitlab-mcp-token-command", "", "a command printing the token for GitLab's MCP server, a fine-grained PAT (default: $INVESTIGATOR_GITLAB_MCP_TOKEN, else the GitLab token)")
 	ff := addFilterFlags(fs)
 	_ = fs.Parse(args)
 	if *name == "" || *limaDir == "" || *state == "" {
@@ -158,6 +159,9 @@ func lima(args []string, log *slog.Logger) {
 		const glHost = "gitlab.broker.internal"
 		gl := &broker.GitLab{User: *glUser, Token: tokenSource(*glTokenCmd, "INVESTIGATOR_GITLAB_TOKEN"),
 			Upstream: up, PublicHost: glHost, Client: broker.NewUpstreamClient(), Log: log}
+		if *glMCPTokenCmd != "" || os.Getenv("INVESTIGATOR_GITLAB_MCP_TOKEN") != "" {
+			gl.MCPToken = tokenSource(*glMCPTokenCmd, "INVESTIGATOR_GITLAB_MCP_TOKEN")
+		}
 		bl, err := n.ListenTCP(443)
 		if err != nil {
 			fail("%v", err)

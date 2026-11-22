@@ -88,7 +88,8 @@ the filter (`filter/`, `investigator allowlist`; our own proxy, since
 smokescreen can't chain), tested with real tools, and the netstack
 (`net/`), tested with a fake guest; `investigator-net lima` serves both and
 the broker on Lima's user-v2 sockets, not yet against a real VM. Step 4
-(the MCP filter) is next. Then step 4. The Lima spike questions are answered on paper
+too: the hosted-MCP filter (`broker/mcp.go`), tested against a fake MCP
+server. What's left needs the user's Mac: steps 2, 5 and 6. Then step 4. The Lima spike questions are answered on paper
 (2026-11-22, "Option C on Lima" in `investigator-design.md`), and the
 Mac side is packaged as one process per sandbox, `investigator-net`
 ("Packaging: one process per sandbox"). Lima fails open until lima#5818
@@ -112,7 +113,7 @@ user run on the user's Mac: this sandbox can't run sbx, Lima or VS Code.
 | `filter/` | The domain filter: allowlist groups and layers (`lists/*.yaml`, embedded), the ACL, our explicit proxy (direct or chained to an upstream) |
 | `net/` | Package `netstack`: the VM's only network (gvisor stack on gvisor-tap-vsock's switch, no forwarders), DHCP, our DNS, Lima's user-v2 sockets and endpoint API |
 | `cmd/investigator-net/` | The per-sandbox network process: `lima` (netstack, filter, broker) or `filter` (the filter on TCP) |
-| `broker/` | The broker: policy (`Decide`), receive-pack parsing, the GitLab adapter (git, LFS, REST, GraphQL), the name-constrained CA, the shared server checks |
+| `broker/` | The broker: policy (`Decide`), receive-pack parsing, the GitLab adapter (git, LFS, REST, GraphQL, the hosted-MCP filter), the name-constrained CA, the shared server checks |
 | `checks/` | `bridges.sh` (run in the editor's terminal), `step1-docker.sh` (step 1 against a container) |
 | `enforcement.md` | Making the harness required (2026-11-22): threats, model-gated chain of trust, network and provider-side options, small provider asks |
 

@@ -27,6 +27,9 @@ type GitLab struct {
 	PublicHost string                 // gitlab.broker.internal
 	Client     *http.Client           // NewUpstreamClient()
 	Log        *slog.Logger
+	// MCPToken, if set, is used for the MCP endpoint instead of Token
+	// (GitLab's MCP server takes fine-grained PATs or OAuth, not classic PATs).
+	MCPToken func() (string, error)
 }
 
 const maxAPIBody = 1 << 20
@@ -37,6 +40,8 @@ func (g *GitLab) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	req := Request{Provider: "gitlab", User: g.User, Method: r.Method, Path: r.URL.EscapedPath()}
 	esc := r.URL.EscapedPath()
 	switch {
+	case esc == GitLabMCPPath:
+		g.mcp(w, r, &req)
 	case strings.HasPrefix(esc, "/api/v4/"):
 		g.api(w, r, &req)
 	case esc == "/api/graphql":

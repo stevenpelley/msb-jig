@@ -92,13 +92,21 @@ The agent writes scripts for each Mac step, and the user runs them and pastes th
 
 ### 4. The hosted-MCP filter (agent, in its sandbox)
 
-- Proxy the GitLab MCP server and apply policy per tool call, **denying unknown tools**:
-  - deny `accept_merge_request`, `apply_suggestion`, `save_project`, `fork_repository`, `save_pipeline`;
-  - check `title` and `source_branch` in `save_merge_request`, and on an update the existing MR's source branch;
-  - apply the ref rule to `add_commit` and `add_branch`;
-  - allow the read tools by name; filter `tools/list` to match; reject JSON-RPC batches.
-- First confirm whether the GitLab MCP server in use is hosted by GitLab.
-- Test against a fake MCP server.
+**Done (2026-11-22).** `broker/mcp.go`, on the GitLab adapter's host at `/api/v4/mcp`:
+- **The server is GitLab's own, hosted** at `gitlab.com/api/v4/mcp` (streamable HTTP; a fine-grained PAT or OAuth token, not a classic PAT; `kit/README.md`). The tool schemas used here are the ones this sandbox's MCP client already holds; no GitLab calls were made.
+- JSON-RPC: batches refused; only `initialize`, `ping`, `tools/list`, `tools/call` and two notifications pass; responses to server requests are refused. GET and DELETE (the session stream and its end) are forwarded.
+- `tools/call` maps each tool onto the broker's ops, so `Decide` is still the one policy:
+  - read tools by name (`get_*`, `list_*`, the search tools);
+  - `save_merge_request`: create checks `source_branch` and `title` and refuses `target_project_id`; update fetches the MR and checks its source branch, and the title if set;
+  - `save_note` and `save_merge_request_review`: only on merge requests (by `project_id` and `merge_request_iid`, or a gitlab.com MR URL) whose source branch is in the namespace; `approve` and `unapprove` are denied, as is `post_duo_review`;
+  - `add_commit` and `add_branch`: the ref rule on `branch`; `start_project` is refused;
+  - `accept_merge_request` denied as a merge; `apply_suggestion`, `save_project`, `fork_repository`, `save_pipeline`, `save_pipeline_job`, `save_work_item`, `link_work_items` denied as unlisted; any other tool denied as unknown.
+- A denial comes back as a tool result with `isError` and the reason, so the agent reads it.
+- `tools/list` is filtered to the tools that can pass, in JSON or server-sent-event responses.
+- The broker sends `Authorization: Bearer` with `MCPToken` (`investigator-net lima -gitlab-mcp-token-command`), else the GitLab token.
+- `go test ./broker -run MCP` runs it against a fake MCP server, in JSON and SSE modes.
+- Provisioning registers it for Claude Code (`claude mcp add --scope user --transport http gitlab <broker>/api/v4/mcp`) and sets `NODE_EXTRA_CA_CERTS` when the broker CA is installed.
+- **Unchecked until step 5:** the real server's responses (SSE framing, session handling), and whether its tool list has tools this list doesn't know (they're hidden and denied until added).
 
 ### 5. Live GitLab and the wiring (user, on the Mac)
 

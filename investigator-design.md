@@ -308,7 +308,7 @@ Cedar could express those predicates: its `like` operator handles `"refs/heads/a
 
 ### Hosted MCP servers: filter tool calls
 
-A hosted MCP server calls its provider's API from the provider's side, where the broker can't see the requests. GitLab's MCP server is presumably hosted (*unverified*), and Datadog's and Wiz's are. So the broker also proxies MCP and applies policy to each tool call: its name and its arguments.
+A hosted MCP server calls its provider's API from the provider's side, where the broker can't see the requests. GitLab's MCP server is hosted (`gitlab.com/api/v4/mcp`, checked 2026-11-22), and so are Datadog's and Wiz's. So the broker also proxies MCP and applies policy to each tool call: its name and its arguments.
 - **Deny unknown tools.** Allow read tools by name; allow writing tools only from a short list, with checks on their arguments. Filter `tools/list` to match, so the agent isn't offered tools it can't use, and reject JSON-RPC batches so a denied call can't hide in one.
 - **GitLab:**
   - Deny `accept_merge_request`.
@@ -317,7 +317,7 @@ A hosted MCP server calls its provider's API from the provider's side, where the
   - Deny `apply_suggestion`, `save_project`, `fork_repository` and `save_pipeline` unless a use turns up.
 - **Datadog and Wiz:** allow the read-only tools by name.
 
-This is the second policy layer, beside the HTTP one. The tool name is the operation, and the policy checks its arguments. GitLab is the practice run for Datadog and Wiz.
+Built for GitLab in `broker/mcp.go` (2026-11-22): each tool call maps onto the HTTP policy's operations, so one `Decide` covers both. This is the second policy layer, beside the HTTP one. The tool name is the operation, and the policy checks its arguments. GitLab is the practice run for Datadog and Wiz.
 
 ### AWS
 

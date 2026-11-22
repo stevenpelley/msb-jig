@@ -134,6 +134,8 @@ EOF
   if [[ -n "$BROKER_CA_FILE" ]]; then
     install -m 0644 "$BROKER_CA_FILE" /usr/local/share/ca-certificates/investigator-broker.crt
     update-ca-certificates >/dev/null
+    # Node-based tools (Claude Code's MCP client) don't read the system store.
+    echo 'export NODE_EXTRA_CA_CERTS=/etc/ssl/certs/ca-certificates.crt' >/etc/profile.d/82-investigator-node-ca.sh
   fi
 fi
 
@@ -163,6 +165,8 @@ if want claude; then
   log "claude code"
   su - "$SANDBOX_USER" -c 'curl -fsSL https://claude.ai/install.sh | bash' >/dev/null
   su - "$SANDBOX_USER" -c '~/.local/bin/claude --version'
+  # GitLab's MCP server, through the broker's MCP filter (which injects the token).
+  su - "$SANDBOX_USER" -c "~/.local/bin/claude mcp remove --scope user gitlab >/dev/null 2>&1; ~/.local/bin/claude mcp add --scope user --transport http gitlab '$BROKER_GITLAB_URL/api/v4/mcp'" >/dev/null
 fi
 
 log "done"
