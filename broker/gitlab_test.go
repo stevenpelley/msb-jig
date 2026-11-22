@@ -70,7 +70,8 @@ func newGitEnv(t *testing.T) *gitEnv {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not installed")
 	}
-	backend := "/usr/lib/git-core/git-http-backend"
+	execPath, _ := exec.Command("git", "--exec-path").Output()
+	backend := filepath.Join(strings.TrimSpace(string(execPath)), "git-http-backend")
 	if _, err := os.Stat(backend); err != nil {
 		t.Skip("git-http-backend not found")
 	}
@@ -220,6 +221,42 @@ func TestGitThroughBroker(t *testing.T) {
 	defer e.mu.Unlock()
 	if e.authErr != "" {
 		t.Fatal(e.authErr)
+	}
+}
+
+// A remote URL without .git works the same, under the same rules.
+func TestGitWithoutDotGit(t *testing.T) {
+	e := newGitEnv(t)
+	work := filepath.Join(e.dir, "work")
+	if out, err := e.git(e.dir, "clone", "-q", strings.TrimSuffix(e.url(), ".git"), work); err != nil {
+		t.Fatalf("clone: %v\n%s", err, out)
+	}
+	if out, err := e.git(work, "commit", "-q", "--allow-empty", "-m", "change"); err != nil {
+		t.Fatal(out)
+	}
+	if out, err := e.git(work, "push", "-q", "origin", "HEAD:refs/heads/agent/alice/nodotgit"); err != nil {
+		t.Fatalf("push to namespace: %v\n%s", err, out)
+	}
+	if !e.upstreamHas("refs/heads/agent/alice/nodotgit") {
+		t.Fatal("upstream lacks the pushed branch")
+	}
+	if out, err := e.git(work, "push", "origin", "HEAD:main"); err == nil || !strings.Contains(out, "pushes are allowed only under agent/alice/") {
+		t.Fatalf("push to main: err=%v\n%s", err, out)
+	}
+}
+
+func TestCutGitSuffix(t *testing.T) {
+	for _, c := range []struct{ in, repo, rest string }{
+		{"grp/proj/info/refs", "grp/proj", "info/refs"},
+		{"grp/sub/proj/git-receive-pack", "grp/sub/proj", "git-receive-pack"},
+		{"grp/proj/info/lfs/objects/batch", "grp/proj", "info/lfs/objects/batch"},
+		{"grp/proj/gitlab-lfs/objects/abc", "grp/proj", "gitlab-lfs/objects/abc"},
+		{"grp/proj/-/merge_requests", "", ""},
+	} {
+		repo, rest, ok := cutGitSuffix(c.in)
+		if repo != c.repo || rest != c.rest || ok != (c.repo != "") {
+			t.Errorf("%s: %q %q %v", c.in, repo, rest, ok)
+		}
 	}
 }
 

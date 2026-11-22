@@ -77,8 +77,33 @@ func (g *GitLab) denyHTTP(w http.ResponseWriter, d Decision) {
 
 // --- git and LFS ---
 
+// gitEndpoints are the paths under a repository that git and LFS use.
+var gitEndpoints = []string{"/info/refs", "/git-upload-pack", "/git-receive-pack", "/info/lfs/", "/gitlab-lfs/objects/"}
+
+// cutGitSuffix splits "<repo>/<endpoint…>" for a repository path written
+// without .git, at the first git or LFS endpoint.
+func cutGitSuffix(p string) (repo, rest string, ok bool) {
+	best := -1
+	for _, e := range gitEndpoints {
+		if i := strings.Index(p, e); i > 0 && (best < 0 || i < best) {
+			best = i
+		}
+	}
+	if best < 0 {
+		return "", "", false
+	}
+	return p[:best], p[best+1:], true
+}
+
 func (g *GitLab) git(w http.ResponseWriter, r *http.Request, req *Request) {
 	repo, rest, ok := strings.Cut(strings.TrimPrefix(r.URL.Path, "/"), ".git/")
+	if !ok && r.URL.RawPath == "" {
+		// git leaves .git off when the remote URL does; GitLab accepts both.
+		// Forward the canonical form, so upstream sees one spelling.
+		if repo, rest, ok = cutGitSuffix(strings.TrimPrefix(r.URL.Path, "/")); ok {
+			r.URL.Path = "/" + repo + ".git/" + rest
+		}
+	}
 	if !ok || r.URL.RawPath != "" || !repoPathRE.MatchString(repo) || strings.Contains(repo, "..") {
 		req.Op, req.Detail = OpUnknown, "not a git, API or GraphQL path"
 		g.denyHTTP(w, g.decide(req))
