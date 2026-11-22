@@ -21,6 +21,9 @@
 #   BROKER_GITLAB_MCP    1 to register GitLab's MCP server (through the broker's
 #                        MCP filter) with Claude Code; it needs a token with the
 #                        mcp scope. Default: glab only.
+#   BROKER_ANTHROPIC_URL the broker's Anthropic endpoint (https://anthropic.broker.internal):
+#                        Claude Code calls it with a placeholder token, and the
+#                        broker injects the user's. Empty: sign in inside the VM.
 #   PROVISION_PROXY      optional explicit proxy URL (e.g. http://proxy.internal:3128)
 #                        written for apt, dockerd and login shells. Leave unset
 #                        where the runtime sets proxies itself (sbx).
@@ -34,6 +37,7 @@ BROKER_CA_FILE="${BROKER_CA_FILE:-}"
 BROKER_SESSION_TOKEN="${BROKER_SESSION_TOKEN:-}"
 BROKER_GITLAB_USER="${BROKER_GITLAB_USER:-}"
 BROKER_GITLAB_MCP="${BROKER_GITLAB_MCP:-}"
+BROKER_ANTHROPIC_URL="${BROKER_ANTHROPIC_URL:-}"
 PROVISION_PROXY="${PROVISION_PROXY:-}"
 export DEBIAN_FRONTEND=noninteractive
 
@@ -183,6 +187,15 @@ if want claude; then
   log "claude code"
   su - "$SANDBOX_USER" -c 'curl -fsSL https://claude.ai/install.sh | bash' >/dev/null
   su - "$SANDBOX_USER" -c '~/.local/bin/claude --version'
+  # The credential stays on the Mac: Claude Code sends a placeholder to the
+  # broker, which swaps in the user's token.
+  rm -f /etc/profile.d/83-investigator-claude.sh
+  if [[ -n "$BROKER_ANTHROPIC_URL" ]]; then
+    cat >/etc/profile.d/83-investigator-claude.sh <<EOF
+export ANTHROPIC_BASE_URL="$BROKER_ANTHROPIC_URL" CLAUDE_CODE_OAUTH_TOKEN=placeholder
+EOF
+    chmod 0644 /etc/profile.d/83-investigator-claude.sh
+  fi
   # GitLab's MCP server, through the broker's MCP filter (which injects the
   # token), only when asked: glab through the broker does everything it does,
   # with one credential fewer (prototype-plan.md, step 6).

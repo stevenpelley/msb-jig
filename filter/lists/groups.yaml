@@ -8,14 +8,19 @@
 # against a tool's real traffic; the filter's denial log shows what's missing.
 groups:
   claude-code:
-    description: Claude Code, its API and its installer
+    description: Claude Code's installer and sign-in. Its API calls go
+      through the broker (anthropic.broker.internal) instead; the
+      claude-code-direct group allows them straight out.
     hosts:
-      - api.anthropic.com
-      - claude.ai
+      - claude.ai                # install.sh
       - platform.claude.com      # sign-in (unverified)
       - console.anthropic.com    # sign-in (unverified)
       - statsig.anthropic.com    # telemetry (unverified)
       - downloads.claude.ai      # the installer's downloads (unverified)
+  claude-code-direct:
+    description: Claude Code's API, straight out, for a VM signed in itself
+    hosts:
+      - api.anthropic.com
   ubuntu:
     description: Ubuntu's package mirrors (apt uses plain http)
     hosts:

@@ -111,13 +111,15 @@ func TestLayers(t *testing.T) {
 		for _, hp := range []struct {
 			h string
 			p int
-		}{{"api.anthropic.com", 443}, {"archive.ubuntu.com", 80}, {"ports.ubuntu.com", 80}, {"proxy.golang.org", 443}} {
+		}{{"claude.ai", 443}, {"archive.ubuntu.com", 80}, {"ports.ubuntu.com", 80}, {"proxy.golang.org", 443}} {
 			if _, ok := a.Allows(hp.h, hp.p); !ok {
 				t.Errorf("%s: %s:%d not allowed", prof, hp.h, hp.p)
 			}
 		}
-		if _, ok := a.Allows("pastebin.com", 443); ok {
-			t.Errorf("%s allows pastebin.com", prof)
+		for _, h := range []string{"pastebin.com", "api.anthropic.com"} { // the API goes through the broker
+			if _, ok := a.Allows(h, 443); ok {
+				t.Errorf("%s allows %s", prof, h)
+			}
 		}
 	}
 	if _, err := Layers("nope"); err == nil {

@@ -29,8 +29,8 @@ type GitLab struct {
 	// PublicScheme is how the sandbox reaches the broker: https (the
 	// default), or http in sbx mode.
 	PublicScheme string
-	Client     *http.Client           // NewUpstreamClient()
-	Log        *slog.Logger
+	Client       *http.Client // NewUpstreamClient()
+	Log          *slog.Logger
 	// MCPToken, if set, is used for the MCP endpoint instead of Token
 	// (GitLab's MCP server takes fine-grained PATs or OAuth, not classic PATs).
 	MCPToken func() (string, error)

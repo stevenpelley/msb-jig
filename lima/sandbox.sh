@@ -29,6 +29,13 @@
 #                   prints a token with the mcp scope (a fine-grained PAT). Only
 #                   when set is GitLab's MCP server registered in the VM; glab's
 #                   token lacks that scope. Read at create time.
+#   INV_CLAUDE_TOKEN_COMMAND
+#                   prints Claude Code's credential (`claude setup-token`'s OAuth
+#                   token, or an API key), which the broker injects; the VM holds
+#                   a placeholder. Default: the Keychain item inv-claude, if it
+#                   exists (`security add-generic-password -U -s inv-claude -a claude -w`).
+#                   Set to empty to sign in inside the VM instead. Read at create time
+#                   for the VM's settings, and by the broker on every call.
 #   INV_PROFILE     the filter's profile layer (default investigator)
 #   INV_LAYERS      space-separated org or user layer files
 set -euo pipefail
@@ -44,7 +51,7 @@ guest_user="${INV_USER:-$(id -un)}"
 die() { printf 'sandbox.sh: %s\n' "$*" >&2; exit 1; }
 log() { printf '[sandbox] %s\n' "$*"; }
 
-usage() { sed -n '2,25p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 2; }
+usage() { sed -n '2,/^set -euo/p' "${BASH_SOURCE[0]}" | grep '^#' | sed 's/^# \{0,1\}//'; exit 2; }
 
 [[ $# -eq 2 ]] || usage
 cmd=$1 name=$2
@@ -52,6 +59,14 @@ cmd=$1 name=$2
 # It goes into the template, provisioning and the broker's branch rule.
 [[ -z "${INV_GITLAB_USER:-}" || $INV_GITLAB_USER =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,254}$ ]] ||
   die "INV_GITLAB_USER isn't a GitLab username"
+
+# Claude Code's credential, through the broker (unset: the Keychain item, if any).
+if [[ -z "${INV_CLAUDE_TOKEN_COMMAND+set}" ]] && security find-generic-password -s inv-claude >/dev/null 2>&1; then
+  INV_CLAUDE_TOKEN_COMMAND='security find-generic-password -s inv-claude -w'
+fi
+claude_cmd="${INV_CLAUDE_TOKEN_COMMAND:-}"
+broker_on=""
+[[ -n "${INV_GITLAB_USER:-}" || -n $claude_cmd ]] && broker_on=1
 
 state="$state_root/$name"
 netdir="$LIMA_HOME/_networks/$name"
@@ -133,9 +148,13 @@ start_net() {
     fi
     args+=(-gitlab-user "$INV_GITLAB_USER" -gitlab-url "$gl_url" -gitlab-token-command "$tok_cmd")
     [[ -n "${INV_GITLAB_MCP_TOKEN_COMMAND:-}" ]] && args+=(-gitlab-mcp-token-command "$INV_GITLAB_MCP_TOKEN_COMMAND")
-  else
-    log "no INV_GITLAB_USER: running without the broker"
   fi
+  if [[ -n $claude_cmd ]]; then
+    args+=(-anthropic-token-command "$claude_cmd")
+  else
+    log "no Claude credential (INV_CLAUDE_TOKEN_COMMAND, Keychain item inv-claude): sign in inside the VM"
+  fi
+  [[ -n $broker_on ]] || log "no INV_GITLAB_USER or Claude credential: running without the broker"
   log "starting investigator-net on $subnet (log: $netlog)"
   nohup "$bin" "${args[@]}" >>"$netlog" 2>&1 </dev/null &
   echo $! >"$netpid"
@@ -201,7 +220,7 @@ instance_status() { limactl list --format '{{.Status}}' "$name" 2>/dev/null || t
 render() {
   local prefix ca="$state/broker-ca/ca.pem" line
   prefix=$(prefix_of "$(cat "$state/subnet")")
-  if [[ -n "${INV_GITLAB_USER:-}" ]]; then
+  if [[ -n $broker_on ]]; then
     [[ -s $ca ]] || die "the broker's CA ($ca) is missing"
   else
     ca=/dev/null
@@ -217,6 +236,7 @@ render() {
       line=${line//@GATEWAY@/$prefix.2}
       line=${line//@GITLAB_USER@/${INV_GITLAB_USER:-}}
       line=${line//@GITLAB_MCP@/${INV_GITLAB_MCP_TOKEN_COMMAND:+1}}
+      line=${line//@ANTHROPIC_URL@/${claude_cmd:+https://anthropic.broker.internal}}
       printf '%s\n' "$line"
       ;;
     esac

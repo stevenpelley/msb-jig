@@ -67,6 +67,7 @@ provision:
     export BROKER_GITHUB_URL=https://github.broker.internal
     export BROKER_GITLAB_USER=@GITLAB_USER@
     export BROKER_GITLAB_MCP=@GITLAB_MCP@
+    export BROKER_ANTHROPIC_URL=@ANTHROPIC_URL@
     export BROKER_CA_FILE=/usr/local/share/ca-certificates/investigator-broker-src.crt
     cat >"$BROKER_CA_FILE" <<'CA'
 @BROKER_CA_PEM@

@@ -31,9 +31,9 @@ else
 fi
 
 # --- the filter: an allowed host works, a denied one gets 403 ---
-code=$(curl -s -o /dev/null -w '%{http_connect} %{http_code}' --max-time 20 -x "$proxy" https://api.anthropic.com/)
-[[ $code == "200 "[1-5]?? ]] && pass "api.anthropic.com through the filter (CONNECT, then HTTP: $code)" ||
-  fail "api.anthropic.com through the filter: CONNECT, then HTTP: $code"
+code=$(curl -s -o /dev/null -w '%{http_connect} %{http_code}' --max-time 20 -x "$proxy" https://claude.ai/install.sh)
+[[ $code == "200 "[1-5]?? ]] && pass "claude.ai through the filter (CONNECT, then HTTP: $code)" ||
+  fail "claude.ai through the filter: CONNECT, then HTTP: $code"
 code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 -x "$proxy" http://archive.ubuntu.com/ubuntu/)
 [[ $code == 200 || $code == 30? ]] && pass "archive.ubuntu.com:80 through the filter ($code)" ||
   fail "archive.ubuntu.com:80 through the filter: $code"
