@@ -504,3 +504,47 @@ func TestLoadOrCreateCA(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// sbx mode: plain HTTP on one port per provider, any Host, a session token.
+func TestSbxMode(t *testing.T) {
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Private-Token") != testToken {
+			http.Error(w, "bad token", 401)
+			return
+		}
+		w.Header().Set("Location", "http://"+r.Host+"/api/v4/projects/1")
+		w.WriteHeader(http.StatusFound)
+	}))
+	t.Cleanup(up.Close)
+	u, _ := url.Parse(up.URL)
+	var srv *httptest.Server
+	gl := &GitLab{User: testUser, Token: func() (string, error) { return testToken, nil }, Upstream: u,
+		PublicScheme: "http", Client: NewUpstreamClient()}
+	srv = httptest.NewServer(&Server{Only: gl, SessionToken: "s3ssion"})
+	t.Cleanup(srv.Close)
+	gl.PublicHost = "host.docker.internal:" + srv.URL[strings.LastIndex(srv.URL, ":")+1:]
+	c := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	get := func(tok string) *http.Response {
+		req, _ := http.NewRequest("GET", srv.URL+"/api/v4/projects/1", nil)
+		req.Host = gl.PublicHost
+		if tok != "" {
+			req.Header.Set("Private-Token", tok)
+		}
+		resp, err := c.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		return resp
+	}
+	if r := get(""); r.StatusCode != 401 {
+		t.Errorf("no session token: %d", r.StatusCode)
+	}
+	if r := get("wrong"); r.StatusCode != 401 {
+		t.Errorf("wrong session token: %d", r.StatusCode)
+	}
+	r := get("s3ssion")
+	if r.StatusCode != http.StatusFound || r.Header.Get("Location") != "http://"+gl.PublicHost+"/api/v4/projects/1" {
+		t.Errorf("with session token: %d %q", r.StatusCode, r.Header.Get("Location"))
+	}
+}

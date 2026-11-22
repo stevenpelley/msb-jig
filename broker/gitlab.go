@@ -24,7 +24,10 @@ type GitLab struct {
 	User       string                 // the GitLab user the agent acts for
 	Token      func() (string, error) // the user's token (Keychain on the Mac)
 	Upstream   *url.URL               // https://gitlab.com
-	PublicHost string                 // gitlab.broker.internal
+	PublicHost string                 // gitlab.broker.internal (sbx mode: host.docker.internal:<port>)
+	// PublicScheme is how the sandbox reaches the broker: https (the
+	// default), or http in sbx mode.
+	PublicScheme string
 	Client     *http.Client           // NewUpstreamClient()
 	Log        *slog.Logger
 	// MCPToken, if set, is used for the MCP endpoint instead of Token
@@ -49,6 +52,13 @@ func (g *GitLab) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	default:
 		g.git(w, r, &req)
 	}
+}
+
+func (g *GitLab) scheme() string {
+	if g.PublicScheme != "" {
+		return g.PublicScheme
+	}
+	return "https"
 }
 
 func (g *GitLab) decide(req *Request) Decision {
@@ -212,7 +222,7 @@ func (g *GitLab) rewriteLFSBatch(resp *http.Response) (io.Reader, error) {
 			delete(am, "header")
 			if href, _ := am["href"].(string); href != "" {
 				if u, err := url.Parse(href); err == nil && strings.EqualFold(u.Host, g.Upstream.Host) {
-					u.Scheme, u.Host = "https", g.PublicHost
+					u.Scheme, u.Host = g.scheme(), g.PublicHost
 					am["href"] = u.String()
 				}
 			}
@@ -557,5 +567,5 @@ func (g *GitLab) forward(w http.ResponseWriter, r *http.Request, body io.Reader,
 			return
 		}
 	}
-	copyResponse(w, resp, g.Upstream, g.PublicHost, rb)
+	copyResponse(w, resp, g.Upstream, g.scheme(), g.PublicHost, rb)
 }

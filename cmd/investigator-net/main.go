@@ -5,18 +5,25 @@
 //	    the VM's only network, on Lima's user-v2 sockets: DHCP, DNS for our
 //	    names only, the filter on the gateway's port 3128 and the broker on
 //	    its port 443. Nothing else is reachable.
+//	investigator-net sbx -gitlab-listen 127.0.0.1:<port> -session-token-file <f> ...
+//	    only the broker, in plain HTTP on the Mac's loopback, for an sbx
+//	    sandbox that reaches it at host.docker.internal:<port> through sbx's
+//	    proxy. Every request must carry the session token.
 //	investigator-net filter -listen 127.0.0.1:3128 ...
 //	    only the filter, on a TCP address (for testing tools against it).
 package main
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/tls"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -94,7 +101,7 @@ func (f *filterFlags) proxy(log *slog.Logger) *filter.Proxy {
 
 func main() {
 	if len(os.Args) < 2 {
-		fmt.Fprintln(os.Stderr, "usage: investigator-net lima|filter [flags]")
+		fmt.Fprintln(os.Stderr, "usage: investigator-net lima|sbx|filter [flags]")
 		os.Exit(2)
 	}
 	log := slog.New(slog.NewJSONHandler(os.Stderr, nil))
@@ -109,6 +116,8 @@ func main() {
 		fail("%v", srv.ListenAndServe())
 	case "lima":
 		lima(os.Args[2:], log)
+	case "sbx":
+		sbx(os.Args[2:], log)
 	default:
 		fail("unknown mode %q", os.Args[1])
 	}
@@ -188,6 +197,63 @@ func lima(args []string, log *slog.Logger) {
 		_ = os.Remove(p)
 	}
 	log.Info("network down")
+}
+
+func sbx(args []string, log *slog.Logger) {
+	fs := flag.NewFlagSet("sbx", flag.ExitOnError)
+	listen := fs.String("gitlab-listen", "127.0.0.1:18443", "where to serve the GitLab broker (loopback only)")
+	public := fs.String("public-host", "", "host:port the sandbox uses (default host.docker.internal:<port>)")
+	tokFile := fs.String("session-token-file", "", "the session token, created (0600) if missing")
+	glUser := fs.String("gitlab-user", "", "the GitLab user the agent acts for")
+	glURL := fs.String("gitlab-url", "https://gitlab.com", "the GitLab the broker forwards to")
+	glTokenCmd := fs.String("gitlab-token-command", "", "a command printing the user's GitLab token (default: $INVESTIGATOR_GITLAB_TOKEN)")
+	glMCPTokenCmd := fs.String("gitlab-mcp-token-command", "", "the same for GitLab's MCP server (default: $INVESTIGATOR_GITLAB_MCP_TOKEN, else the GitLab token)")
+	_ = fs.Parse(args)
+	if *glUser == "" || *tokFile == "" {
+		fail("sbx: -gitlab-user and -session-token-file are required")
+	}
+	host, port, err := net.SplitHostPort(*listen)
+	if ip := net.ParseIP(host); err != nil || ip == nil || !ip.IsLoopback() {
+		fail("sbx: -gitlab-listen must be a loopback address and port")
+	}
+	if *public == "" {
+		*public = "host.docker.internal:" + port
+	}
+	session, err := sessionToken(*tokFile)
+	if err != nil {
+		fail("session token: %v", err)
+	}
+	up, err := url.Parse(*glURL)
+	if err != nil || up.Scheme != "https" {
+		fail("gitlab-url %q: want https://", *glURL)
+	}
+	gl := &broker.GitLab{User: *glUser, Token: tokenSource(*glTokenCmd, "INVESTIGATOR_GITLAB_TOKEN"),
+		Upstream: up, PublicHost: *public, PublicScheme: "http", Client: broker.NewUpstreamClient(), Log: log}
+	if *glMCPTokenCmd != "" || os.Getenv("INVESTIGATOR_GITLAB_MCP_TOKEN") != "" {
+		gl.MCPToken = tokenSource(*glMCPTokenCmd, "INVESTIGATOR_GITLAB_MCP_TOKEN")
+	}
+	srv := &http.Server{Addr: *listen, Handler: &broker.Server{Only: gl, SessionToken: session, Log: log},
+		ReadHeaderTimeout: 30 * time.Second}
+	log.Info("broker listening (sbx mode)", "addr", *listen, "public", "http://"+*public, "token_file", *tokFile)
+	fail("%v", srv.ListenAndServe())
+}
+
+// sessionToken reads the token, or makes a random one.
+func sessionToken(file string) (string, error) {
+	if b, err := os.ReadFile(file); err == nil {
+		if t := strings.TrimSpace(string(b)); len(t) >= 32 {
+			return t, nil
+		}
+		return "", fmt.Errorf("%s: too short", file)
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return "", err
+	}
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	t := hex.EncodeToString(b)
+	return t, os.WriteFile(file, []byte(t+"\n"), 0o600)
 }
 
 // tokenSource returns the user's token from a command (run at most once a

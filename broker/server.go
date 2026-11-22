@@ -17,6 +17,10 @@ import (
 type Server struct {
 	// Providers by hostname, e.g. "gitlab.broker.internal".
 	Providers map[string]http.Handler
+	// Only, if set, serves every request regardless of Host: sbx mode,
+	// where each provider has its own port and the sandbox sends
+	// Host: host.docker.internal:<port>. Providers is unused then.
+	Only http.Handler
 	// SessionToken, if set, must accompany every request (sbx mode, where
 	// the broker listens on a Mac port). Empty on Lima, where the network
 	// is the sandbox's identity.
@@ -45,6 +49,9 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	p, ok := s.Providers[host]
+	if s.Only != nil {
+		p, ok = s.Only, true
+	}
 	if !ok {
 		httpError(w, http.StatusNotFound, "no provider for host "+host)
 		return
@@ -149,7 +156,7 @@ func outbound(r *http.Request, upstream *url.URL, body io.Reader) (*http.Request
 
 // copyResponse writes an upstream response back to the sandbox, with
 // Location headers that point at the upstream rewritten to the broker.
-func copyResponse(w http.ResponseWriter, resp *http.Response, upstream *url.URL, publicHost string, body io.Reader) {
+func copyResponse(w http.ResponseWriter, resp *http.Response, upstream *url.URL, publicScheme, publicHost string, body io.Reader) {
 	for k, vs := range resp.Header {
 		w.Header()[k] = vs
 	}
@@ -158,7 +165,7 @@ func copyResponse(w http.ResponseWriter, resp *http.Response, upstream *url.URL,
 	}
 	if loc := resp.Header.Get("Location"); loc != "" {
 		if lu, err := url.Parse(loc); err == nil && strings.EqualFold(lu.Host, upstream.Host) {
-			lu.Scheme, lu.Host = "https", publicHost
+			lu.Scheme, lu.Host = publicScheme, publicHost
 			w.Header().Set("Location", lu.String())
 		}
 	}

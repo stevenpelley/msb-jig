@@ -14,6 +14,8 @@
 #                        sbx mode: http://host.docker.internal:<port>)
 #   BROKER_GITHUB_URL    the same for GitHub (default https://github.broker.internal)
 #   BROKER_CA_FILE       the broker's CA certificate, installed as trusted if given
+#   BROKER_SESSION_TOKEN sbx mode only: the token investigator-net sbx requires,
+#                        sent by git (extraHeader), glab (its token) and the MCP client
 #   PROVISION_PROXY      optional explicit proxy URL (e.g. http://proxy.internal:3128)
 #                        written for apt, dockerd and login shells. Leave unset
 #                        where the runtime sets proxies itself (sbx).
@@ -24,6 +26,7 @@ PROVISION_COMPONENTS="${PROVISION_COMPONENTS:-base sshd git broker docker claude
 BROKER_GITLAB_URL="${BROKER_GITLAB_URL:-https://gitlab.broker.internal}"
 BROKER_GITHUB_URL="${BROKER_GITHUB_URL:-https://github.broker.internal}"
 BROKER_CA_FILE="${BROKER_CA_FILE:-}"
+BROKER_SESSION_TOKEN="${BROKER_SESSION_TOKEN:-}"
 PROVISION_PROXY="${PROVISION_PROXY:-}"
 export DEBIAN_FRONTEND=noninteractive
 
@@ -125,12 +128,20 @@ if want broker; then
   # No push mapping: git applies remote.<name>.push even to explicit branches.
   gl_host=${BROKER_GITLAB_URL#*://}; gl_proto=${BROKER_GITLAB_URL%%://*}
   gh_host=${BROKER_GITHUB_URL#*://}
+  # On Lima the network is the sandbox's identity and the tokens are
+  # placeholders. In sbx mode the broker listens on a Mac port, so every
+  # tool sends the session token instead.
+  tok="${BROKER_SESSION_TOKEN:-placeholder}"
+  if [[ -n "$BROKER_SESSION_TOKEN" ]]; then
+    git config --system "http.$BROKER_GITLAB_URL/.extraHeader" "X-Investigator-Session: $BROKER_SESSION_TOKEN"
+  fi
   cat >/etc/profile.d/81-investigator-broker.sh <<EOF
 # The tools treat the broker as a self-hosted GitLab and GitHub Enterprise
-# Server. The tokens are placeholders; the broker injects the real ones.
-export GITLAB_HOST="$gl_host" GITLAB_TOKEN="placeholder" GITLAB_API_PROTOCOL="$gl_proto"
-export GH_HOST="$gh_host" GH_ENTERPRISE_TOKEN="placeholder"
+# Server. The broker injects the real tokens.
+export GITLAB_HOST="$gl_host" GITLAB_TOKEN="$tok" GITLAB_API_PROTOCOL="$gl_proto"
+export GH_HOST="$gh_host" GH_ENTERPRISE_TOKEN="$tok"
 EOF
+  chmod 0644 /etc/profile.d/81-investigator-broker.sh
   if [[ -n "$BROKER_CA_FILE" ]]; then
     install -m 0644 "$BROKER_CA_FILE" /usr/local/share/ca-certificates/investigator-broker.crt
     update-ca-certificates >/dev/null
@@ -166,7 +177,7 @@ if want claude; then
   su - "$SANDBOX_USER" -c 'curl -fsSL https://claude.ai/install.sh | bash' >/dev/null
   su - "$SANDBOX_USER" -c '~/.local/bin/claude --version'
   # GitLab's MCP server, through the broker's MCP filter (which injects the token).
-  su - "$SANDBOX_USER" -c "~/.local/bin/claude mcp remove --scope user gitlab >/dev/null 2>&1; ~/.local/bin/claude mcp add --scope user --transport http gitlab '$BROKER_GITLAB_URL/api/v4/mcp'" >/dev/null
+  su - "$SANDBOX_USER" -c "~/.local/bin/claude mcp remove --scope user gitlab >/dev/null 2>&1; ~/.local/bin/claude mcp add --scope user --transport http gitlab '$BROKER_GITLAB_URL/api/v4/mcp' ${BROKER_SESSION_TOKEN:+--header 'X-Investigator-Session: $BROKER_SESSION_TOKEN'}" >/dev/null
 fi
 
 log "done"
