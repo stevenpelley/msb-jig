@@ -12,8 +12,8 @@ notes.
    and reaches GitHub, AWS, Datadog and Wiz in restricted ways, using the
    developer's own credentials. A developer hands it a Datadog alert or a
    Wiz issue and it investigates. Interactive use is an editor on the Mac
-   connected over SSH into the VM sandbox (sbx or OpenShell), where the
-   agent, terminals and Docker run. **VS Code first**, prototyped on a
+   connected over SSH into the VM sandbox (Lima; sbx for the
+   prototype), where the agent, terminals and Docker run. **VS Code first**, prototyped on a
    personal Mac with personal accounts (also for personal use); then Kiro
    IDE, which gained remote SSH in 1.5 (2026-11-20). Dev containers only
    ever run inside that VM, never on the Mac: our tests need Docker, and
@@ -46,10 +46,10 @@ notes.
    **Two tracks (2026-11-22): personal first, then work.**
    - *Personal* (build first): GitLab, with my own GitLab user's
      credentials through the broker (not the `<user>-agent` user), and
-     AWS; the agent is Claude Code; it runs directly in sbx or from
-     VS Code over SSH into sbx.
+     AWS; the agent is Claude Code; it runs directly in the sandbox or
+     from VS Code over SSH into it.
    - *Work* (adapt it): GitHub, AWS, Datadog and Wiz; the agent is Kiro;
-     it runs directly in sbx or from Kiro IDE over SSH into sbx.
+     it runs directly in the sandbox or from Kiro IDE over SSH into it.
 2. **Restrictions finer than the providers offer.** The main case is
    GitHub: push only to `agent/<user>/...` branches, open and edit only
    PRs tagged `[agent/<user>]`, never merge. Fine-grained tokens and
@@ -71,7 +71,7 @@ Keep these parties separate when reasoning about enforcement:
 | The user | Not malicious, but not relied on to configure anything correctly or to resist convenience. A deliberate insider (mints a PAT, writes a script) is out of scope; existing controls cover that. |
 | Agent software (Kiro, Claude Code, …) | Vendor code and replaceable by any other client. Useful for UX, not an enforcement point on its own. |
 | The IDE connection (VS Code, then Kiro, over SSH) | A second path between sandbox and Mac. Relied on, through settings we ship, not to pass the Mac's credentials (SSH agent, git credential helper) into the sandbox. |
-| Sandbox runtime (sbx, OpenShell) | Trusted to confine the agent: no host credentials, egress only through the broker. |
+| Sandbox runtime (Lima with `investigator-net`; sbx for the prototype) | Trusted to confine the agent: no host credentials, egress only through the domain filter and the broker. |
 | Broker / MCP proxy (ours) | Trusted: holds credentials, enforces policy. Its integrity on a Mac rests on the OS (code signing, MDM). |
 | Model provider / model gateway | The org controls access to it; the strongest candidate chokepoint, since every agent needs a model and users don't bring their own corporate one. |
 | Provider (GitHub, AWS, Datadog, Wiz) | Goal: rely on nothing it doesn't already ship. Secondary goal: find small, standard features it would happily add (e.g. per-credential network binding, delegation markers in audit logs). |
@@ -82,7 +82,11 @@ No code yet. The Lima spike questions are answered on paper
 (2026-11-22, "Option C on Lima" in `investigator-design.md`), and the
 Mac side is packaged as one process per sandbox, `investigator-net`
 ("Packaging: one process per sandbox"). Lima fails open until lima#5818
-or #5813 merges, so the CLI must check the daemon. Next:
+or #5813 merges, so the CLI must check the daemon and the VM's network
+after boot. A design review (2026-11-22) tightened the broker (deny
+unlisted writes, push options, LFS tokens, MCP tools), the netstack (no
+gvisor-tap-vsock forwarders) and the Lima lifecycle; libkrun is assessed
+as a second VM runner and a path to the cloud. Next:
 `prototype-plan.md`, step 1: the sandbox image and SSH, tested here
 against Docker containers standing in for sbx. Steps marked for the
 user run on the user's Mac: this sandbox can't run sbx, Lima or VS Code.
@@ -91,7 +95,7 @@ user run on the user's Mac: this sandbox can't run sbx, Lima or VS Code.
 
 | File | What it is |
 |---|---|
-| `investigator-design.md` | The harness design (2026-11-21; editor over SSH added 2026-11-22): the two tracks, VS Code then Kiro over SSH into the sandbox, egress filtering, packaging as one process per sandbox (`investigator-net`), leaving sbx for Lima and libraries that boot VMs, dev containers, the broker (core plus per-provider adapters, GitLab and GitHub, hosted-MCP tool filtering), the sandbox backend interface, whether OpenShell is easier behind an IDE, packaging, open questions |
+| `investigator-design.md` | The harness design (2026-11-21; editor over SSH added 2026-11-22): the two tracks, VS Code then Kiro over SSH into the sandbox, egress filtering, packaging as one process per sandbox (`investigator-net`), leaving sbx for Lima and libraries that boot VMs (libkrun and the cloud path), dev containers, the broker (core plus per-provider adapters, GitLab and GitHub, hosted-MCP tool filtering), the sandbox backend interface, whether OpenShell is easier behind an IDE, packaging, open questions |
 | `prototype-plan.md` | The personal track, step by step, ending on Lima: who tests what (this sandbox vs the user's Mac) |
 | `enforcement.md` | Making the harness required (2026-11-22): threats, model-gated chain of trust, network and provider-side options, small provider asks |
 

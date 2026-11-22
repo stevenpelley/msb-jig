@@ -26,15 +26,15 @@ Every agent needs three things: a model, a place to run, and provider credential
 ```
 model gateway ──accepts only──▶ short-lived credential minted for an attested broker
 broker        ──injects it only into──▶ sandboxes it launched (approved image + policy)
-sandbox       ──egress only via──▶ broker (model + provider proxies, nothing else useful)
+sandbox       ──egress only via──▶ broker (model + provider proxies) and the domain filter
 ```
 
 | Component | Must provide | Trust basis |
 |---|---|---|
 | **Model gateway** (org-run) | Refuse any request without a broker-minted, short-lived credential; record which broker, device and sandbox image it came from | It's ours |
 | **Device (Mac + MDM)** | A non-exportable Secure Enclave key, usable only by the org-signed broker binary; attestation that the device is managed and SIP is on (Apple Managed Device Attestation; which fields it covers is *unverified*) | Apple and MDM. This is the root of trust. Everything above it is only as strong as "the user didn't disable SIP or tamper with a signed binary". |
-| **Broker** (ours) | Prove possession of the key to get gateway credentials; launch the sandbox itself; report the image digest and policy hash; add the model credential to the sandbox's outbound traffic, never expose it inside | Code signing plus MDM-managed config |
-| **Sandbox runtime** | Keep the agent away from host credentials and the model credential; deny all egress except the broker | Measured, versioned runtime. Relied on for confinement, not identity. |
+| **Broker** (ours) | Prove possession of the key to get gateway credentials; run only inside sandboxes the harness launched (the CLI starts the VM with `investigator-net` as its only network); report the image digest and policy hash; add the model credential to the sandbox's outbound traffic, never expose it inside | Code signing plus MDM-managed config |
+| **Sandbox runtime** | Keep the agent away from host credentials and the model credential; allow egress only to the broker and the domain filter. Filtered hosts get anonymous access only, so the model credential must never be reachable through them | Measured, versioned runtime. Relied on for confinement, not identity. |
 | **Agent software** | Nothing for enforcement. Any client can be pointed at the gateway, which is why the gateway checks the broker, not the agent. | — |
 | **IDE connection** (VS Code or Kiro over SSH, added 2026-11-22) | Pass nothing from the Mac into the sandbox: no SSH agent forwarding, no git credential bridging, no editor sign-in tokens | Settings we ship. A user could change them, but only deliberately. |
 | **Provider** | Nothing | — |
