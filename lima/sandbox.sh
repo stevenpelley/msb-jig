@@ -293,8 +293,9 @@ do_check() {
 
   local fw ports
   fw=$(ep_get /services/forwarder/all || echo '?')
-  ports=$(grep -o '"remote":"[^"]*"' <<<"$fw" | sed 's/.*:\([0-9]*\)"$/\1/' | sort -u)
-  if [[ $fw == '?' ]] || grep -qvx 22 <<<"$ports"; then
+  # Over vsock, Lima asks for no forwards at all: an empty list passes.
+  ports=$(grep -o '"remote":"[^"]*"' <<<"$fw" | sed 's/.*:\([0-9]*\)"$/\1/' | sort -u || true)
+  if [[ $fw == '?' ]] || { [[ -n $ports ]] && grep -qvx 22 <<<"$ports"; }; then
     log "FAIL investigator-net forwards more than SSH: $fw"
     fails=1
   else

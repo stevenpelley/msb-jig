@@ -91,8 +91,12 @@ the broker on Lima's user-v2 sockets, not yet against a real VM. Step 4
 too: the hosted-MCP filter (`broker/mcp.go`), tested against a fake MCP
 server. `investigator-net sbx` (the broker for step 5) is built. Step 6's
 pieces are written (`lima/investigator.yaml.in`, `lima/sandbox.sh`,
-`checks/lima-net.sh`) and tested here with a fake `limactl`, not yet with
-Lima. Steps 2, 5 and 6 now run on the user's Mac. Then step 4. The Lima spike questions are answered on paper
+`checks/lima-net.sh`) and, since 2026-11-22, run on the user's Mac with
+Lima 2.3.0 (`vz`), without the broker: `up` and `check` pass, and so do
+the lifecycle checks but one: after a hand-typed `limactl stop`, a
+hand-typed `limactl start` fails open (step 6 in `prototype-plan.md`).
+The agent now runs on the Mac itself, and asks before running commands.
+Steps 2, 5 and 6 now run on the user's Mac. Then step 4. The Lima spike questions are answered on paper
 (2026-11-22, "Option C on Lima" in `investigator-design.md`), and the
 Mac side is packaged as one process per sandbox, `investigator-net`
 ("Packaging: one process per sandbox"). Lima fails open until lima#5818

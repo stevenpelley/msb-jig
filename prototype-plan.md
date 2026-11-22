@@ -133,11 +133,19 @@ The design isn't done until this works. Details are in "Leaving sbx: Lima" in `i
   - `check` reruns the boot check, runs `checks/lima-net.sh` in the guest, then from the Mac: a guest listener on all addresses isn't reachable on the Mac's loopback, and `investigator-net` forwards nothing but port 22;
   - `down` stops the VM and `investigator-net` and drops the network from `networks.yaml`, so a hand-typed `limactl start` has no network to use; `delete` also deletes the instance and `_networks/<name>`.
 - `checks/lima-net.sh <gateway> [broker]`, in the guest: `proxy.internal` and `gitlab.broker.internal` resolve to the gateway, `example.com` doesn't, 8.8.8.8:53 is unreachable; through the filter `api.anthropic.com` and `archive.ubuntu.com:80` work, `example.com` and `1.1.1.1` get 403; a direct connection to 1.1.1.1 fails within 3 s, ping gets nothing, the gateway's other ports are closed; the broker answers over TLS under the installed CA; one NIC, default route via the gateway.
-- **To run on the Mac** (Lima 2.3+): `INV_GITLAB_USER=<user> INV_GITLAB_TOKEN_COMMAND='<prints a token>' lima/sandbox.sh up inv1`, then `lima/sandbox.sh check inv1`, and paste both outputs back. Unverified Lima details to watch:
-  - whether Lima accepts a `networks.yaml` without `paths` and `group`;
-  - whether Lima's `ReadPIDFile` accepts a PID that isn't `limactl usernet` (if not, Lima starts its own daemon and the post-boot lease check fails);
-  - whether `limactl stop` stops `investigator-net` itself (Lima stops a usernet daemon no instance uses), which `down` tolerates;
-  - the guest's NIC name and `ip` output, which the NIC check parses.
+- **Run on the Mac, without the broker (2026-11-22; macOS 27.2.1 arm64, Lima 2.3.0 from Homebrew, `vz`, Ubuntu 26.04 `release-20261016`).** `go vet ./... && go test ./...` pass on darwin, `net` included, so `peer_darwin.go` (`LOCAL_PEERCRED`) runs. `up inv1` took about 2 minutes with the image download; `check inv1` passes everything. The answers:
+  - Lima accepts a `networks.yaml` without `paths` and `group`.
+  - Lima accepts our PID in `usernet_<name>.pid`: no `limactl usernet` starts, and the VM's MAC holds our lease.
+  - The guest's NIC is `eth0`; it gets the subnet's `.1`, the gateway is `.2` (`networks.yaml`'s `gateway: .1` follows Lima's own default for `user-v2`, and Lima passes only `--subnet` to the daemon).
+  - Over vsock, Lima asks `investigator-net` for **no** port forwards, not even SSH's fallback: `/services/forwarder/all` is `[]`. `check` crashed on the empty list (`grep` under `pipefail`); fixed.
+  - Provisioning works through the filter. Denied at boot: `motd.ubuntu.com` (filter) and `*.ntp.ubuntu.com` (DNS); Lima's guest agent syncs the clock anyway.
+  - `limactl stop` (by hand or from `down`) **does** stop `investigator-net`: Lima kills the pidfile's PID.
+- **Lifecycle checks (2026-11-22):**
+  - PASS `down` leaves no daemon, `networks: {}`, and only `leases.json` in `_networks/<name>`; a hand-typed `LIMA_HOME=~/.inv limactl start` then fails: "network `inv1` is not defined".
+  - PASS `up` after `down` comes back; the boot check passes.
+  - PASS an extra NIC from `$LIMA_HOME/_config/override.yaml` (`vzNAT`) is caught after boot (`eth0 lima1`), and `up` stops the VM. The VM did boot with that NIC first: the check limits exposure, it doesn't prevent it.
+  - **FAIL (fails open):** after a hand-typed `limactl stop`, Lima has killed `investigator-net` but `networks.yaml` still lists the network (only `down` rewrites it). A hand-typed `limactl start` then starts Lima's own `limactl usernet` on the same subnet, with our leases, so the guest sees the same address, and the guest has direct TCP to `1.1.1.1:443` and outside DNS. Fix to choose: `investigator-net` drops its own entry from `networks.yaml` when it exits (covers Lima's SIGTERM, not SIGKILL), and/or `sandbox.sh` keeps the entry only for the moment of `limactl start` (*unverified* that Lima needs it only then). The real fix is still lima#5818 or #5813.
+  - Not yet: `delete` cleanup (`ifconfig`, `pfctl`, `$LIMA_HOME/_networks/`), the broker, `krunkit`.
 
 1. A Lima template: stock Ubuntu cloud image, `vmType: vz`, `mounts: []`, and `sandbox/provision.sh` as its provisioning step.
 2. Enforce the route with option C: `investigator-net` (step 3b) serves a per-sandbox `user-v2` network, which on `vz` is the VM's only NIC. The filter and the broker are served inside it, and nothing else is reachable. No root needed. `HTTPS_PROXY=http://proxy.internal:3128` in the VM. Details and the Mac checks are in "Option C on Lima" (`investigator-design.md`):
