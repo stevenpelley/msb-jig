@@ -68,6 +68,7 @@ The agent writes scripts for each Mac step, and the user runs them and pastes th
   - rewrite LFS batch responses so links go through the broker without GitLab's LFS token;
   - inject the token in the right form: Basic for git, `PRIVATE-TOKEN` for the API.
   - Test against a fake upstream with recorded responses. Check that `glab` works against the broker as a self-hosted GitLab host.
+- **Done 2026-11-22** (`broker/`, `go test ./broker/`), except the `glab` check, which needs recorded GitLab responses or the live test in step 5. GraphQL allows queries only; no mutation is listed yet. `provision.sh`'s `broker` component writes the sandbox side (`insteadOf`, `GITLAB_HOST`, `GH_HOST`, the CA).
 
 ### 3b. The domain filter and the netstack (agent, in its sandbox)
 

@@ -8,15 +8,22 @@
 # Environment:
 #   SANDBOX_USER         the one user that may log in over SSH (default: agent).
 #                        On Lima this is Lima's own user, which must keep working.
-#   PROVISION_COMPONENTS space-separated subset of: base sshd git docker claude
+#   PROVISION_COMPONENTS space-separated subset of: base sshd git broker docker claude
 #                        (default: all of them)
+#   BROKER_GITLAB_URL    the broker's GitLab endpoint (default https://gitlab.broker.internal;
+#                        sbx mode: http://host.docker.internal:<port>)
+#   BROKER_GITHUB_URL    the same for GitHub (default https://github.broker.internal)
+#   BROKER_CA_FILE       the broker's CA certificate, installed as trusted if given
 #   PROVISION_PROXY      optional explicit proxy URL (e.g. http://proxy.internal:3128)
 #                        written for apt, dockerd and login shells. Leave unset
 #                        where the runtime sets proxies itself (sbx).
 set -euo pipefail
 
 SANDBOX_USER="${SANDBOX_USER:-agent}"
-PROVISION_COMPONENTS="${PROVISION_COMPONENTS:-base sshd git docker claude}"
+PROVISION_COMPONENTS="${PROVISION_COMPONENTS:-base sshd git broker docker claude}"
+BROKER_GITLAB_URL="${BROKER_GITLAB_URL:-https://gitlab.broker.internal}"
+BROKER_GITHUB_URL="${BROKER_GITHUB_URL:-https://github.broker.internal}"
+BROKER_CA_FILE="${BROKER_CA_FILE:-}"
 PROVISION_PROXY="${PROVISION_PROXY:-}"
 export DEBIAN_FRONTEND=noninteractive
 
@@ -102,6 +109,32 @@ if want git; then
 export GIT_TERMINAL_PROMPT=0
 unset GIT_ASKPASS SSH_ASKPASS
 EOF
+fi
+
+# --- broker: every git, gh and glab call to a managed provider goes to it ---
+# See investigator-design.md, "How the agent uses git and gh".
+if want broker; then
+  log "broker client settings ($BROKER_GITLAB_URL, $BROKER_GITHUB_URL)"
+  for spec in "gitlab.com=$BROKER_GITLAB_URL" "github.com=$BROKER_GITHUB_URL"; do
+    host=${spec%%=*}; b=${spec#*=}
+    git config --system --unset-all "url.$b/.insteadOf" 2>/dev/null || true
+    for from in "https://$host/" "git@$host:" "ssh://git@$host/" "http://$host/"; do
+      git config --system --add "url.$b/.insteadOf" "$from"
+    done
+  done
+  # No push mapping: git applies remote.<name>.push even to explicit branches.
+  gl_host=${BROKER_GITLAB_URL#*://}; gl_proto=${BROKER_GITLAB_URL%%://*}
+  gh_host=${BROKER_GITHUB_URL#*://}
+  cat >/etc/profile.d/81-investigator-broker.sh <<EOF
+# The tools treat the broker as a self-hosted GitLab and GitHub Enterprise
+# Server. The tokens are placeholders; the broker injects the real ones.
+export GITLAB_HOST="$gl_host" GITLAB_TOKEN="placeholder" GITLAB_API_PROTOCOL="$gl_proto"
+export GH_HOST="$gh_host" GH_ENTERPRISE_TOKEN="placeholder"
+EOF
+  if [[ -n "$BROKER_CA_FILE" ]]; then
+    install -m 0644 "$BROKER_CA_FILE" /usr/local/share/ca-certificates/investigator-broker.crt
+    update-ca-certificates >/dev/null
+  fi
 fi
 
 # --- docker: the VM's own daemon, for tests ---

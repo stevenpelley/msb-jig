@@ -81,7 +81,9 @@ Keep these parties separate when reasoning about enforcement:
 Step 1 of `prototype-plan.md` is built and passes here (2026-11-22): the
 sandbox image (`sandbox/`), the CLI's SSH setup and VS Code settings
 (`cli/`, `cmd/investigator`), `checks/bridges.sh`, and
-`checks/step1-docker.sh`. The Lima spike questions are answered on paper
+`checks/step1-docker.sh`. Step 3 too: the broker's GitLab adapter
+(`broker/`), tested with real git against `git-http-backend` and with a
+fake GitLab API; `glab` against the broker is still unchecked. The Lima spike questions are answered on paper
 (2026-11-22, "Option C on Lima" in `investigator-design.md`), and the
 Mac side is packaged as one process per sandbox, `investigator-net`
 ("Packaging: one process per sandbox"). Lima fails open until lima#5818
@@ -102,6 +104,7 @@ user run on the user's Mac: this sandbox can't run sbx, Lima or VS Code.
 | `prototype-plan.md` | The personal track, step by step, ending on Lima: who tests what (this sandbox vs the user's Mac) |
 | `sandbox/` | `provision.sh` (one script for the sbx image and the Lima VM), `install-keys.sh`, the image's `Dockerfile` |
 | `cli/`, `cmd/investigator/` | The CLI: per-sandbox SSH keys, pinned host key, SSH config, VS Code settings |
+| `broker/` | The broker: policy (`Decide`), receive-pack parsing, the GitLab adapter (git, LFS, REST, GraphQL), the name-constrained CA, the shared server checks |
 | `checks/` | `bridges.sh` (run in the editor's terminal), `step1-docker.sh` (step 1 against a container) |
 | `enforcement.md` | Making the harness required (2026-11-22): threats, model-gated chain of trust, network and provider-side options, small provider asks |
 
