@@ -558,7 +558,6 @@ func clientEnv(c config) map[string]string {
 	env := map[string]string{
 		"GIT_TERMINAL_PROMPT": "0",
 		"GITLAB_HOST":         brokerd.GitLabHost, "GITLAB_TOKEN": "placeholder", "GITLAB_API_PROTOCOL": "https",
-		"GH_HOST": "github.broker.internal", "GH_ENTERPRISE_TOKEN": "placeholder",
 		"NODE_EXTRA_CA_CERTS": "/etc/ssl/certs/ca-certificates.crt",
 	}
 	if c.broker.AnthropicTokenCmd != "" {
@@ -579,9 +578,9 @@ func (c config) awsOn() bool {
 }
 
 // provision runs provision.sh as root: all of it on the first start (a
-// marker in the guest records it), and on later starts only claude-env and
-// aws-env, so Claude Code's settings, the agent's instructions and mcpcli
-// follow the broker's providers (clientEnv does the same for the sandbox's
+// marker in the guest records it), and on later starts only broker-env,
+// claude-env and aws-env, so git's and glab's settings, Claude Code's, the
+// agent's instructions and mcpcli follow the broker's providers (clientEnv does the same for the sandbox's
 // own env). The script and mcpcli are written from this binary each time.
 func provision(ctx context.Context, sb *m.Sandbox, c config, log *slog.Logger) error {
 	done, err := sb.FS().Exists(ctx, provisioned)
@@ -607,7 +606,7 @@ func provision(ctx context.Context, sb *m.Sandbox, c config, log *slog.Logger) e
 	if c.broker.AnthropicTokenCmd != "" {
 		anthropic = "https://" + brokerd.AnthropicHost
 	}
-	first, comps := "", "claude-env aws-env"
+	first, comps := "", "broker-env claude-env aws-env"
 	if !done {
 		log.Info("provisioning the guest (first start)")
 		first = `export DEBIAN_FRONTEND=noninteractive
@@ -619,7 +618,7 @@ apt-get install -y -qq --no-install-recommends socat >/dev/null
 	script := fmt.Sprintf(`set -euo pipefail
 %s
 export SANDBOX_USER=%s PROVISION_COMPONENTS=%q
-export BROKER_GITLAB_URL=https://gitlab.broker.internal BROKER_GITHUB_URL=https://github.broker.internal
+export BROKER_GITLAB_URL=https://gitlab.broker.internal BROKER_GITHUB_URL=
 export BROKER_GITLAB_USER=%q BROKER_GITLAB_MCP= BROKER_ANTHROPIC_URL=%q BROKER_CA_FILE=%s
 export BROKER_AWS_URL=%q BROKER_AWS_PROFILES=%q MCPCLI_DIR=%s
 bash /root/provision.sh

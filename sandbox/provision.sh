@@ -9,14 +9,18 @@
 #   SANDBOX_USER         the one user that may log in over SSH (default: agent).
 #                        On Lima this is Lima's own user, which must keep working.
 #   PROVISION_COMPONENTS space-separated subset of: base sshd git broker docker claude
-#                        (default: all of them). claude-env alone rewrites only
+#                        (default: all of them). broker-env alone rewrites only
+#                        git's, glab's and gh's settings for the broker (broker
+#                        includes it). claude-env alone rewrites only
 #                        Claude Code's settings and the agent's instructions
 #                        (claude includes it), and aws-env sets up mcpcli for
 #                        the AWS MCP Server: the supervisor runs both on every
-#                        start, so they follow which providers the broker serves.
+#                        start (with broker-env), so they follow which providers the broker serves.
 #   BROKER_GITLAB_URL    the broker's GitLab endpoint (default https://gitlab.broker.internal;
 #                        sbx mode: http://host.docker.internal:<port>)
-#   BROKER_GITHUB_URL    the same for GitHub (default https://github.broker.internal)
+#   BROKER_GITHUB_URL    the same for GitHub. Default empty: no broker serves GitHub
+#                        yet, so github.com stays github.com (anonymous, through
+#                        the domain filter)
 #   BROKER_CA_FILE       the broker's CA certificate, installed as trusted if given
 #   BROKER_SESSION_TOKEN sbx mode only: the token investigator-net sbx requires,
 #                        sent by git (extraHeader), glab (its token) and the MCP client
@@ -41,7 +45,7 @@ set -euo pipefail
 SANDBOX_USER="${SANDBOX_USER:-agent}"
 PROVISION_COMPONENTS="${PROVISION_COMPONENTS:-base sshd git broker docker claude}"
 BROKER_GITLAB_URL="${BROKER_GITLAB_URL:-https://gitlab.broker.internal}"
-BROKER_GITHUB_URL="${BROKER_GITHUB_URL:-https://github.broker.internal}"
+BROKER_GITHUB_URL="${BROKER_GITHUB_URL:-}"
 BROKER_CA_FILE="${BROKER_CA_FILE:-}"
 BROKER_SESSION_TOKEN="${BROKER_SESSION_TOKEN:-}"
 BROKER_GITLAB_USER="${BROKER_GITLAB_USER:-}"
@@ -155,12 +159,18 @@ if want git; then
 fi
 
 # --- broker: every git, gh and glab call to a managed provider goes to it ---
-# See investigator-design.md, "How the agent uses git and gh".
-if want broker; then
-  log "broker client settings ($BROKER_GITLAB_URL, $BROKER_GITHUB_URL)"
+# See investigator-design.md, "How the agent uses git and gh". Only for the
+# providers the broker serves: a URL rewritten to a name the broker has no
+# certificate for fails its TLS handshake, public clones included.
+if want broker || want broker-env; then
+  log "broker client settings (${BROKER_GITLAB_URL:-no GitLab}, ${BROKER_GITHUB_URL:-no GitHub})"
+  # Older provisioning mapped GitHub unconditionally: clear both first.
+  for b in "$BROKER_GITLAB_URL" "$BROKER_GITHUB_URL" https://gitlab.broker.internal https://github.broker.internal; do
+    [[ -n $b ]] && { git config --system --unset-all "url.$b/.insteadOf" 2>/dev/null || true; }
+  done
   for spec in "gitlab.com=$BROKER_GITLAB_URL" "github.com=$BROKER_GITHUB_URL"; do
     host=${spec%%=*}; b=${spec#*=}
-    git config --system --unset-all "url.$b/.insteadOf" 2>/dev/null || true
+    [[ -n $b ]] || continue
     for from in "https://$host/" "git@$host:" "ssh://git@$host/" "http://$host/"; do
       git config --system --add "url.$b/.insteadOf" "$from"
     done
@@ -177,9 +187,31 @@ if want broker; then
   fi
   # The tools treat the broker as a self-hosted GitLab and GitHub Enterprise
   # Server. The broker injects the real tokens.
+  gh=()
+  [[ -n $BROKER_GITHUB_URL ]] && gh=("GH_HOST=$gh_host" "GH_ENTERPRISE_TOKEN=$tok")
   client_env 81-investigator-broker \
-    "GITLAB_HOST=$gl_host" "GITLAB_TOKEN=$tok" "GITLAB_API_PROTOCOL=$gl_proto" \
-    "GH_HOST=$gh_host" "GH_ENTERPRISE_TOKEN=$tok"
+    "GITLAB_HOST=$gl_host" "GITLAB_TOKEN=$tok" "GITLAB_API_PROTOCOL=$gl_proto" "${gh[@]}"
+  # glab's own config too: auth status and clone read it, not GITLAB_HOST.
+  # Only the broker's host: glab checks every host listed (its default
+  # gitlab.com fails with the placeholder), and https, since glab repo clone
+  # would otherwise use SSH, which the sandbox doesn't have. Rewritten on
+  # every start, like the rest.
+  home="$(getent passwd "$SANDBOX_USER" | cut -d: -f6)"
+  install -d -m 0700 -o "$SANDBOX_USER" -g "$SANDBOX_USER" "$home/.config" "$home/.config/glab-cli"
+  cat >"$home/.config/glab-cli/config.yml" <<EOF
+# Written by investigator provision.sh; rewritten on every start.
+host: $gl_host
+git_protocol: https
+check_update: false
+hosts:
+    $gl_host:
+        api_protocol: $gl_proto
+        git_protocol: https
+EOF
+  chown "$SANDBOX_USER:$SANDBOX_USER" "$home/.config/glab-cli/config.yml"
+  chmod 0600 "$home/.config/glab-cli/config.yml"
+fi
+if want broker; then
   if [[ -n "$BROKER_CA_FILE" ]]; then
     install -m 0644 "$BROKER_CA_FILE" /usr/local/share/ca-certificates/investigator-broker.crt
     update-ca-certificates >/dev/null
@@ -218,6 +250,17 @@ if want claude || want claude-env; then
   if [[ -n "$BROKER_ANTHROPIC_URL" ]]; then
     client_env 83-investigator-claude \
       "ANTHROPIC_BASE_URL=$BROKER_ANTHROPIC_URL" CLAUDE_CODE_OAUTH_TOKEN=placeholder
+    # Until onboarding is done, interactive claude checks api.anthropic.com
+    # directly, ignoring ANTHROPIC_BASE_URL, and the sandbox can't resolve
+    # it ("Unable to connect to Anthropic services"; -p skips the check).
+    cj="$(getent passwd "$SANDBOX_USER" | cut -d: -f6)/.claude.json"
+    if [[ -s $cj ]]; then
+      jq '.hasCompletedOnboarding = true' "$cj" >"$cj.tmp" && mv "$cj.tmp" "$cj"
+    else
+      echo '{"hasCompletedOnboarding": true}' >"$cj"
+    fi
+    chown "$SANDBOX_USER:$SANDBOX_USER" "$cj"
+    chmod 0600 "$cj"
   else
     client_env 83-investigator-claude
   fi
