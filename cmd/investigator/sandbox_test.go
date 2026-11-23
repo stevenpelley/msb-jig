@@ -97,3 +97,18 @@ func TestDrainDenialsTruncates(t *testing.T) {
 		t.Errorf("not truncated: off %d, size %d", off, fi.Size())
 	}
 }
+
+func TestGuestDir(t *testing.T) {
+	for in, want := range map[string]string{
+		"": "/home/agent", "repos/test": "/home/agent/repos/test",
+		"/tmp/x/": "/tmp/x", "../etc": "/home/etc",
+	} {
+		var args []string
+		if in != "" {
+			args = []string{in}
+		}
+		if got := guestDir(args); got != want {
+			t.Errorf("guestDir(%q) = %q, want %q", in, got, want)
+		}
+	}
+}

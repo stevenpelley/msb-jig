@@ -46,7 +46,8 @@ func VSCodeSettings(sshConfig string) map[string]any {
 		"extensions.ignoreRecommendations": true,
 		"extensions.autoUpdate":            false,
 		"telemetry.telemetryLevel":         "off",
-		"workbench.startupEditor":          "none",
+		// The start page, for its Clone Git Repository and Open Folder.
+		"workbench.startupEditor": "welcomePage",
 	}
 }
 

@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"path"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -81,7 +82,7 @@ func env(k, def string) string {
 //	INV_CLAUDE_TOKEN_COMMAND  default: the Keychain item inv-claude, if it exists
 //	INV_AWS_PROFILES          AWS profiles for the AWS MCP proxy, the first the default; empty: no AWS
 //	INV_AWS_MCP_COMMAND       default: the embedded aws-mcp-proxy wrapper under uv
-func sandboxCmd(cmd, name string) {
+func sandboxCmd(cmd, name string, args []string) {
 	if !nameRE.MatchString(name) {
 		fail("name must be lowercase letters, digits and dashes, at most 31 characters")
 	}
@@ -100,7 +101,7 @@ func sandboxCmd(cmd, name string) {
 	case "ssh-config":
 		fmt.Print(sshConfig(name, state))
 	case "code":
-		code(name, state)
+		code(name, state, args)
 	case "denied":
 		denied(state)
 	case "rm":
@@ -278,8 +279,9 @@ func sshHost(name string) string { return "investigator-" + name }
 
 // code opens the harness's own VS Code instance (its own user data and
 // extensions, under <root>/_vscode) on the sandbox, with the settings
-// that close the credential bridges (cli.VSCodeSettings).
-func code(name, state string) {
+// that close the credential bridges (cli.VSCodeSettings), on dir (relative
+// to the guest user's home) or the home itself.
+func code(name, state string, args []string) {
 	if pidOf(state) == 0 {
 		fail("%s isn't up: investigator up %s", name, name)
 	}
@@ -293,10 +295,23 @@ func code(name, state string) {
 	if err != nil {
 		fail("VS Code's code command isn't on PATH (VS Code: Shell Command: Install 'code' command in PATH)")
 	}
-	args := []string{"code", "--user-data-dir", data, "--extensions-dir", ext,
-		"--remote", "ssh-remote+" + sshHost(name), "/home/" + guestUser}
-	fmt.Println(strings.Join(args, " "))
-	fail("%v", syscall.Exec(bin, args, os.Environ()))
+	argv := []string{"code", "--user-data-dir", data, "--extensions-dir", ext,
+		"--remote", "ssh-remote+" + sshHost(name), guestDir(args)}
+	fmt.Println(strings.Join(argv, " "))
+	fail("%v", syscall.Exec(bin, argv, os.Environ()))
+}
+
+// guestDir is the folder investigator code opens: an absolute guest path
+// as given, anything else under the guest user's home.
+func guestDir(args []string) string {
+	home := "/home/" + guestUser
+	if len(args) == 0 || args[0] == "" {
+		return home
+	}
+	if path.IsAbs(args[0]) {
+		return path.Clean(args[0])
+	}
+	return path.Join(home, args[0])
 }
 
 // --- run: the supervisor ---

@@ -6,7 +6,7 @@
 //	investigator run <name>         the supervisor, in the foreground
 //	investigator down <name>        stop the supervisor, and with it the sandbox
 //	investigator shell <name>       a login shell as the agent user
-//	investigator code <name>        VS Code on the sandbox, with the harness's settings
+//	investigator code <name> [dir]  VS Code on the sandbox, with the harness's settings
 //	investigator ssh-config <name>  write and print the sandbox's OpenSSH Host block
 //	investigator denied <name>      the hosts its egress policy refused (denials.jsonl)
 //	investigator rm <name>          down, then remove the sandbox and its disks (the state directory stays)
@@ -33,7 +33,8 @@ sandboxes (microsandbox):
   run <name>         the same, in the foreground
   down <name>        stop it
   shell <name>       a login shell as the agent user
-  code <name>        open VS Code on it, with the harness's settings
+  code <name> [dir]  open VS Code on it, with the harness's settings, on dir
+                     (relative to the sandbox user's home; default: home)
   ssh-config <name>  write and print its OpenSSH Host block
   denied <name>      hosts the sandbox was refused, most recent first
   rm <name>          stop and remove it, with its disks
@@ -54,10 +55,10 @@ func main() {
 	case "allowlist":
 		allowlist(os.Args[2:])
 	case "up", "run", "down", "shell", "code", "ssh-config", "denied", "rm":
-		if len(os.Args) != 3 {
+		if len(os.Args) != 3 && (os.Args[1] != "code" || len(os.Args) != 4) {
 			usage()
 		}
-		sandboxCmd(os.Args[1], os.Args[2])
+		sandboxCmd(os.Args[1], os.Args[2], os.Args[3:])
 	default:
 		usage()
 	}
