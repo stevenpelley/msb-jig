@@ -560,13 +560,16 @@ func clientEnv(c config) map[string]string {
 	return env
 }
 
-// provision runs provision.sh as root once per sandbox (a marker in the
-// guest records it).
+// provision runs provision.sh as root: all of it on the first start (a
+// marker in the guest records it), and on later starts only claude-env, so
+// Claude Code's settings for login shells and sshd sessions follow the
+// broker (clientEnv does the same for the sandbox's own env). The script
+// is written from this binary each time.
 func provision(ctx context.Context, sb *m.Sandbox, c config, log *slog.Logger) error {
-	if ok, err := sb.FS().Exists(ctx, provisioned); err == nil && ok {
-		return nil
+	done, err := sb.FS().Exists(ctx, provisioned)
+	if err != nil {
+		return err
 	}
-	log.Info("provisioning the guest (first start)")
 	if err := sb.FS().WriteString(ctx, "/root/provision.sh", sandbox.ProvisionScript); err != nil {
 		return err
 	}
@@ -574,17 +577,23 @@ func provision(ctx context.Context, sb *m.Sandbox, c config, log *slog.Logger) e
 	if c.broker.AnthropicTokenCmd != "" {
 		anthropic = "https://" + brokerd.AnthropicHost
 	}
-	script := fmt.Sprintf(`set -euo pipefail
-export DEBIAN_FRONTEND=noninteractive
+	first, comps := "", "claude-env"
+	if !done {
+		log.Info("provisioning the guest (first start)")
+		first = `export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
 apt-get install -y -qq --no-install-recommends socat >/dev/null
+` + hostsLine()
+		comps = components(c)
+	}
+	script := fmt.Sprintf(`set -euo pipefail
+%s
 export SANDBOX_USER=%s PROVISION_COMPONENTS=%q
 export BROKER_GITLAB_URL=https://gitlab.broker.internal BROKER_GITHUB_URL=https://github.broker.internal
 export BROKER_GITLAB_USER=%q BROKER_GITLAB_MCP= BROKER_ANTHROPIC_URL=%q BROKER_CA_FILE=%s
-%s
 bash /root/provision.sh
 mkdir -p %s && touch %s
-`, guestUser, components(c), c.broker.GitLabUser, anthropic, guestCA, hostsLine(), filepath.Dir(provisioned), provisioned)
+`, first, guestUser, comps, c.broker.GitLabUser, anthropic, guestCA, filepath.Dir(provisioned), provisioned)
 	h, err := sb.ShellStream(ctx, script, m.WithExecUser("root"))
 	if err != nil {
 		return err

@@ -98,7 +98,7 @@ netstack and gvisor.
 
 Still open:
 - VS Code itself (`investigator code`, step 2);
-- a way to allow a host without `rm` (microsandbox fixes rules at create);
+- allowing a host without `rm`: waiting for microsandbox#1538;
 - the AWS provider (step 7);
 - the work track.
 

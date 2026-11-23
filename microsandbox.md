@@ -288,8 +288,11 @@ variable set at create (`-e`) reaches both SSH and exec sessions.
 Checked on `inv2` (recreated): a non-login SSH command gets all of them,
 and `glab api user` and `claude -p` work in it. Restarted with
 `INV_CLAUDE_TOKEN_COMMAND=` the Claude variables are gone, and back on the
-next normal `up`. One leftover: login shells still read the claude
-profile.d file written at the first provisioning.
+next normal `up`. Login shells follow too: on every start after the
+first, the supervisor writes the current `provision.sh` into the guest and
+runs only its `claude-env` component, which rewrites (or removes) the
+Claude profile.d file and `/etc/environment` block. Checked both ways on
+`inv2`: login shell, plain command and `/etc/environment` all agree.
 
 ## What we'd lose or have to settle
 
@@ -308,8 +311,18 @@ profile.d file written at the first provisioning.
     recorded. So were Claude Code's direct calls to `api.anthropic.com`
     during provisioning.
   - Not recorded: a connect to a bare IP. `investigator denied <name>`
-    lists the hosts, most recent first. Still to do: an upstream ask for a policy event
-    stream or a networking-only log level.
+    lists the hosts, most recent first.
+  - **Upstream (checked 2026-11-22):** #691, "Capture & expose network
+    policy deny events", is open and asks for exactly this: a public API
+    for deny events with kind, host, port and time. The maintainers say it
+    will come with the plugin system, under an RFC, with no date yet. A
+    comment there (v0.7.11) lists what debug level misses: denials of an
+    allowed host on a port it isn't allowed, plain TCP to an IP, and UDP.
+    #1854, "Log blocked domains" (count and last time per domain), was
+    closed in favour of #691, with the debug log plus `jq` as the answer
+    for now. #2064 (open) asks for a WARN-level line with the SNI and
+    reason when strict mode denies TLS. Our follower stays a stopgap
+    until #691 lands; we won't build more.
 - **Strict mode or TLS interception.** Strict mode with no interception
   breaks allowed hosts, so one of them has to give:
   - **Strict off:** hostname rules match on SNI plus DNS. The tests show it
@@ -320,8 +333,8 @@ profile.d file written at the first provisioning.
     there's no QUIC, and #2013 is open.
 - **Allowing a host while running.** Rules are set at create time and
   `msb modify` can't change them (0.7.16), so a new host means `rm` and
-  `up`, which loses the guest's files. Fine while the agent's work lives
-  in git; worth an upstream ask otherwise.
+  `up`, which loses the guest's files. #1538 ("Allow modifying network
+  rules of a running sandbox") is open; we wait for it (user, 2026-11-22).
 - **SDK runtime discovery.** The Go SDK looks for `~/.microsandbox/bin/msb`.
   With Homebrew's install it needs `MSB_PATH` and `MSB_LIBKRUNFW_PATH`, or
   `msb`'s own installer. It adds a 33 MB binary, through cgo (verify).
@@ -329,6 +342,15 @@ profile.d file written at the first provisioning.
 - **Corporate track.** The work Mac may not allow a hypervisor-entitled
   binary from a third-party tap. Ask before betting the corporate track on it.
 - **Not yet checked:**
-  - #1998 (a Wi-Fi change with a sandbox running);
+  - #1998 (a Wi-Fi change with a sandbox running): not tested on purpose
+    (user, 2026-11-22);
   - VS Code Remote-SSH itself (the SSH pieces it needs work);
   - an image built from `provision.sh`.
+
+## Sources
+
+- [#691: Capture & expose network policy deny events](https://github.com/superradcompany/microsandbox/issues/691) (open)
+- [#1854: Log blocked domains](https://github.com/superradcompany/microsandbox/issues/1854) (closed for #691)
+- [#2064: Strict-hostname denials show up in the guest as bare TLS EOF](https://github.com/superradcompany/microsandbox/issues/2064) (open)
+- [#1538: Allow modifying network rules of a running sandbox](https://github.com/superradcompany/microsandbox/issues/1538) (open)
+- [#1998: DNS after the host changes networks](https://github.com/superradcompany/microsandbox/issues/1998)

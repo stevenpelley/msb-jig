@@ -9,7 +9,10 @@
 #   SANDBOX_USER         the one user that may log in over SSH (default: agent).
 #                        On Lima this is Lima's own user, which must keep working.
 #   PROVISION_COMPONENTS space-separated subset of: base sshd git broker docker claude
-#                        (default: all of them)
+#                        (default: all of them). claude-env alone rewrites only
+#                        Claude Code's settings (claude includes it): the
+#                        supervisor runs it on every start, so they follow
+#                        whether the broker serves Claude.
 #   BROKER_GITLAB_URL    the broker's GitLab endpoint (default https://gitlab.broker.internal;
 #                        sbx mode: http://host.docker.internal:<port>)
 #   BROKER_GITHUB_URL    the same for GitHub (default https://github.broker.internal)
@@ -199,6 +202,18 @@ EOF
 fi
 
 # --- Claude Code: the personal track's agent, installed for the user ---
+# --- Claude Code's settings: the broker's endpoint, or none ---
+# The credential stays on the Mac: Claude Code sends a placeholder to the
+# broker, which swaps in the user's token.
+if want claude || want claude-env; then
+  if [[ -n "$BROKER_ANTHROPIC_URL" ]]; then
+    client_env 83-investigator-claude \
+      "ANTHROPIC_BASE_URL=$BROKER_ANTHROPIC_URL" CLAUDE_CODE_OAUTH_TOKEN=placeholder
+  else
+    client_env 83-investigator-claude
+  fi
+fi
+
 if want claude; then
   log "claude code"
   su - "$SANDBOX_USER" -c 'curl -fsSL https://claude.ai/install.sh | bash' >/dev/null
@@ -206,14 +221,6 @@ if want claude; then
   # On PATH without a login shell too (ssh host cmd, VS Code's server). The
   # installer's own link in ~/.local/bin follows its updates.
   ln -sfn "$(getent passwd "$SANDBOX_USER" | cut -d: -f6)/.local/bin/claude" /usr/local/bin/claude
-  # The credential stays on the Mac: Claude Code sends a placeholder to the
-  # broker, which swaps in the user's token.
-  if [[ -n "$BROKER_ANTHROPIC_URL" ]]; then
-    client_env 83-investigator-claude \
-      "ANTHROPIC_BASE_URL=$BROKER_ANTHROPIC_URL" CLAUDE_CODE_OAUTH_TOKEN=placeholder
-  else
-    client_env 83-investigator-claude
-  fi
   # GitLab's MCP server, through the broker's MCP filter (which injects the
   # token), only when asked: glab through the broker does everything it does,
   # with one credential fewer (prototype-plan.md, step 6).
