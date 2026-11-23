@@ -72,7 +72,7 @@ The agent writes scripts for each Mac step, and the user runs them and pastes th
   - `git.useIntegratedAskPass`, `git.terminalAuthentication`, `github.gitAuthentication: true`: `GIT_ASKPASS` and `VSCODE_GIT_ASKPASS_*` are back. `git credential fill` for github.com and gitlab.com got nothing: the harness's instance has no GitHub sign-in, so the most it can do is put a prompt in front of the user.
   - None of this opens a bridge our settings leave closed: the git socket and the remote `code` CLI are open anyway (above), and the agent could set `GIT_ASKPASS` to VS Code's script itself. So our settings set the defaults; the boundary is the broker, plus a user who doesn't answer prompts they didn't expect.
   - `terminal.integrated.env.*` is `restricted`: ignored in an untrusted workspace (Restricted Mode). Not checked with trust on.
-- **Not done yet:** `investigator code` itself, which uses the same settings.
+- **`investigator code <name> [dir]` (2026-11-23, checked by the user):** opens the harness's VS Code on the sandbox, on `dir` under `/home/agent`, with the start page (Clone Git Repository, Open Folder) shown. Cloning from the terminal or the UI, interactive `claude`, `glab` and Claude Code's extension worked there; interactive `claude` needed onboarding marked done, `glab` its own config listing only the broker's host, and GitHub URLs left alone while no broker serves GitHub.
 
 ### 3. The broker's GitLab HTTP proxy (agent, in its sandbox)
 
