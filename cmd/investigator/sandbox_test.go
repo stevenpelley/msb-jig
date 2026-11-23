@@ -1,6 +1,11 @@
 package main
 
 import (
+	"bytes"
+	"io"
+	"log/slog"
+	"os"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
@@ -71,5 +76,23 @@ func TestParseDenial(t *testing.T) {
 		if _, ok := parseDenial(l, "s"); ok {
 			t.Errorf("parsed %s", l)
 		}
+	}
+}
+
+func TestDrainDenialsTruncates(t *testing.T) {
+	src := filepath.Join(t.TempDir(), "runtime.log")
+	deny := "2026-11-22T23:39:36.768489Z DEBUG microsandbox_network::engine::dns::forwarder: DNS query denied by network policy domain=example.org\n"
+	noise := strings.Repeat("2026-11-22T23:39:36.756974Z DEBUG msb_krun_devices::virtio::mmio[block]: interrupt: signal_used_queue\n", maxRuntimeLog/100+1000)
+	if err := os.WriteFile(src, []byte(deny+deny+noise+"partial"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	var last filter.Denial
+	off := drainDenials(src, 0, "s", &out, &last, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if n := strings.Count(out.String(), "example.org"); n != 1 {
+		t.Errorf("%d denials recorded, want 1 (duplicates folded): %s", n, out.String())
+	}
+	if fi, _ := os.Stat(src); off != 0 || fi.Size() != 0 {
+		t.Errorf("not truncated: off %d, size %d", off, fi.Size())
 	}
 }
