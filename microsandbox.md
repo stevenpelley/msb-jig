@@ -201,7 +201,7 @@ The broker setup it shares with `investigator-net` lives in `brokerd/`.
 - `shell` is `msb exec -t -u agent`.
 - `ssh-config` prints a Host block with `ProxyCommand msb ssh serve`.
 - `rm` is `down` plus removing the sandbox.
-- Configuration comes from `INV_*` variables (the header of `sandbox.go`):
+- Configuration comes from `investigator login` (since 2026-11-23, `login.go`), under the `INV_*` variables (the header of `sandbox.go`); before that, only the variables:
   - `INV_GITLAB_USER`;
   - glab's login as the GitLab token by default;
   - the `inv-claude` Keychain item for Claude.

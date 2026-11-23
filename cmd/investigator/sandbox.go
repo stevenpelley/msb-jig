@@ -42,7 +42,10 @@ const (
 	mcpcliDir = "/usr/local/lib/investigator/mcpcli"
 )
 
-var nameRE = regexp.MustCompile(`^[a-z][a-z0-9-]{0,30}$`)
+var (
+	nameRE       = regexp.MustCompile(`^[a-z][a-z0-9-]{0,30}$`)
+	gitlabUserRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,254}$`)
+)
 
 func fail(f string, a ...any) {
 	fmt.Fprintf(os.Stderr, "investigator: "+f+"\n", a...)
@@ -67,6 +70,9 @@ func env(k, def string) string {
 // the filter's layers. Network rules and the vsock route are set when the
 // sandbox is created; rm and up again to change them.
 //
+// The providers come from investigator login (settings.json and the
+// Keychain, login.go); the INV_* variables below override them.
+//
 // Environment:
 //
 //	INV_STATE                 state directories (default ~/.investigator)
@@ -78,16 +84,15 @@ func env(k, def string) string {
 //	INV_PROFILE, INV_LAYERS   the allowlist's profile and extra layer files
 //	INV_GITLAB_USER           the GitLab user the agent acts for; empty: no GitLab provider
 //	INV_GITLAB_URL            default https://gitlab.com
-//	INV_GITLAB_TOKEN_COMMAND  default: glab's own login
+//	INV_GITLAB_TOKEN_COMMAND  default: glab's own login, or the Keychain item inv-gitlab
 //	INV_CLAUDE_TOKEN_COMMAND  default: the Keychain item inv-claude, if it exists
-//	INV_AWS_PROFILES          AWS profiles for the AWS MCP proxy, the first the default; empty: no AWS
+//	INV_AWS_PROFILES          AWS profiles for the AWS MCP proxy, the first the default, space-separated; empty: no AWS
 //	INV_AWS_MCP_COMMAND       default: the embedded aws-mcp-proxy wrapper under uv
 func sandboxCmd(cmd, name string, args []string) {
 	if !nameRE.MatchString(name) {
 		fail("name must be lowercase letters, digits and dashes, at most 31 characters")
 	}
-	home, _ := os.UserHomeDir()
-	state := filepath.Join(env("INV_STATE", filepath.Join(home, ".investigator")), name)
+	state := filepath.Join(stateRoot(), name)
 	setRuntimePaths()
 	switch cmd {
 	case "up":
@@ -102,6 +107,10 @@ func sandboxCmd(cmd, name string, args []string) {
 		fmt.Print(sshConfig(name, state))
 	case "code":
 		code(name, state, args)
+	case "open":
+		open(name, state, args)
+	case "stop":
+		stop(name, state)
 	case "denied":
 		denied(state)
 	case "rm":
@@ -109,8 +118,14 @@ func sandboxCmd(cmd, name string, args []string) {
 		if err := m.RemoveSandbox(context.Background(), name); err != nil && !m.IsKind(err, m.ErrSandboxNotFound) {
 			fail("remove: %v", err)
 		}
-		// The next sandbox of this name has a new host key.
+		// The next sandbox of this name has a new host key, and gets a new
+		// key of ours, authorized again (sshConfig).
 		_ = os.Remove(filepath.Join(state, "known_hosts"))
+		if err := pruneAuthorizedKeys(func(c string) bool { return c == sshHost(name) }); err != nil {
+			fail("%v", err)
+		}
+		_ = os.Remove(filepath.Join(state, "ssh_key"))
+		_ = os.Remove(filepath.Join(state, "ssh_key.pub"))
 		fmt.Println("removed", name, "(state kept in", state+")")
 	}
 }
@@ -348,27 +363,36 @@ func loadConfig(name, state string) config {
 	}
 	c.diskGiB, c.dockerGiB = uint32(disk), uint32(docker)
 
-	user := env("INV_GITLAB_USER", "")
-	if user != "" && !regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,254}$`).MatchString(user) {
-		fail("INV_GITLAB_USER isn't a GitLab username")
+	// investigator login's settings, under the INV_* variables.
+	s := loadSettings()
+	gl := gitlabSettings{URL: "https://gitlab.com", Token: "glab"}
+	if s.GitLab != nil {
+		gl = *s.GitLab
+	}
+	user := env("INV_GITLAB_USER", gl.User)
+	if user != "" && !gitlabUserRE.MatchString(user) {
+		fail("the GitLab user %q isn't a GitLab username", user)
 	}
 	c.broker.GitLabUser = user
-	c.broker.GitLabURL = env("INV_GITLAB_URL", "https://gitlab.com")
+	c.broker.GitLabURL = env("INV_GITLAB_URL", gl.URL)
 	c.broker.AnthropicURL = "https://api.anthropic.com"
 	if user != "" {
 		u, err := url.Parse(c.broker.GitLabURL)
-		if err != nil {
-			fail("INV_GITLAB_URL: %v", err)
+		if err != nil || u.Host == "" {
+			fail("the GitLab URL %q: want https://host", c.broker.GitLabURL)
 		}
-		c.broker.GitLabTokenCmd = env("INV_GITLAB_TOKEN_COMMAND",
-			fmt.Sprintf("glab api --hostname %[1]s user >/dev/null && glab config get token --host %[1]s", u.Host))
+		c.broker.GitLabTokenCmd = env("INV_GITLAB_TOKEN_COMMAND", gitlabTokenCommand(gl, u.Host))
 	}
 	claude, set := os.LookupEnv("INV_CLAUDE_TOKEN_COMMAND")
-	if !set && exec.Command("security", "find-generic-password", "-s", "inv-claude").Run() == nil {
-		claude = "security find-generic-password -s inv-claude -w"
+	if !set && keychainHas(keychainClaude) {
+		claude = "security find-generic-password -s " + keychainClaude + " -w"
 	}
 	c.broker.AnthropicTokenCmd = claude
-	c.broker.AWSProfiles = strings.Fields(env("INV_AWS_PROFILES", ""))
+	var profiles []string
+	if s.AWS != nil {
+		profiles = s.AWS.Profiles
+	}
+	c.broker.AWSProfiles = strings.Fields(env("INV_AWS_PROFILES", strings.Join(profiles, " ")))
 	c.broker.AWSMCPCommand = env("INV_AWS_MCP_COMMAND", "")
 	c.broker.AWSMCPURL = brokerd.DefaultAWSMCPURL
 

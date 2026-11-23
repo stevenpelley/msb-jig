@@ -2,6 +2,15 @@
 // owned by a supervisor process that also serves the broker
 // (microsandbox.md); the commands taking a <name> manage one.
 //
+//	investigator setup              check the Mac, write the harness's VS Code profile, pull the image
+//	investigator login [provider]   record GitLab, Claude and AWS for the broker (login.go); alone: what's recorded
+//	investigator logout [provider]  forget them, and remove their Keychain items
+//	investigator open <name> [dir]  start the sandbox if needed (creating it the first time), then VS Code on dir
+//	investigator stop <name>        stop it
+//	investigator uninstall          remove every sandbox, the state directory and the Keychain items
+//
+// And beneath them, for the checks:
+//
 //	investigator up <name>          start the supervisor in the background (creates and provisions the sandbox once)
 //	investigator run <name>         the supervisor, in the foreground
 //	investigator down <name>        stop the supervisor, and with it the sandbox
@@ -28,15 +37,27 @@ import (
 func usage() {
 	fmt.Fprintln(os.Stderr, `usage: investigator <command> ...
 
-sandboxes (microsandbox):
+  setup                   check what's needed, set up the harness's VS Code, pull the image
+  login                   show what the broker uses for GitLab, Claude and AWS
+  login gitlab <user> [--url https://host] [--keychain]
+                          act for <user>, with your glab login's token, or one you paste
+  login claude            store a token from claude setup-token
+  login aws <profile>...  use these AWS profiles (signing in with SSO if needed)
+  logout [gitlab|claude|aws]
+                          forget them (all, if none named)
+  open <name> [dir]       start the sandbox (creating it the first time) and open VS Code
+                          on dir (relative to the sandbox user's home; default: home)
+  stop <name>             stop it
+  denied <name>           hosts the sandbox was refused, most recent first
+  uninstall [--yes]       remove every sandbox, its state and the Keychain items
+
+sandboxes, beneath open and stop:
   up <name>          start the sandbox and its broker in the background (creates it the first time)
   run <name>         the same, in the foreground
   down <name>        stop it
   shell <name>       a login shell as the agent user
-  code <name> [dir]  open VS Code on it, with the harness's settings, on dir
-                     (relative to the sandbox user's home; default: home)
+  code <name> [dir]  open VS Code on it
   ssh-config <name>  write and print its OpenSSH Host block
-  denied <name>      hosts the sandbox was refused, most recent first
   rm <name>          stop and remove it, with its disks
 
 other:
@@ -54,8 +75,20 @@ func main() {
 		sshSetup(os.Args[2:])
 	case "allowlist":
 		allowlist(os.Args[2:])
-	case "up", "run", "down", "shell", "code", "ssh-config", "denied", "rm":
-		if len(os.Args) != 3 && (os.Args[1] != "code" || len(os.Args) != 4) {
+	case "setup":
+		if len(os.Args) != 2 {
+			usage()
+		}
+		setup()
+	case "login":
+		login(os.Args[2:])
+	case "logout":
+		logout(os.Args[2:])
+	case "uninstall":
+		uninstall(os.Args[2:])
+	case "up", "run", "down", "shell", "code", "open", "stop", "ssh-config", "denied", "rm":
+		dir := os.Args[1] == "code" || os.Args[1] == "open"
+		if len(os.Args) != 3 && (!dir || len(os.Args) != 4) {
 			usage()
 		}
 		sandboxCmd(os.Args[1], os.Args[2], os.Args[3:])
