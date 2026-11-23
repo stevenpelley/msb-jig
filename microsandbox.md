@@ -159,7 +159,7 @@ Keychain item.
 | Claude Code as user `agent` | `claude -p "say hi"` answers. Through the broker: `HEAD /api/hello`, `POST /v1/messages`. Installer hosts: `claude.ai`, `downloads.claude.ai`, `storage.googleapis.com` (the last unverified as needed). |
 | The agent against the bridge | It can't write `/etc/hosts` or kill socat: "Operation not permitted" |
 | SSH (`msb ssh serve --stdio` as ProxyCommand) | Logs in as `agent` with the login profile; `ssh -W` to a guest port works; agent forwarding isn't offered (`SSH_AUTH_SOCK` empty) |
-| Host-side denial log | **None found.** `runtime.log` and `msb logs --source system` don't record denied hosts at the default level; only the guest's own output shows them. |
+| Host-side denial log | **Only at debug level.** At the default level `runtime.log` and `msb logs --source system` don't record denied hosts. With `--debug`, `~/.microsandbox/sandboxes/<name>/logs/runtime.log` has `DNS query denied by network policy domain=example.org` and `TCP egress denied by strict hostname policy sni=… dst=…`; a connect to a bare IP left no line. Debug is global (`msb machine --log-level`; `RUST_LOG` is ignored) and writes about 16 KB/s while idle, mostly virtio, roughly 1.4 GB a day. |
 
 Found on the way, not microsandbox's:
 
@@ -220,23 +220,49 @@ Checked on the Mac with `INV_GITLAB_USER=<user> investigator-msb up inv2`:
 
 Still open:
 
-- **Environment outside login shells.** A non-login SSH command doesn't
-  get `ANTHROPIC_BASE_URL` (profile.d). The same is true on Lima, and it
-  matters for VS Code's terminals and its server. Write the variables
-  somewhere every shell reads too, e.g. `/etc/bash.bashrc` or
-  `/etc/environment`.
 - **One authorization for every sandbox.** `msb ssh authorize` adds the key
   to `~/.microsandbox/ssh/authorized_keys`, which covers all sandboxes, not
   one. Fine for one user's Mac.
 - **Docker in the guest** isn't provisioned yet (there's no systemd).
-- **Rules are fixed at create time.** Changing the layers needs `rm` and `up`.
+- **Rules are fixed at create time.** `msb modify` changes CPUs, memory,
+  disk, env, secrets and ports, but not the network policy, so changing
+  the layers needs `rm` and `up`, which loses the guest's files.
+
+### The environment outside login shells (fixed)
+
+`msb ssh` and `msb exec` run `/bin/sh -c` straight from the guest's init:
+no PAM, no login shell, and the env is only `HOME`, `PATH`, `TERM` plus the
+sandbox's own. So `provision.sh`'s profile.d files reached login shells
+only, and a plain `ssh host cmd`, as VS Code's server is started, had no
+`ANTHROPIC_BASE_URL` or `GITLAB_HOST`. Checked with a throwaway sandbox: a
+variable set at create (`-e`) reaches both SSH and exec sessions.
+
+- `investigator-msb` sets the client variables (`clientEnv`) on the
+  sandbox at create. On every start it re-applies them to the stopped
+  sandbox (`Modify` with `next_start`; a running sandbox refuses: "env
+  requires restart"), so a sandbox from an older supervisor, or one whose
+  Claude setting changed, follows. `TestClientEnvMatchesProvision` keeps
+  the names in step with `provision.sh`.
+- `provision.sh` writes each component's variables to
+  `/etc/profile.d/<name>.sh` and to a marked block in `/etc/environment`,
+  which pam_env reads for every sshd session, login or not (Lima).
+  Unverified on Lima itself.
+
+Checked on `inv2` (recreated): a non-login SSH command gets all of them,
+and `glab api user` and `claude -p` work in it. Restarted with
+`INV_CLAUDE_TOKEN_COMMAND=` the Claude variables are gone, and back on the
+next normal `up`. One leftover: login shells still read the claude
+profile.d file written at the first provisioning.
 
 ## What we'd lose or have to settle
 
 - **The denial log.** Our filter writes `denials.jsonl`, which drives "ask the
-  user to allow it". Here a denied name just doesn't resolve in the guest,
-  and the Mac keeps no record. Try `--debug` or `--trace` runtime logs. If
-  they don't record it, the guest's error message is all the agent sees.
+  user to allow it". Here a denied name just doesn't resolve in the guest.
+  The runtime logs denied names only at debug level, which is too noisy to
+  leave on (above). Options: run at debug and have the supervisor follow
+  `runtime.log`, keep only the `microsandbox_network` denial lines, and
+  truncate the file; or ask upstream for a per-module filter or a policy
+  event stream. Until then, the guest's error message is all the agent sees.
 - **Strict mode or TLS interception.** Strict mode with no interception
   breaks allowed hosts, so one of them has to give:
   - **Strict off:** hostname rules match on SNI plus DNS. The tests show it
@@ -245,8 +271,10 @@ Still open:
   - **Interception on:** clearer 403s, but its CA has to go into every
     trust store (Node, Python, Java), pinned clients must be bypassed,
     there's no QUIC, and #2013 is open.
-- **Allowing a host while running.** Rules are set at create time. A new
-  host means `down` and `up`; verify whether `msb modify` can change them.
+- **Allowing a host while running.** Rules are set at create time and
+  `msb modify` can't change them (0.7.16), so a new host means `rm` and
+  `up`, which loses the guest's files. Fine while the agent's work lives
+  in git; worth an upstream ask otherwise.
 - **SDK runtime discovery.** The Go SDK looks for `~/.microsandbox/bin/msb`.
   With Homebrew's install it needs `MSB_PATH` and `MSB_LIBKRUNFW_PATH`, or
   `msb`'s own installer. It adds a 33 MB binary, through cgo (verify).

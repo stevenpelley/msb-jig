@@ -25,7 +25,7 @@
 #                        Claude Code calls it with a placeholder token, and the
 #                        broker injects the user's. Empty: sign in inside the VM.
 #   PROVISION_PROXY      optional explicit proxy URL (e.g. http://proxy.internal:3128)
-#                        written for apt, dockerd and login shells. Leave unset
+#                        written for apt, dockerd and every session. Leave unset
 #                        where the runtime sets proxies itself (sbx).
 set -euo pipefail
 
@@ -44,6 +44,25 @@ export DEBIAN_FRONTEND=noninteractive
 want() { [[ " $PROVISION_COMPONENTS " == *" $1 "* ]]; }
 log() { printf '[provision] %s\n' "$*"; }
 
+# client_env <name> [KEY=VALUE...]: the tools' settings, where every session
+# reads them. /etc/profile.d/<name>.sh serves login shells; a block in
+# /etc/environment serves sshd sessions without one (pam_env), such as
+# `ssh host cmd` and VS Code's server, whose terminals and extensions inherit
+# it. Values must not contain spaces or quotes. No pairs: remove both.
+client_env() {
+  local name=$1 kv; shift
+  rm -f "/etc/profile.d/$name.sh"
+  touch /etc/environment
+  sed -i "/^# $name begin\$/,/^# $name end\$/d" /etc/environment
+  (( $# )) || return 0
+  {
+    echo "# Written by investigator provision.sh."
+    for kv in "$@"; do printf 'export %s="%s"\n' "${kv%%=*}" "${kv#*=}"; done
+  } >"/etc/profile.d/$name.sh"
+  chmod 0644 "/etc/profile.d/$name.sh"
+  { echo "# $name begin"; printf '%s\n' "$@"; echo "# $name end"; } >>/etc/environment
+}
+
 if [[ $EUID -ne 0 ]]; then
   echo "provision.sh must run as root" >&2
   exit 1
@@ -56,11 +75,11 @@ if [[ -n "$PROVISION_PROXY" ]]; then
 Acquire::http::Proxy "$PROVISION_PROXY";
 Acquire::https::Proxy "$PROVISION_PROXY";
 EOF
-  cat >/etc/profile.d/90-investigator-proxy.sh <<EOF
-export HTTPS_PROXY="$PROVISION_PROXY" HTTP_PROXY="$PROVISION_PROXY"
-export https_proxy="$PROVISION_PROXY" http_proxy="$PROVISION_PROXY"
-export NO_PROXY="localhost,127.0.0.1,::1,.broker.internal" no_proxy="localhost,127.0.0.1,::1,.broker.internal"
-EOF
+  no_proxy="localhost,127.0.0.1,::1,.broker.internal"
+  client_env 90-investigator-proxy \
+    "HTTPS_PROXY=$PROVISION_PROXY" "HTTP_PROXY=$PROVISION_PROXY" \
+    "https_proxy=$PROVISION_PROXY" "http_proxy=$PROVISION_PROXY" \
+    "NO_PROXY=$no_proxy" "no_proxy=$no_proxy"
   export HTTPS_PROXY="$PROVISION_PROXY" HTTP_PROXY="$PROVISION_PROXY"
 fi
 
@@ -119,10 +138,8 @@ if want git; then
   # No credential helper and no prompts: the broker injects credentials.
   git config --system credential.helper ""
   git config --system core.askPass ""
-  cat >/etc/profile.d/80-investigator-git.sh <<'EOF'
-export GIT_TERMINAL_PROMPT=0
-unset GIT_ASKPASS SSH_ASKPASS
-EOF
+  client_env 80-investigator-git GIT_TERMINAL_PROMPT=0
+  echo 'unset GIT_ASKPASS SSH_ASKPASS' >>/etc/profile.d/80-investigator-git.sh
 fi
 
 # --- broker: every git, gh and glab call to a managed provider goes to it ---
@@ -146,18 +163,16 @@ if want broker; then
   if [[ -n "$BROKER_SESSION_TOKEN" ]]; then
     git config --system "http.$BROKER_GITLAB_URL/.extraHeader" "X-Investigator-Session: $BROKER_SESSION_TOKEN"
   fi
-  cat >/etc/profile.d/81-investigator-broker.sh <<EOF
-# The tools treat the broker as a self-hosted GitLab and GitHub Enterprise
-# Server. The broker injects the real tokens.
-export GITLAB_HOST="$gl_host" GITLAB_TOKEN="$tok" GITLAB_API_PROTOCOL="$gl_proto"
-export GH_HOST="$gh_host" GH_ENTERPRISE_TOKEN="$tok"
-EOF
-  chmod 0644 /etc/profile.d/81-investigator-broker.sh
+  # The tools treat the broker as a self-hosted GitLab and GitHub Enterprise
+  # Server. The broker injects the real tokens.
+  client_env 81-investigator-broker \
+    "GITLAB_HOST=$gl_host" "GITLAB_TOKEN=$tok" "GITLAB_API_PROTOCOL=$gl_proto" \
+    "GH_HOST=$gh_host" "GH_ENTERPRISE_TOKEN=$tok"
   if [[ -n "$BROKER_CA_FILE" ]]; then
     install -m 0644 "$BROKER_CA_FILE" /usr/local/share/ca-certificates/investigator-broker.crt
     update-ca-certificates >/dev/null
     # Node-based tools (Claude Code's MCP client) don't read the system store.
-    echo 'export NODE_EXTRA_CA_CERTS=/etc/ssl/certs/ca-certificates.crt' >/etc/profile.d/82-investigator-node-ca.sh
+    client_env 82-investigator-node-ca NODE_EXTRA_CA_CERTS=/etc/ssl/certs/ca-certificates.crt
   fi
 fi
 
@@ -189,12 +204,11 @@ if want claude; then
   su - "$SANDBOX_USER" -c '~/.local/bin/claude --version'
   # The credential stays on the Mac: Claude Code sends a placeholder to the
   # broker, which swaps in the user's token.
-  rm -f /etc/profile.d/83-investigator-claude.sh
   if [[ -n "$BROKER_ANTHROPIC_URL" ]]; then
-    cat >/etc/profile.d/83-investigator-claude.sh <<EOF
-export ANTHROPIC_BASE_URL="$BROKER_ANTHROPIC_URL" CLAUDE_CODE_OAUTH_TOKEN=placeholder
-EOF
-    chmod 0644 /etc/profile.d/83-investigator-claude.sh
+    client_env 83-investigator-claude \
+      "ANTHROPIC_BASE_URL=$BROKER_ANTHROPIC_URL" CLAUDE_CODE_OAUTH_TOKEN=placeholder
+  else
+    client_env 83-investigator-claude
   fi
   # GitLab's MCP server, through the broker's MCP filter (which injects the
   # token), only when asked: glab through the broker does everything it does,

@@ -422,6 +422,19 @@ func openSandbox(ctx context.Context, c config) (*m.Sandbox, bool, error) {
 				return nil, false, fmt.Errorf("%s is %s and couldn't be stopped: %w", c.name, s, err)
 			}
 		}
+		// The env can change after create (unlike the egress rules), but
+		// only while stopped: apply the current one, so a sandbox from an
+		// older supervisor, or whose Claude setting changed, matches it.
+		env := clientEnv(c)
+		var gone []string
+		for _, k := range []string{"ANTHROPIC_BASE_URL", "CLAUDE_CODE_OAUTH_TOKEN"} {
+			if _, ok := env[k]; !ok {
+				gone = append(gone, k)
+			}
+		}
+		if _, err := h.Modify(ctx, m.ModifyOptions{Env: env, EnvRemove: gone, Policy: m.ModificationPolicyNextStart}); err != nil {
+			return nil, false, fmt.Errorf("setting the environment: %w", err)
+		}
 		sb, err := m.StartSandbox(ctx, c.name)
 		return sb, false, err
 	case m.IsKind(err, m.ErrSandboxNotFound):
@@ -446,10 +459,31 @@ func openSandbox(ctx context.Context, c config) (*m.Sandbox, bool, error) {
 			// SNI plus the sandbox's own DNS answers (microsandbox.md).
 			DisableStrict: true,
 		}),
+		m.WithEnv(clientEnv(c)),
 		m.WithVsock(m.VsockRoute{HostSocket: filepath.Join(c.state, "broker.sock"), Port: brokerPort}),
 		m.WithPatches(m.Patch.Text(guestCA, string(ca), m.PatchOptions{Mode: &mode, Replace: true})),
 	)
 	return sb, true, err
+}
+
+// clientEnv is what provision.sh writes to /etc/profile.d and
+// /etc/environment for the broker, git and claude components. Neither file
+// reaches a microsandbox session: msb ssh and exec run /bin/sh -c from the
+// guest's init, without PAM or a login shell. The sandbox's own environment
+// does: it is set at create and re-applied on every start (openSandbox).
+// TestClientEnvMatchesProvision keeps the names in step.
+func clientEnv(c config) map[string]string {
+	env := map[string]string{
+		"GIT_TERMINAL_PROMPT": "0",
+		"GITLAB_HOST":         brokerd.GitLabHost, "GITLAB_TOKEN": "placeholder", "GITLAB_API_PROTOCOL": "https",
+		"GH_HOST": "github.broker.internal", "GH_ENTERPRISE_TOKEN": "placeholder",
+		"NODE_EXTRA_CA_CERTS": "/etc/ssl/certs/ca-certificates.crt",
+	}
+	if c.broker.AnthropicTokenCmd != "" {
+		env["ANTHROPIC_BASE_URL"] = "https://" + brokerd.AnthropicHost
+		env["CLAUDE_CODE_OAUTH_TOKEN"] = "placeholder"
+	}
+	return env
 }
 
 // provision runs provision.sh as root once per sandbox (a marker in the
