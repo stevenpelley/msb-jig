@@ -83,7 +83,7 @@ fi
 # --- ports listening in the sandbox (candidates for forwarding to the Mac) ---
 if command -v ss >/dev/null; then
   ports=$(ss -Hltn 2>/dev/null | awk '{print $4}' | grep -Ev '(^|:)22$' | sort -u | tr '\n' ' ')
-  report info listening "${ports:-none besides sshd} (check the editor's Ports view and Lima's forwards on the Mac)"
+  report info listening "${ports:-none besides sshd} (check the editor's Ports view)"
 fi
 
 # --- the editor's own sign-ins, as visible from the remote ---

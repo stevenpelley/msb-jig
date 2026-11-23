@@ -23,8 +23,8 @@ const BrokerDomain = "broker.internal"
 
 // CA is the broker's own certificate authority. Its certificate carries a
 // critical X.509 name constraint, so even a stolen key could sign only
-// names under broker.internal. The VM trusts it; the key stays in
-// investigator-net.
+// names under broker.internal. The VM trusts it; the key stays with the
+// supervisor, on the Mac.
 type CA struct {
 	Cert *x509.Certificate
 	Key  *ecdsa.PrivateKey

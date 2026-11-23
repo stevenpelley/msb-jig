@@ -16,19 +16,27 @@ import (
 	"strconv"
 	"strings"
 	"time"
-
-	"mcp-restrict/filter"
 )
 
 // The denial log. microsandbox records denied names only at debug level,
 // in the sandbox's runtime.log, which at that level grows by about 16 KB/s
-// (microsandbox.md). The supervisor follows it, appends each denial to
-// <state>/denials.jsonl in the filter's format, and truncates runtime.log
+// (docs/microsandbox.md). The supervisor follows it, appends each denial to
+// <state>/denials.jsonl, one Denial per line, and truncates runtime.log
 // once it passes maxRuntimeLog; the runtime appends, so writing simply
 // restarts at zero. A line written between our last read and the truncate
 // is lost: a window of microseconds every quarter hour or so.
 
 const maxRuntimeLog = 16 << 20
+
+// Denial is one refused connection or DNS query.
+type Denial struct {
+	Time   time.Time `json:"time"`
+	Client string    `json:"client"`
+	Method string    `json:"method"`
+	Host   string    `json:"host"`
+	Port   int       `json:"port"`
+	Reason string    `json:"reason"`
+}
 
 var denialRE = regexp.MustCompile(`^(\S+)\s+DEBUG microsandbox_network::\S+: ((?:DNS query|TCP egress) denied by [^=]*?)\s+((?:\w+=\S+\s*)+)$`)
 
@@ -36,12 +44,12 @@ var denialRE = regexp.MustCompile(`^(\S+)\s+DEBUG microsandbox_network::\S+: ((?
 //
 //	2026-11-22T23:39:36.768489Z DEBUG microsandbox_network::engine::dns::forwarder: DNS query denied by network policy domain=example.org
 //	2026-11-22T23:39:36.765763Z DEBUG microsandbox_network::engine::tcp::proxy: TCP egress denied by strict hostname policy sni="proxy.golang.org" dst=142.251.179.141:443
-func parseDenial(line, client string) (filter.Denial, bool) {
+func parseDenial(line, client string) (Denial, bool) {
 	mm := denialRE.FindStringSubmatch(strings.TrimSpace(line))
 	if mm == nil {
-		return filter.Denial{}, false
+		return Denial{}, false
 	}
-	d := filter.Denial{Client: client, Reason: mm[2], Method: "connect"}
+	d := Denial{Client: client, Reason: mm[2], Method: "connect"}
 	d.Time, _ = time.Parse(time.RFC3339Nano, mm[1])
 	kv := map[string]string{}
 	for _, f := range strings.Fields(mm[3]) {
@@ -84,7 +92,7 @@ func followDenials(ctx context.Context, name, state string, off int64, log *slog
 		return
 	}
 	defer out.Close()
-	var last filter.Denial
+	var last Denial
 	tick := time.NewTicker(2 * time.Second)
 	defer tick.Stop()
 	for {
@@ -103,7 +111,7 @@ func followDenials(ctx context.Context, name, state string, off int64, log *slog
 
 // drainDenials reads src from off to its last full line, records the
 // denials, truncates src if it's too big, and returns the new offset.
-func drainDenials(src string, off int64, name string, out io.Writer, last *filter.Denial, log *slog.Logger) int64 {
+func drainDenials(src string, off int64, name string, out io.Writer, last *Denial, log *slog.Logger) int64 {
 	f, err := os.Open(src)
 	if err != nil {
 		return 0
@@ -159,7 +167,7 @@ func denied(state string) {
 	byHost := map[string]*agg{}
 	sc := bufio.NewScanner(f)
 	for sc.Scan() {
-		var d filter.Denial
+		var d Denial
 		if json.Unmarshal(sc.Bytes(), &d) != nil || d.Host == "" {
 			continue
 		}

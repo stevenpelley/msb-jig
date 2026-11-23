@@ -3,7 +3,7 @@
 Exploration project: tools that limit what a coding agent in a sandbox can
 reach, mainly over the network, with finer rules than the providers' own
 roles and tokens allow. Design notes plus the prototype's code (Go module
-`mcp-restrict`, `prototype-plan.md`).
+`mcp-restrict`, `docs/prototype-plan.md`).
 
 ## Purpose
 
@@ -21,12 +21,12 @@ roles and tokens allow. Design notes plus the prototype's code (Go module
    Later the same pieces should serve headless, automated agents.
 
    **Configurable into a general dev sandbox** (2026-11-22): the egress
-   allowlist comes in layers (base, profile, org, user). The
-   `investigator` profile is narrow; a `dev` profile adds documentation
-   sites and hosts that serve dev and production tools. Domain filtering
-   is a separate policy from the broker's: the runtime's own, or an
-   embedded off-the-shelf proxy. **The broker's policy covers only the
-   managed providers.**
+   allowlist comes in layers: the base (sbx's balanced list plus our
+   own groups, without the hosts of providers the broker serves), org
+   layers (`INV_LAYERS`) and the user's `~/.investigator/allowlist.yaml`
+   (2026-11-23; the `investigator` and `dev` profiles are gone). Domain
+   filtering is a separate policy from the broker's: the runtime's own.
+   **The broker's policy covers only the managed providers.**
 
    **One process per sandbox** (2026-11-22): everything that runs
    continuously on the Mac is packaged with the VM. The `investigator`
@@ -40,7 +40,7 @@ roles and tokens allow. Design notes plus the prototype's code (Go module
 
    **No dependency on sbx** (2026-11-22): assume work won't allow Docker
    accounts. Prototyped on sbx, then Lima; it now runs on microsandbox
-   (`microsandbox.md`).
+   (`docs/microsandbox.md`).
 
    **Two tracks (2026-11-22): personal first, then work.**
    - *Personal* (build first): GitLab, with my own GitLab user's
@@ -78,11 +78,11 @@ Keep these parties separate when reasoning about enforcement:
 ## Current state
 
 As of 2026-11-22. **microsandbox is the VM layer** (user's decision;
-`microsandbox.md`, `prototype-plan.md` step 6b). `investigator up <name>`
+`docs/microsandbox.md`, `docs/prototype-plan.md` step 6b). `investigator up <name>`
 starts one supervisor process per sandbox. It owns the VM through
 microsandbox's Go SDK and serves the broker on a Unix socket, which the
 guest reaches over vsock. If the process dies, so does the VM. The egress
-policy is microsandbox's, compiled from the filter's layers.
+policy is microsandbox's, compiled from the allowlist's layers.
 
 On the user's Mac, against `<user>/test`, these pass:
 - git push rules and glab, through the broker, with the user's own
@@ -94,7 +94,7 @@ On the user's Mac, against `<user>/test`, these pass:
 - Docker in the guest, on its own ext4 disk;
 - AWS: the agent calls the AWS MCP Server with `mcpcli` or `curl` at
   `aws.broker.internal/mcp`; the broker runs AWS's stdio proxy on the Mac
-  (`prototype-plan.md` step 7).
+  (`docs/prototype-plan.md` step 7).
 
 The Lima backend was removed the same day (in git at `695143a`), with its
 netstack and gvisor.
@@ -102,7 +102,12 @@ netstack and gvisor.
 Still open:
 - VS Code: the bridges check runs unattended (`checks/vscode-e2e/`, step 2); the git extension's socket and the remote `code` CLI stay open; Claude Code's extension installs and works on the remote; a repo's `.vscode/settings.json` overrides our settings (no new bridge, but ports and askpass come back); `investigator code <name> [dir]` checked by the user;
 - allowing a host without `rm`: waiting for microsandbox#1538;
-- the work track.
+- the work track;
+- the name and pitch (user, 2026-11-23): it's no longer just an
+  "investigator" but a full-featured sandbox (own image, host folders,
+  brokered providers, an editor over SSH). Sell it first for one-shot
+  investigations; with Kiro IDE's remote SSH, people may use it as their
+  everyday dev sandbox. Rename later.
 
 The agent runs on the Mac itself and asks before running commands.
 
@@ -110,17 +115,19 @@ The agent runs on the Mac itself and asks before running commands.
 
 | File | What it is |
 |---|---|
-| `investigator-design.md` | The harness design (2026-11-21; editor over SSH added 2026-11-22): the two tracks, VS Code then Kiro over SSH into the sandbox, egress filtering, packaging as one process per sandbox (`investigator-net`), leaving sbx for Lima and libraries that boot VMs (libkrun and the cloud path), dev containers, the broker (core plus per-provider adapters, GitLab and GitHub, hosted-MCP tool filtering), the sandbox backend interface, whether OpenShell is easier behind an IDE, packaging, open questions |
-| `prototype-plan.md` | The personal track, step by step, ending on microsandbox (6b): who tests what (this sandbox vs the user's Mac) |
-| `sandbox/` | `provision.sh` (one script for the sbx image and the microsandbox guest), `install-keys.sh`, the image's `Dockerfile`, `mcpcli/` (the agent's MCP client, copied from the `sbx-mcp-client` skill) |
-| `cli/`, `cmd/investigator/` | The CLI. `setup`, `login`, `logout`, `open`, `stop`, `uninstall` for users (`login.go`; settings in `~/.investigator/settings.json`, tokens in the Keychain); beneath them `up\|run\|down\|shell\|code\|ssh-config\|rm <name>`: the microsandbox supervisor (broker plus VM, Go SDK, attached), SSH config and VS Code settings; `allowlist` compiles the layers; `ssh-setup` for sshd-based sandboxes |
-| `filter/` | The domain filter: allowlist groups and layers (`lists/*.yaml`, embedded), the ACL, our explicit proxy (direct or chained to an upstream) |
-| `cmd/investigator-net/` | The broker or the filter on their own: `sbx` (the broker on the Mac's loopback), `broker` (on a Unix socket), `filter` (on TCP) |
-| `broker/` | The broker: policy (`Decide`), receive-pack parsing, the GitLab adapter (git, LFS, REST, GraphQL, the hosted-MCP filter), the GitHub adapter (git, REST and GraphQL as gh calls a GitHub Enterprise Server; no LFS), the AWS MCP bridge (HTTP to the stdio proxy), the name-constrained CA, the shared server checks |
-| `brokerd/` | The broker as the supervisor and `investigator-net` run it: providers from flags, the TLS server under the sandbox's CA, the Unix-socket listener, token commands, the `aws-mcp-proxy.py` wrapper |
-| `microsandbox.md` | microsandbox as the VM layer (2026-11-22, msb 0.7.16): checks on the Mac, the broker over vsock, the supervisor, Docker, the environment |
+| `docs/design.md` | The harness design (2026-11-21; editor over SSH added 2026-11-22): the two tracks, VS Code then Kiro over SSH into the sandbox, egress filtering, packaging as one process per sandbox, leaving sbx (for Lima, since removed, then libraries that boot VMs), dev containers, the broker, the sandbox backend interface, whether OpenShell is easier behind an IDE, packaging, open questions |
+| `docs/prototype-plan.md` | The personal track, step by step, ending on microsandbox (6b): who tests what (this sandbox vs the user's Mac) |
+| `docs/microsandbox.md` | microsandbox as the VM layer (2026-11-22, msb 0.7.16): checks on the Mac, the broker over vsock, the supervisor, Docker, the environment |
+| `docs/enforcement.md` | Making the harness required (2026-11-22): threats, model-gated chain of trust, network and provider-side options, small provider asks |
+| `broker/providers/` | **Start reviewing here.** The list of providers and how each is configured from the CLI's settings |
+| `broker/<provider>/routes.go` | Each provider's route table (`gitlab`, `github`, `anthropic`, `awsmcp`): every request it serves, the check it runs and where it goes; anything unmatched is denied. The rest of the package is the checks and upstreams |
+| `broker/` | The core: `broker.go` (routes, matching, decision log), `policy.go` (the shared rules: agent branches, title tags), `upstream.go` (credential injection, header rewriting), `server.go` (routing by host, SNI check), `listen.go` (TLS, Unix socket, token commands), `ca.go` (the name-constrained CA). `gitproto/` parses pushes, `mcp/` JSON-RPC, `brokertest/` the shared test fixtures |
+| `allowlist/` | The egress allowlist: groups (`lists/sbx-balanced.yaml`, copied from sbx's balanced policy, and `lists/groups.yaml`, ours and the providers'), the base layer, user and org layers; a provider's hosts drop out when the broker serves it |
+| `cmd/investigator/` | The CLI. `setup`, `login`, `logout`, `open`, `stop`, `uninstall` for users (`login.go`; settings in `~/.investigator/settings.json`, tokens in the Keychain, extra hosts in `~/.investigator/allowlist.yaml`); beneath them `up\|run\|down\|shell\|code\|ssh-config\|rm <name>` (`lifecycle.go`, `supervisor.go`: broker plus VM through the microsandbox Go SDK; `remote.go`: SSH and VS Code); `image.go`: `image build`, your own image from a Dockerfile (Docker or Podman, then `msb load`); `mounts.go`: the exchange folder, `--mount` at create, `cp`; `allowlist` prints the compiled list; `ssh-setup` for sshd-based sandboxes |
+| `cmd/investigator-sbx/` | The broker for an sbx sandbox: on the Mac's loopback, plain HTTP, behind a session token |
+| `editor/` | How the editor reaches a sandbox: per-sandbox SSH keys and config, the harness's VS Code settings |
+| `guest/` | What goes into the VM: `provision.sh` (one script for the image and the microsandbox guest), `install-keys.sh`, the image's `Dockerfile`, `mcpcli/` (the agent's MCP client, copied from the `sbx-mcp-client` skill) |
 | `checks/` | `bridges.sh` (run in the editor's terminal), `vscode-e2e/` (VS Code over Remote-SSH, unattended, running `bridges.sh` through a probe extension), `step1-docker.sh` (step 1 against a container) |
-| `enforcement.md` | Making the harness required (2026-11-22): threats, model-gated chain of trust, network and provider-side options, small provider asks |
 
 ## Working rules
 
@@ -129,7 +136,7 @@ The agent runs on the Mac itself and asks before running commands.
 - Research notes carry the date and tool versions they were checked
   against. Mark anything not tested or not confirmed in a source as
   *unverified*, and list sources at the end.
-- Write plainly, in the style of `investigator-design.md`: short
+- Write plainly, in the style of `docs/design.md`: short
   sections, direct answers first, then detail.
 - Never put real credentials, tokens or work-internal names, hosts or
   account IDs in this directory. Work details (Kiro as the work editor,

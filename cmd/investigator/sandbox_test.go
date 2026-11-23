@@ -13,12 +13,12 @@ import (
 
 	m "github.com/superradcompany/microsandbox/sdk/go"
 
-	"mcp-restrict/filter"
-	"mcp-restrict/sandbox"
+	"mcp-restrict/allowlist"
+	"mcp-restrict/guest"
 )
 
 func TestEgressRules(t *testing.T) {
-	rules := egressRules([]filter.Entry{{Pattern: "proxy.golang.org", Port: 443}, {Pattern: "*.ports.ubuntu.com", Port: 80}})
+	rules := egressRules([]allowlist.Entry{{Pattern: "proxy.golang.org", Port: 443}, {Pattern: "*.ports.ubuntu.com", Port: 80}})
 	if len(rules) != 2 {
 		t.Fatalf("%d rules", len(rules))
 	}
@@ -39,7 +39,7 @@ func TestClientEnvMatchesProvision(t *testing.T) {
 	// The client_env calls, and the provider arrays they take: gl=(...) and gh=(...).
 	call := regexp.MustCompile(`(?m)^\s*(?:client_env 8[0-4]-\S+|\[\[ .* \]\] && g[lh]=\()((?:.*\\\n)*.*)$`)
 	name := regexp.MustCompile(`([A-Z_]+)=`)
-	for _, c := range call.FindAllStringSubmatch(sandbox.ProvisionScript, -1) {
+	for _, c := range call.FindAllStringSubmatch(guest.ProvisionScript, -1) {
 		for _, n := range name.FindAllStringSubmatch(c[1], -1) {
 			want = append(want, n[1])
 		}
@@ -90,7 +90,7 @@ func TestDrainDenialsTruncates(t *testing.T) {
 		t.Fatal(err)
 	}
 	var out bytes.Buffer
-	var last filter.Denial
+	var last Denial
 	off := drainDenials(src, 0, "s", &out, &last, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	if n := strings.Count(out.String(), "example.org"); n != 1 {
 		t.Errorf("%d denials recorded, want 1 (duplicates folded): %s", n, out.String())

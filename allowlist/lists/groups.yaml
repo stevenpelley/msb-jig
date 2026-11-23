@@ -1,0 +1,67 @@
+# Our own groups: hosts we know the sandbox needs, beyond sbx's balanced
+# defaults (sbx-balanced.yaml), and the hosts the broker's providers serve.
+# See docs/design.md, "Egress filtering".
+#
+# An entry is a host or "*.suffix" (subdomains, any depth, not the suffix
+# itself), with an optional port: 443 by default, or 80.
+#
+# A group with a provider leaves the allowlist when the broker serves that
+# provider (the user ran investigator login for it): the sandbox reaches it
+# only through the broker then. Without the login it is reached directly,
+# anonymously.
+#
+# Hosts marked "unverified" were written from what we knew, not checked
+# against a tool's real traffic; investigator denied <name> shows what's
+# missing.
+groups:
+  claude-code:
+    description: Claude Code's installer and sign-in
+    hosts:
+      - claude.ai                # install.sh
+      - console.anthropic.com    # sign-in (unverified)
+  go:
+    description: Go hosts sbx's list lacks
+    hosts:
+      - go.dev
+      - storage.googleapis.com   # some module zips (unverified)
+  terraform:
+    description: Terraform's registry
+    hosts:
+      - registry.terraform.io
+  docs:
+    description: Documentation sbx's list lacks
+    hosts:
+      - docs.aws.amazon.com
+      - docs.python.org
+      - developer.mozilla.org
+      - docs.github.com
+      - docs.gitlab.com
+      - kubernetes.io
+  github-downloads:
+    description: GitHub archives; release and raw files are *.githubusercontent.com (sbx-code-and-containers)
+    hosts:
+      - codeload.github.com
+
+  # --- provider hosts: direct only without the provider's login ---
+  anthropic:
+    provider: anthropic
+    description: The Claude API; with a Claude login it goes through anthropic.broker.internal
+    hosts:
+      - api.anthropic.com
+  github:
+    provider: github
+    description: GitHub's git and API; with a GitHub login they go through github.broker.internal
+    hosts:
+      - github.com
+      - api.github.com
+      - uploads.github.com
+  gitlab:
+    provider: gitlab
+    description: gitlab.com's git and API; with a GitLab login they go through gitlab.broker.internal
+    hosts:
+      - gitlab.com
+  aws:
+    provider: aws
+    description: AWS endpoints; with AWS profiles the agent reaches AWS through aws.broker.internal (the AWS MCP Server)
+    hosts:
+      - "*.amazonaws.com"

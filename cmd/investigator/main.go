@@ -1,12 +1,14 @@
 // Command investigator is the harness CLI. A sandbox is a microsandbox VM
 // owned by a supervisor process that also serves the broker
-// (microsandbox.md); the commands taking a <name> manage one.
+// (docs/microsandbox.md); the commands taking a <name> manage one.
 //
-//	investigator setup              check the Mac, write the harness's VS Code profile, pull the image
+//	investigator setup              check the Mac, write the harness's VS Code profile, build the base image
 //	investigator login [provider]   record GitLab, GitHub, Claude and AWS for the broker (login.go); alone: what's recorded
 //	investigator logout [provider]  forget them, and remove their Keychain items
+//	investigator image build        your own sandbox image, from a Dockerfile (image.go)
 //	investigator open <name> [dir]  start the sandbox if needed (creating it the first time), then VS Code on dir
 //	investigator stop <name>        stop it
+//	investigator cp <src> <dst>     copy files between the Mac and a sandbox (mounts.go: host folders)
 //	investigator uninstall          remove every sandbox, the state directory and the Keychain items
 //
 // And beneath them, for the checks:
@@ -19,7 +21,7 @@
 //	investigator ssh-config <name>  write and print the sandbox's OpenSSH Host block
 //	investigator denied <name>      the hosts its egress policy refused (denials.jsonl)
 //	investigator rm <name>          down, then remove the sandbox and its disks (the state directory stays)
-//	investigator allowlist          compile the allowlist layers
+//	investigator allowlist          the hosts a new sandbox may reach
 //	investigator ssh-setup          SSH keys and config for an sshd-based sandbox (sbx, checks/step1-docker.sh)
 package main
 
@@ -28,29 +30,42 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 
-	"mcp-restrict/cli"
-	"mcp-restrict/filter"
+	"mcp-restrict/allowlist"
+	"mcp-restrict/editor"
 )
 
 func usage() {
 	fmt.Fprintln(os.Stderr, `usage: investigator <command> ...
 
-  setup                   check what's needed, set up the harness's VS Code, pull the image
+  setup                   check what's needed, set up the harness's VS Code, build the base image
   login                   show what the broker uses for GitLab, GitHub, Claude and AWS
-  login gitlab <user> [--url https://host] [--keychain]
-                          act for <user>, with your glab login's token, or one you paste
-  login github <user> [--keychain]
-                          act for <user> on github.com, with your gh login's token, or one you paste
+  login all               ask about each provider in turn and log in with the defaults
+  login gitlab [<user>] [--url https://host] [--keychain]
+                          act for the user of your glab login's token, or one you paste
+                          (given <user>, check that it's theirs)
+  login github [<user>] [--keychain]
+                          the same on github.com, with your gh login's token
   login claude            store a token from claude setup-token
-  login aws <profile>...  use these AWS profiles (signing in with SSO if needed)
+  login aws [<profile>...]
+                          use these AWS profiles (signing in with SSO if needed); none: choose from a list
   logout [gitlab|github|claude|aws]
                           forget them (all, if none named)
   open <name> [dir]       start the sandbox (creating it the first time) and open VS Code
                           on dir (relative to the sandbox user's home; default: home)
+  open <name> [dir] --mount host[:guest][:ro] ...
+                          when creating it, also mount these Mac folders (guest path under
+                          /mnt; default /mnt/<folder name>). Every sandbox has
+                          ~/.investigator/<name>/share at /mnt/host (and ~/host)
+  cp <src> <dst>          copy between the Mac and a sandbox; a sandbox path is
+                          <name>:<path>, relative to the agent's home unless absolute
   stop <name>             stop it
   denied <name>           hosts the sandbox was refused, most recent first
+  image init [file]       write a starter Dockerfile (default ./Dockerfile)
+  image build [-f Dockerfile [context]] [-engine docker|podman]
+                          build the base image (git, Docker, Claude Code...), then your
+                          Dockerfile on it; new sandboxes start from the result
+  image show|reset        the image new sandboxes start from; back to plain Ubuntu
   uninstall [--yes]       remove every sandbox, its state and the Keychain items
 
 sandboxes, beneath open and stop:
@@ -63,7 +78,7 @@ sandboxes, beneath open and stop:
   rm <name>          stop and remove it, with its disks
 
 other:
-  allowlist [flags]  compile the allowlist layers into the filter's ACL or sbx policy commands
+  allowlist [-format list|sbx]  the hosts a new sandbox may reach (base, INV_LAYERS, ~/.investigator/allowlist.yaml)
   ssh-setup [flags]  SSH keys and config for an sshd-based sandbox (sbx, checks/step1-docker.sh)`)
 	os.Exit(2)
 }
@@ -76,7 +91,7 @@ func main() {
 	case "ssh-setup":
 		sshSetup(os.Args[2:])
 	case "allowlist":
-		allowlist(os.Args[2:])
+		allowlistCmd(os.Args[2:])
 	case "setup":
 		if len(os.Args) != 2 {
 			usage()
@@ -86,14 +101,27 @@ func main() {
 		login(os.Args[2:])
 	case "logout":
 		logout(os.Args[2:])
+	case "image":
+		imageCmd(os.Args[2:])
 	case "uninstall":
 		uninstall(os.Args[2:])
+	case "cp":
+		cp(os.Args[2:])
 	case "up", "run", "down", "shell", "code", "open", "stop", "ssh-config", "denied", "rm":
-		dir := os.Args[1] == "code" || os.Args[1] == "open"
-		if len(os.Args) != 3 && (!dir || len(os.Args) != 4) {
+		cmd := os.Args[1]
+		args, specs := splitMounts(os.Args[2:])
+		dir := cmd == "code" || cmd == "open"
+		if len(args) != 1 && (!dir || len(args) != 2) {
 			usage()
 		}
-		sandboxCmd(os.Args[1], os.Args[2], os.Args[3:])
+		if len(specs) > 0 && cmd != "up" && cmd != "open" {
+			usage()
+		}
+		if len(specs) > 0 {
+			setRuntimePaths()
+			saveMounts(args[0], filepath.Join(stateRoot(), args[0]), specs)
+		}
+		sandboxCmd(cmd, args[0], args[1:])
 	default:
 		usage()
 	}
@@ -120,17 +148,17 @@ func sshSetup(args []string) {
 		fmt.Fprintln(os.Stderr, "ssh-setup: -name is required")
 		os.Exit(2)
 	}
-	p := cli.PathsFor(filepath.Join(*state, "sandboxes", *name))
-	if err := cli.GenerateKeys(p, *name); err != nil {
+	p := editor.PathsFor(filepath.Join(*state, "sandboxes", *name))
+	if err := editor.GenerateKeys(p, *name); err != nil {
 		fmt.Fprintln(os.Stderr, "ssh-setup:", err)
 		os.Exit(1)
 	}
-	e := cli.HostEntry{Alias: cli.HostAlias(*name), User: *user, ProxyCommand: *proxy, HostName: *host, Port: *port, Paths: p}
-	if err := cli.WriteConfig(e); err != nil {
+	e := editor.HostEntry{Alias: editor.HostAlias(*name), User: *user, ProxyCommand: *proxy, HostName: *host, Port: *port, Paths: p}
+	if err := editor.WriteConfig(e); err != nil {
 		fmt.Fprintln(os.Stderr, "ssh-setup:", err)
 		os.Exit(1)
 	}
-	vs, err := cli.WriteVSCodeSettings(filepath.Join(*state, "vscode"), p.Config, []string{e.Alias})
+	vs, err := editor.WriteVSCodeSettings(filepath.Join(*state, "vscode"), p.Config, []string{e.Alias})
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "ssh-setup:", err)
 		os.Exit(1)
@@ -140,35 +168,25 @@ func sshSetup(args []string) {
 		filepath.Join(*state, "vscode"), filepath.Join(*state, "vscode-ext"), e.Alias, *user)
 }
 
-// layerFlags collects repeated -layer flags.
-type layerFlags []string
-
-func (l *layerFlags) String() string     { return strings.Join(*l, ",") }
-func (l *layerFlags) Set(v string) error { *l = append(*l, v); return nil }
-
-func allowlist(args []string) {
+// allowlistCmd prints the hosts a new sandbox would reach: the base, the
+// INV_LAYERS files and the user's layer, less the hosts of the providers
+// you're logged in to (allowed).
+func allowlistCmd(args []string) {
 	fs := flag.NewFlagSet("allowlist", flag.ExitOnError)
-	profile := fs.String("profile", "investigator", "profile layer: "+strings.Join(filter.Profiles, " or "))
-	format := fs.String("format", "acl", "acl (the filter's ACL file) or sbx (sbx policy commands)")
-	var layers layerFlags
-	fs.Var(&layers, "layer", "an org or user layer file, in order (repeatable)")
+	format := fs.String("format", "list", "list (one host per line, with its layer and group) or sbx (sbx policy commands)")
 	_ = fs.Parse(args)
-	ls, err := filter.Layers(*profile, layers...)
+	es, err := allowed(brokerConfig())
 	if err == nil {
-		var es []filter.Entry
-		if es, err = filter.Compile(ls); err == nil {
-			switch *format {
-			case "acl":
-				fmt.Print(filter.FormatACL(es))
-			case "sbx":
-				fmt.Print(filter.FormatSbx(es))
-			default:
-				err = fmt.Errorf("unknown format %q", *format)
-			}
+		switch *format {
+		case "list":
+			fmt.Print(allowlist.Format(es))
+		case "sbx":
+			fmt.Print(allowlist.FormatSbx(es))
+		default:
+			err = fmt.Errorf("unknown format %q", *format)
 		}
 	}
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "allowlist:", err)
-		os.Exit(1)
+		fail("allowlist: %v", err)
 	}
 }

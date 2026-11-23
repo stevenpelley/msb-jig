@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# step1-docker.sh: prototype-plan.md step 1, against a Docker container
+# step1-docker.sh: docs/prototype-plan.md step 1, against a Docker container
 # standing in for the sandbox, with `docker exec -i ... nc localhost 22` in
 # place of `sbx exec`.
 #
@@ -26,7 +26,7 @@ cleanup() {
 trap cleanup EXIT
 
 if ! docker image inspect "$image" >/dev/null 2>&1; then
-  docker build -q -t "$image" "$here/sandbox" >/dev/null
+  docker build -q -t "$image" "$here/guest" >/dev/null
 fi
 docker run -d --name "$name" "$image" >/dev/null
 

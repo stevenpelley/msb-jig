@@ -1,0 +1,21 @@
+# The base layer: every sandbox gets it. sbx's balanced defaults, our own
+# groups, and the provider groups (dropped for providers the broker
+# serves). The broker isn't listed: the sandbox reaches *.broker.internal
+# over vsock, not the network.
+description: every sandbox
+groups:
+  - sbx-ai-services
+  - sbx-package-managers
+  - sbx-code-and-containers
+  - sbx-cloud-infrastructure
+  - sbx-os-packages
+  - sbx-cert-validation
+  - claude-code
+  - go
+  - terraform
+  - docs
+  - github-downloads
+  - anthropic
+  - github
+  - gitlab
+  - aws

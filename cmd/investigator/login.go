@@ -1,7 +1,7 @@
 package main
 
 // The user-facing commands: setup, login, logout, open, stop, uninstall
-// (investigator-design.md, "Install and uninstall"). They sit on the
+// (docs/design.md, "Install and uninstall"). They sit on the
 // sandbox commands in sandbox.go; up, down and rm stay for the checks.
 
 import (
@@ -21,14 +21,15 @@ import (
 
 	m "github.com/superradcompany/microsandbox/sdk/go"
 
-	"mcp-restrict/cli"
+	"mcp-restrict/editor"
 )
 
 // --- setup ---
 
 // setup checks the Mac for what investigator needs, writes the harness's
 // VS Code profile (settings, and the Remote-SSH extension in its own
-// extensions directory) and pulls the sandbox image.
+// extensions directory) and builds the base image (image.go), or pulls
+// plain Ubuntu without Docker or Podman.
 func setup() {
 	setRuntimePaths()
 	ok := true
@@ -63,7 +64,7 @@ func setup() {
 	if err := os.MkdirAll(root, 0o700); err != nil {
 		fail("%v", err)
 	}
-	if _, err := cli.WriteVSCodeSettings(data, filepath.Join(root, "ssh_config"), sshHosts(root)); err != nil {
+	if _, err := editor.WriteVSCodeSettings(data, filepath.Join(root, "ssh_config"), sshHosts(root)); err != nil {
 		fail("%v", err)
 	}
 	if hasCode {
@@ -77,8 +78,14 @@ func setup() {
 			ok = false
 		}
 	}
-	if ok {
-		image := env("INV_IMAGE", "ubuntu:26.04")
+	image, local := sandboxImage()
+	if e := imageEngine(""); ok && image == defaultImage && os.Getenv("INV_IMAGE") == "" && e != "" {
+		fmt.Println("building the base image with", e, "(investigator image build)")
+		image, local = buildImage(e, "", ""), true
+	} else if ok && image == defaultImage {
+		fmt.Println("no docker or podman: sandboxes start from plain Ubuntu and install everything at their first start")
+	}
+	if ok && !local {
 		fmt.Println("pulling", image)
 		c := exec.Command("msb", "pull", image)
 		c.Stdout, c.Stderr = os.Stdout, os.Stderr
@@ -89,7 +96,7 @@ func setup() {
 	if !ok {
 		fail("setup isn't complete: fix the missing pieces above and run it again")
 	}
-	fmt.Printf("set up in %s\nnext: investigator login gitlab|claude|aws, then investigator open <name>\n", root)
+	fmt.Printf("set up in %s\nnext: investigator login all, then investigator open <name>\n", root)
 }
 
 // --- login, logout ---
@@ -100,6 +107,11 @@ func login(args []string) {
 		return
 	}
 	switch args[0] {
+	case "all", "--all":
+		if len(args) != 1 {
+			usage()
+		}
+		loginAll()
 	case "gitlab":
 		loginGitLab(args[1:])
 	case "github":
@@ -114,17 +126,50 @@ func login(args []string) {
 	fmt.Println("sandboxes pick this up when they next start (investigator stop, then open)")
 }
 
+// loginAll asks about each provider in turn and logs in to those you
+// choose, with each login's defaults: the user from your glab or gh login,
+// and the AWS profiles chosen from a list.
+func loginAll() {
+	for _, p := range []struct {
+		name  string
+		login func([]string)
+	}{{"gitlab", loginGitLab}, {"github", loginGitHub}, {"claude", loginClaude}, {"aws", loginAWS}} {
+		if strings.EqualFold(ask("log in to "+p.name+"? [y/N] "), "y") {
+			p.login(nil)
+		}
+	}
+}
+
+// ask prints a prompt and reads one line from stdin. It reads a byte at
+// a time, so nothing typed after the line is taken from the commands
+// that run next (glab, gh, aws sso login).
+func ask(prompt string) string {
+	fmt.Print(prompt)
+	var b []byte
+	one := make([]byte, 1)
+	for {
+		n, err := os.Stdin.Read(one)
+		if n == 1 && one[0] != '\n' {
+			b = append(b, one[0])
+			continue
+		}
+		if n == 1 || err != nil {
+			return strings.TrimSpace(string(b))
+		}
+	}
+}
+
 func loginStatus() {
 	s := loadSettings()
 	if s.GitLab != nil {
 		fmt.Printf("gitlab  %s on %s, token from %s\n", s.GitLab.User, s.GitLab.URL, tokenSource(*s.GitLab))
 	} else {
-		fmt.Println("gitlab  not logged in (investigator login gitlab <user>)")
+		fmt.Println("gitlab  not logged in (investigator login gitlab)")
 	}
 	if s.GitHub != nil {
 		fmt.Printf("github  %s on github.com, token from %s\n", s.GitHub.User, githubTokenSource(*s.GitHub))
 	} else {
-		fmt.Println("github  not logged in (investigator login github <user>)")
+		fmt.Println("github  not logged in (investigator login github)")
 	}
 	if keychainHas(keychainClaude) {
 		fmt.Printf("claude  token in the Keychain (%s)\n", keychainClaude)
@@ -134,7 +179,7 @@ func loginStatus() {
 	if s.AWS != nil && len(s.AWS.Profiles) > 0 {
 		fmt.Printf("aws     profiles %s (the first is the default)\n", strings.Join(s.AWS.Profiles, " "))
 	} else {
-		fmt.Println("aws     not logged in (investigator login aws <profile>...)")
+		fmt.Println("aws     not logged in (investigator login aws)")
 	}
 }
 
@@ -147,7 +192,8 @@ func tokenSource(g gitlabSettings) string {
 
 // loginGitLab records the user the agent acts for, and where the broker
 // gets their token: glab's login on the Mac (logging in if needed), or a
-// token pasted into the Keychain. It checks the token belongs to the user.
+// token pasted into the Keychain. With no user given, the user is the
+// token's; given one, it checks the token belongs to them.
 func loginGitLab(args []string) {
 	var g gitlabSettings
 	g.URL, g.Token = "https://gitlab.com", "glab"
@@ -165,16 +211,18 @@ func loginGitLab(args []string) {
 			rest = append(rest, a)
 		}
 	}
-	if len(rest) != 1 || !gitlabUserRE.MatchString(rest[0]) {
+	if len(rest) > 1 || (len(rest) == 1 && !gitlabUserRE.MatchString(rest[0])) {
 		usage()
 	}
-	g.User = rest[0]
+	if len(rest) == 1 {
+		g.User = rest[0]
+	}
 	u, err := url.Parse(g.URL)
 	if err != nil || u.Scheme != "https" || u.Host == "" || u.Path != "" {
 		fail("--url: want https://host")
 	}
 	if g.Token == "keychain" {
-		tok := readSecret(fmt.Sprintf("a GitLab token for %s on %s (api scope; input hidden): ", g.User, u.Host))
+		tok := readSecret(fmt.Sprintf("a GitLab token on %s (api scope; input hidden): ", u.Host))
 		keychainStore(keychainGitLab, u.Host, tok)
 	} else {
 		if _, err := exec.LookPath("glab"); err != nil {
@@ -197,7 +245,9 @@ func loginGitLab(args []string) {
 	if err != nil {
 		fail("checking the token: %v", err)
 	}
-	if !strings.EqualFold(who, g.User) {
+	if g.User == "" {
+		g.User = who
+	} else if !strings.EqualFold(who, g.User) {
 		fail("the token belongs to %s, not %s", who, g.User)
 	}
 	s := loadSettings()
@@ -239,8 +289,8 @@ func githubTokenSource(g githubSettings) string {
 
 // loginGitHub records the github.com user the agent acts for, and where
 // the broker gets their token: gh's login on the Mac (logging in if
-// needed), or a token pasted into the Keychain. It checks the token
-// belongs to the user.
+// needed), or a token pasted into the Keychain. With no user given, the
+// user is the token's; given one, it checks the token belongs to them.
 func loginGitHub(args []string) {
 	g := githubSettings{Token: "gh"}
 	var rest []string
@@ -254,12 +304,14 @@ func loginGitHub(args []string) {
 			rest = append(rest, a)
 		}
 	}
-	if len(rest) != 1 || !githubUserRE.MatchString(rest[0]) {
+	if len(rest) > 1 || (len(rest) == 1 && !githubUserRE.MatchString(rest[0])) {
 		usage()
 	}
-	g.User = rest[0]
+	if len(rest) == 1 {
+		g.User = rest[0]
+	}
 	if g.Token == "keychain" {
-		tok := readSecret(fmt.Sprintf("a GitHub token for %s (repo scope, or a fine-grained token with contents, pull requests and actions; input hidden): ", g.User))
+		tok := readSecret("a GitHub token (repo scope, or a fine-grained token with contents, pull requests and actions; input hidden): ")
 		keychainStore(keychainGitHub, "github.com", tok)
 	} else {
 		if _, err := exec.LookPath("gh"); err != nil {
@@ -282,7 +334,9 @@ func loginGitHub(args []string) {
 	if err != nil {
 		fail("checking the token: %v", err)
 	}
-	if !strings.EqualFold(who, g.User) {
+	if g.User == "" {
+		g.User = who
+	} else if !strings.EqualFold(who, g.User) {
 		fail("the token belongs to %s, not %s", who, g.User)
 	}
 	s := loadSettings()
@@ -331,11 +385,9 @@ func loginClaude(args []string) {
 
 // loginAWS records the profiles for the AWS MCP proxy and runs aws sso
 // login for each that uses SSO. The profiles and the SSO cache are the
-// user's own, in ~/.aws (prototype-plan.md step 7).
+// user's own, in ~/.aws (docs/prototype-plan.md step 7). With no profiles
+// given, it lists yours and asks.
 func loginAWS(args []string) {
-	if len(args) == 0 {
-		usage()
-	}
 	if _, err := exec.LookPath("aws"); err != nil {
 		fail("the AWS CLI isn't installed: brew install awscli")
 	}
@@ -347,6 +399,16 @@ func loginAWS(args []string) {
 		fail("aws configure list-profiles: %v", err)
 	}
 	profiles := strings.Fields(string(out))
+	if len(args) == 0 {
+		if len(profiles) == 0 {
+			fail("no AWS profiles in your AWS config (aws configure sso)")
+		}
+		fmt.Println("your AWS profiles:\n  " + strings.Join(profiles, "\n  "))
+		args = strings.Fields(ask("profiles for the agent, the default first (space-separated): "))
+		if len(args) == 0 {
+			fail("no profiles chosen")
+		}
+	}
 	for _, p := range args {
 		if strings.HasPrefix(p, "-") {
 			usage()

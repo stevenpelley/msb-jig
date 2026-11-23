@@ -1,4 +1,0 @@
-# The investigator profile: narrow, because it runs unattended on alerts.
-# What tests need, and a short documentation list.
-description: the investigator (narrow)
-groups: [docker-hub, github-public, gitlab-public, go, node, python, aws-docs]

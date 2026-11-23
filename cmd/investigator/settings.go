@@ -17,6 +17,8 @@ type settings struct {
 	GitLab *gitlabSettings `json:"gitlab,omitempty"`
 	GitHub *githubSettings `json:"github,omitempty"`
 	AWS    *awsSettings    `json:"aws,omitempty"`
+	// Image is the image investigator image build made (image.go).
+	Image string `json:"image,omitempty"`
 }
 
 type gitlabSettings struct {

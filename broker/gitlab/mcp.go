@@ -1,0 +1,197 @@
+package gitlab
+
+import (
+	"encoding/json"
+	"net/url"
+	"regexp"
+	"strconv"
+	"strings"
+
+	"mcp-restrict/broker"
+	"mcp-restrict/broker/mcp"
+)
+
+// GitLab's MCP server calls GitLab's API from GitLab's side, where the
+// routes in routes.go can't see it, so the broker decides each tool call
+// from its name and arguments (docs/design.md, "Hosted MCP servers: filter
+// tool calls"). tools/list is filtered to the tools below; any other tool
+// is denied.
+
+// readTools only read; they pass by name.
+var readTools = []string{
+	"get_artifact_file", "get_commit", "get_group", "get_job", "get_mcp_server_version",
+	"get_merge_request", "get_pages_content", "get_pipeline", "get_project", "get_repository_file",
+	"get_saved_view_work_items", "get_user", "get_work_item", "get_work_item_types",
+	"list_branches", "list_commits", "list_groups", "list_merge_requests", "list_milestones",
+	"list_pipeline_schedules", "list_pipelines", "list_project_members", "list_projects",
+	"list_releases", "list_repository_tree", "list_tags", "list_todos", "list_user_events",
+	"list_work_item_saved_views", "list_work_items", "search", "search_labels", "semantic_search",
+}
+
+// toolCheck decides one call of a writing tool from its arguments.
+type toolCheck func(g *gitlab, c *broker.Call, a *toolArgs) broker.Decision
+
+// writeTools are checked with their arguments.
+var writeTools = map[string]toolCheck{
+	"save_merge_request":        (*gitlab).saveMergeRequest,
+	"save_note":                 (*gitlab).saveNote,
+	"save_merge_request_review": (*gitlab).saveNote,
+	"add_commit":                (*gitlab).addToBranch,
+	"add_branch":                (*gitlab).addToBranch,
+}
+
+func (g *gitlab) toolListed(name string) bool {
+	return writeTools[name] != nil || isReadTool(name)
+}
+
+func isReadTool(name string) bool {
+	for _, t := range readTools {
+		if t == name {
+			return true
+		}
+	}
+	return false
+}
+
+// mcpCall checks one MCP request.
+func (g *gitlab) mcpCall(c *broker.Call) broker.Decision {
+	m, d := mcp.Read(c)
+	if !d.Allow {
+		return d
+	}
+	switch m.Method {
+	case "tools/list":
+		c.Rewrite(mcp.FilterToolsList(g.toolListed))
+		return broker.Allow()
+	case "tools/call":
+	default:
+		return broker.Allow() // initialize, ping, notifications
+	}
+	var call mcp.ToolCall
+	if err := json.Unmarshal(m.Params, &call); err != nil {
+		return broker.Deny("bad tools/call params")
+	}
+	mcp.DenyAsTool(c, m.ID, call.Name)
+	c.Note("tool", call.Name)
+	switch {
+	case isReadTool(call.Name):
+		return broker.Allow()
+	case call.Name == "accept_merge_request":
+		return broker.Deny(neverMerge)
+	case writeTools[call.Name] == nil:
+		return broker.Deny("the GitLab MCP tool %s isn't on the broker's list", call.Name)
+	}
+	var a toolArgs
+	if len(call.Arguments) > 0 {
+		if err := json.Unmarshal(call.Arguments, &a); err != nil {
+			return broker.Deny("bad arguments")
+		}
+	}
+	c.Note("repo", rawString(a.ProjectID))
+	return writeTools[call.Name](g, c, &a)
+}
+
+// toolArgs is the union of the arguments the write tools take.
+type toolArgs struct {
+	ProjectID       json.RawMessage `json:"project_id"`
+	URL             string          `json:"url"`
+	MergeRequestIID json.RawMessage `json:"merge_request_iid"`
+	WorkItemIID     json.RawMessage `json:"work_item_iid"`
+	GroupID         string          `json:"group_id"`
+	Title           *string         `json:"title"`
+	SourceBranch    *string         `json:"source_branch"`
+	TargetProjectID json.RawMessage `json:"target_project_id"`
+	Branch          *string         `json:"branch"`
+	StartProject    string          `json:"start_project"`
+	Method          string          `json:"method"`
+}
+
+// saveMergeRequest creates (no merge_request_iid) or updates one.
+func (g *gitlab) saveMergeRequest(c *broker.Call, a *toolArgs) broker.Decision {
+	iid := rawString(a.MergeRequestIID)
+	if iid == "" {
+		if len(a.TargetProjectID) > 0 && string(a.TargetProjectID) != "null" {
+			return broker.Deny("merge requests into another project aren't allowed")
+		}
+		var src string
+		if a.SourceBranch != nil {
+			src = *a.SourceBranch
+		}
+		return broker.All(broker.AgentBranch(g.User, src), broker.TaggedTitle(g.User, a.Title, true))
+	}
+	pid := rawString(a.ProjectID)
+	var source *string
+	if pid != "" {
+		source = g.mrSource(c, pid, iid)
+	}
+	return broker.All(broker.ExistingFromAgentBranch(g.User, source), broker.TaggedTitle(g.User, a.Title, false))
+}
+
+// saveNote comments on or reviews a merge request from an agent branch;
+// never approves.
+func (g *gitlab) saveNote(c *broker.Call, a *toolArgs) broker.Decision {
+	switch a.Method {
+	case "approve", "unapprove":
+		return broker.Deny(neverApprove)
+	case "post_duo_review":
+		return broker.Deny("post_duo_review isn't on the broker's list")
+	}
+	pid, iid, ok := g.mrTarget(a)
+	if !ok {
+		return broker.Deny("notes on anything but a merge request aren't on the broker's list")
+	}
+	c.Note("repo", pid)
+	return broker.ExistingFromAgentBranch(g.User, g.mrSource(c, pid, iid))
+}
+
+// addToBranch commits to or creates a branch: an agent branch, in the
+// same project.
+func (g *gitlab) addToBranch(_ *broker.Call, a *toolArgs) broker.Decision {
+	if a.StartProject != "" {
+		return broker.Deny("start_project isn't allowed")
+	}
+	var b string
+	if a.Branch != nil {
+		b = *a.Branch
+	}
+	return broker.AgentBranch(g.User, b)
+}
+
+var mrURLRE = regexp.MustCompile(`^/(.+?)/-/merge_requests/([0-9]+)/?$`)
+
+// mrTarget finds the merge request a note or review names: url, or
+// project_id with merge_request_iid. ok is false if it names anything else.
+func (g *gitlab) mrTarget(a *toolArgs) (pid, iid string, ok bool) {
+	if a.URL != "" {
+		u, err := url.Parse(a.URL)
+		if err != nil || !strings.EqualFold(u.Host, g.Upstream.Host) {
+			return "", "", false
+		}
+		m := mrURLRE.FindStringSubmatch(u.Path)
+		if m == nil {
+			return "", "", false
+		}
+		return m[1], m[2], true
+	}
+	pid, iid = rawString(a.ProjectID), rawString(a.MergeRequestIID)
+	if pid == "" || iid == "" || len(a.WorkItemIID) > 0 || a.GroupID != "" {
+		return "", "", false
+	}
+	if _, err := strconv.ParseUint(iid, 10, 64); err != nil {
+		return "", "", false
+	}
+	return pid, iid, true
+}
+
+// rawString accepts a JSON string or number (project and MR ids come as either).
+func rawString(r json.RawMessage) string {
+	var s string
+	if json.Unmarshal(r, &s) == nil {
+		return s
+	}
+	var n json.Number
+	if json.Unmarshal(r, &n) == nil {
+		return n.String()
+	}
+	return ""
+}

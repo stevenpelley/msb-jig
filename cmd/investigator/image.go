@@ -1,0 +1,245 @@
+package main
+
+import (
+	"crypto/sha256"
+	"encoding/hex"
+	"errors"
+	"flag"
+	"fmt"
+	"io"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime"
+	"strconv"
+	"time"
+
+	"mcp-restrict/guest"
+)
+
+// Sandbox images. investigator image build builds, with Docker or Podman
+// on the Mac:
+//
+//   - the base image, localhost/investigator-base:<hash>, from the
+//     Dockerfile and provision.sh embedded in this binary
+//     (guest/image.Dockerfile): Ubuntu with provision.sh's parts that depend
+//     only on the image (imageComponents: packages, the agent user, git,
+//     gh, glab, Docker, Claude Code). The engine caches it, so it's rebuilt
+//     only when provision.sh changes;
+//   - then, with -f, your Dockerfile on top of it (FROM
+//     $INVESTIGATOR_BASE, passed as a build argument).
+//
+// It loads the result into microsandbox's image cache (msb load) and
+// records it in settings.json; new sandboxes start from it. Their first
+// start runs only what the image doesn't have (firstComponents): the
+// broker's CA and settings, and Claude's and AWS's. A plain image
+// (INV_IMAGE=ubuntu:26.04) still works, with everything installed at the
+// first start. A sandbox keeps the image it was created from: investigator
+// rm, then open, to move one to a new image.
+
+const defaultImage = "ubuntu:26.04"
+
+// sandboxImage is the image new sandboxes start from: INV_IMAGE, else the
+// last image investigator image build made, else plain Ubuntu. local is
+// true for a built image, which msb can't pull.
+func sandboxImage() (ref string, local bool) {
+	if v := os.Getenv("INV_IMAGE"); v != "" {
+		return v, false
+	}
+	if s := loadSettings(); s.Image != "" {
+		return s.Image, true
+	}
+	return defaultImage, false
+}
+
+const starterDockerfile = `# Your sandbox image, on top of investigator's base: Ubuntu with the agent
+# user, git, gh, glab, Docker and Claude Code. Build it with
+#   investigator image build -f <this file>
+# which builds the base first and passes it in. Hosts your tools need at
+# run time go in ~/.investigator/allowlist.yaml.
+ARG INVESTIGATOR_BASE
+FROM ${INVESTIGATOR_BASE}
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends \
+      ripgrep \
+ && rm -rf /var/lib/apt/lists/*
+`
+
+func imageCmd(args []string) {
+	if len(args) == 0 {
+		usage()
+	}
+	switch args[0] {
+	case "init":
+		imageInit(args[1:])
+	case "build":
+		imageBuild(args[1:])
+	case "show":
+		ref, _ := sandboxImage()
+		fmt.Println(ref)
+	case "reset":
+		s := loadSettings()
+		s.Image = ""
+		saveSettings(s)
+		fmt.Println("new sandboxes start from", defaultImage, "(everything installed at the first start)")
+	default:
+		usage()
+	}
+}
+
+// imageInit writes a starter Dockerfile.
+func imageInit(args []string) {
+	path := "Dockerfile"
+	if len(args) == 1 {
+		path = args[0]
+	} else if len(args) > 1 {
+		usage()
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		fail("%v", err)
+	}
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
+	if errors.Is(err, os.ErrExist) {
+		fail("%s exists; not overwriting it", path)
+	} else if err != nil {
+		fail("%v", err)
+	}
+	if _, err := f.WriteString(starterDockerfile); err != nil {
+		fail("%v", err)
+	}
+	if err := f.Close(); err != nil {
+		fail("%v", err)
+	}
+	fmt.Printf("wrote %s; add your tools, then: investigator image build -f %s\n", path, path)
+}
+
+func imageBuild(args []string) {
+	fs := flag.NewFlagSet("image build", flag.ExitOnError)
+	file := fs.String("f", "", "your Dockerfile, FROM $INVESTIGATOR_BASE (default: the base image alone)")
+	engine := fs.String("engine", "", "docker or podman (default: whichever is installed, docker first)")
+	_ = fs.Parse(args)
+	ctxDir := filepath.Dir(*file)
+	switch {
+	case fs.NArg() == 1 && *file != "":
+		ctxDir = fs.Arg(0)
+	case fs.NArg() != 0:
+		usage()
+	}
+	e := imageEngine(*engine)
+	if e == "" {
+		fail("neither docker nor podman is installed")
+	}
+	tag := buildImage(e, *file, ctxDir)
+	fmt.Printf("new sandboxes start from %s\n(an existing sandbox keeps its image: investigator rm <name>, then open, to move it)\n", tag)
+}
+
+// imageEngine is the engine to build with: the one named, else docker or
+// podman, whichever is installed; "" if none.
+func imageEngine(named string) string {
+	if named != "" {
+		if named != "docker" && named != "podman" {
+			fail("-engine: docker or podman")
+		}
+		return named
+	}
+	for _, e := range []string{"docker", "podman"} {
+		if _, err := exec.LookPath(e); err == nil {
+			return e
+		}
+	}
+	return ""
+}
+
+// buildImage builds the base image, then file on it if there is one,
+// loads the result into microsandbox and records it.
+func buildImage(engine, file, ctxDir string) string {
+	setRuntimePaths()
+	tag := buildBase(engine)
+	if file != "" {
+		// A new tag each build: sandboxes made from an earlier build keep it.
+		tag = "localhost/investigator:" + time.Now().Format("20060102-150405")
+		runCmd(engine, "build", "--platform", "linux/"+runtime.GOARCH,
+			"--build-arg", "INVESTIGATOR_BASE="+baseTag(),
+			"-t", tag, "-f", file, ctxDir)
+	}
+	if exec.Command("msb", "image", "inspect", tag).Run() == nil {
+		fmt.Println(tag, "is already in microsandbox's cache")
+	} else {
+		fmt.Printf("%s save %s | msb load -t %s\n", engine, tag, tag)
+		if err := pipe(exec.Command(engine, "save", tag), exec.Command("msb", "load", "-t", tag)); err != nil {
+			fail("loading the image into microsandbox: %v", err)
+		}
+	}
+	s := loadSettings()
+	s.Image = tag
+	saveSettings(s)
+	return tag
+}
+
+// baseArgs are the base image's build arguments.
+func baseArgs() []string {
+	return []string{
+		"SANDBOX_USER=" + guestUser,
+		"SANDBOX_UID=" + strconv.Itoa(guestUID),
+		"PROVISION_COMPONENTS=" + imageComponents,
+		"PROVISION_HASH=" + guest.ProvisionHash(),
+	}
+}
+
+// baseTag names the base image by everything it's built from.
+func baseTag() string {
+	h := sha256.New()
+	for _, s := range append([]string{guest.ImageDockerfile, guest.ProvisionScript}, baseArgs()...) {
+		fmt.Fprintf(h, "%d:%s", len(s), s)
+	}
+	return "localhost/investigator-base:" + hex.EncodeToString(h.Sum(nil)[:6])
+}
+
+// buildBase builds the base image from the embedded Dockerfile and
+// provision.sh, in a temporary context directory.
+func buildBase(engine string) string {
+	dir, err := os.MkdirTemp("", "investigator-base-")
+	if err != nil {
+		fail("%v", err)
+	}
+	defer os.RemoveAll(dir)
+	for name, body := range map[string]string{"Dockerfile": guest.ImageDockerfile, "provision.sh": guest.ProvisionScript} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o644); err != nil {
+			fail("%v", err)
+		}
+	}
+	tag := baseTag()
+	a := []string{"build", "--platform", "linux/" + runtime.GOARCH, "-t", tag}
+	for _, b := range baseArgs() {
+		a = append(a, "--build-arg", b)
+	}
+	runCmd(engine, append(a, dir)...)
+	return tag
+}
+
+// runCmd runs a command with our output, and fails if it does.
+func runCmd(name string, args ...string) {
+	c := exec.Command(name, args...)
+	c.Stdout, c.Stderr = os.Stdout, os.Stderr
+	fmt.Println(c.String())
+	if err := c.Run(); err != nil {
+		fail("%s %s: %v", name, args[0], err)
+	}
+}
+
+// pipe runs a | b, with a's stdout into b's stdin and both stderrs ours.
+func pipe(a, b *exec.Cmd) error {
+	r, w := io.Pipe()
+	a.Stdout, a.Stderr = w, os.Stderr
+	b.Stdin, b.Stdout, b.Stderr = r, os.Stdout, os.Stderr
+	if err := b.Start(); err != nil {
+		return err
+	}
+	errA := a.Run()
+	w.CloseWithError(errA)
+	errB := b.Wait()
+	if errA != nil {
+		return fmt.Errorf("%s: %w", a.Args[0], errA)
+	}
+	return errB
+}
