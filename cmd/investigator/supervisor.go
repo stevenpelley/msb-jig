@@ -134,7 +134,7 @@ func brokerConfig() providers.Config {
 	b.GitLabURL = env("INV_GITLAB_URL", gl.URL)
 	if user != "" {
 		u, err := url.Parse(b.GitLabURL)
-		if err != nil || u.Host == "" {
+		if err != nil || u.Scheme != "https" || u.Host == "" {
 			fail("the GitLab URL %q: want https://host", b.GitLabURL)
 		}
 		b.GitLabTokenCmd = env("INV_GITLAB_TOKEN_COMMAND", gitlabTokenCommand(gl, u.Host))

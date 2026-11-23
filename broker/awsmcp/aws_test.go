@@ -1,4 +1,4 @@
-package awsmcp
+package awsmcp_test
 
 import (
 	"bufio"
@@ -17,7 +17,12 @@ import (
 	"log/slog"
 
 	"mcp-restrict/broker"
+	"mcp-restrict/broker/awsmcp"
+	"mcp-restrict/broker/providers"
 )
+
+// awsProtocolVersion is what the broker asks the proxy for (bridge.go).
+const awsProtocolVersion = "2025-06-18"
 
 // The fake AWS MCP proxy: this test binary, run with FAKE_AWS_MCP=1. It
 // answers initialize and tools/list; tools/call "echo" returns its
@@ -87,18 +92,18 @@ func awsBroker(t *testing.T) *httptest.Server {
 		t.Fatal(err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	a, err := New(ctx, Config{Command: "env FAKE_AWS_MCP=1 " + exe, State: t.TempDir(), Log: slog.New(slog.DiscardHandler)})
+	ps, err := providers.Build(ctx, providers.Config{AWSMCPCommand: "env FAKE_AWS_MCP=1 " + exe}, t.TempDir(), slog.New(slog.DiscardHandler))
 	if err != nil {
 		t.Fatal(err)
 	}
-	srv := httptest.NewServer(&broker.Server{Providers: map[string]http.Handler{"aws.broker.internal": a}})
+	srv := httptest.NewServer(&broker.Server{Providers: ps})
 	t.Cleanup(func() { srv.Close(); cancel() })
 	return srv
 }
 
 func awsPost(t *testing.T, srv *httptest.Server, body string) (map[string]any, *http.Response) {
 	t.Helper()
-	req, _ := http.NewRequest("POST", srv.URL+Path, strings.NewReader(body))
+	req, _ := http.NewRequest("POST", srv.URL+awsmcp.Path, strings.NewReader(body))
 	req.Host = "aws.broker.internal"
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := http.DefaultClient.Do(req)
@@ -198,7 +203,7 @@ func TestAWSMCPRefusals(t *testing.T) {
 			t.Errorf("%s: not refused: %v", body, out)
 		}
 	}
-	req, _ := http.NewRequest("GET", srv.URL+Path, nil)
+	req, _ := http.NewRequest("GET", srv.URL+awsmcp.Path, nil)
 	req.Host = "aws.broker.internal"
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {

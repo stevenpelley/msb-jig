@@ -1,6 +1,7 @@
-package github
+package github_test
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -12,6 +13,7 @@ import (
 
 	"mcp-restrict/broker"
 	"mcp-restrict/broker/brokertest"
+	"mcp-restrict/broker/providers"
 )
 
 const ghHost = "github.broker.internal"
@@ -21,8 +23,12 @@ func serve(t *testing.T, git, api *url.URL, client *http.Client) (addr, caFile s
 	if client == nil {
 		client = broker.NewUpstreamClient()
 	}
-	return brokertest.Serve(t, ghHost, New(Config{User: brokertest.User, Token: brokertest.TokenFunc,
-		Git: git, API: api, Public: brokertest.Public(ghHost), Client: client}))
+	ps, err := providers.Build(context.Background(), providers.Config{GitHubUser: brokertest.User,
+		GitHubTokenCmd: brokertest.TokenCmd, GitHubURL: git.String(), GitHubAPIURL: api.String(), Client: client}, "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return brokertest.Serve(t, ghHost, ps[ghHost])
 }
 
 func gitEnv(t *testing.T) *brokertest.GitEnv {
@@ -91,7 +97,7 @@ func (f *fakeGitHub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			Variables map[string]any `json:"variables"`
 		}
 		_ = json.Unmarshal(b, &q)
-		if q.Query == nodePRQuery {
+		if strings.Contains(q.Query, "node(id: $id)") {
 			node := map[string]any{
 				"PR_agent":     map[string]any{"headRefName": "agent/alice/x", "isCrossRepository": false},
 				"PR_human":     map[string]any{"headRefName": "feature", "isCrossRepository": false},

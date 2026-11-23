@@ -12,7 +12,7 @@ import (
 )
 
 // GitLab's MCP server calls GitLab's API from GitLab's side, where the
-// routes in routes.go can't see it, so the broker decides each tool call
+// REST routes (routes.go) can't see it, so the broker decides each tool call
 // from its name and arguments (docs/design.md, "Hosted MCP servers: filter
 // tool calls"). tools/list is filtered to the tools below; any other tool
 // is denied.
@@ -29,18 +29,18 @@ var readTools = []string{
 }
 
 // toolCheck decides one call of a writing tool from its arguments.
-type toolCheck func(g *gitlab, c *broker.Call, a *toolArgs) broker.Decision
+type toolCheck func(g *Checks, c *broker.Call, a *toolArgs) broker.Decision
 
 // writeTools are checked with their arguments.
 var writeTools = map[string]toolCheck{
-	"save_merge_request":        (*gitlab).saveMergeRequest,
-	"save_note":                 (*gitlab).saveNote,
-	"save_merge_request_review": (*gitlab).saveNote,
-	"add_commit":                (*gitlab).addToBranch,
-	"add_branch":                (*gitlab).addToBranch,
+	"save_merge_request":        (*Checks).saveMergeRequest,
+	"save_note":                 (*Checks).saveNote,
+	"save_merge_request_review": (*Checks).saveNote,
+	"add_commit":                (*Checks).addToBranch,
+	"add_branch":                (*Checks).addToBranch,
 }
 
-func (g *gitlab) toolListed(name string) bool {
+func (g *Checks) toolListed(name string) bool {
 	return writeTools[name] != nil || isReadTool(name)
 }
 
@@ -53,8 +53,8 @@ func isReadTool(name string) bool {
 	return false
 }
 
-// mcpCall checks one MCP request.
-func (g *gitlab) mcpCall(c *broker.Call) broker.Decision {
+// MCPCall checks one MCP request.
+func (g *Checks) MCPCall(c *broker.Call) broker.Decision {
 	m, d := mcp.Read(c)
 	if !d.Allow {
 		return d
@@ -77,7 +77,7 @@ func (g *gitlab) mcpCall(c *broker.Call) broker.Decision {
 	case isReadTool(call.Name):
 		return broker.Allow()
 	case call.Name == "accept_merge_request":
-		return broker.Deny(neverMerge)
+		return broker.Deny(broker.NeverMerge)
 	case writeTools[call.Name] == nil:
 		return broker.Deny("the GitLab MCP tool %s isn't on the broker's list", call.Name)
 	}
@@ -107,7 +107,7 @@ type toolArgs struct {
 }
 
 // saveMergeRequest creates (no merge_request_iid) or updates one.
-func (g *gitlab) saveMergeRequest(c *broker.Call, a *toolArgs) broker.Decision {
+func (g *Checks) saveMergeRequest(c *broker.Call, a *toolArgs) broker.Decision {
 	iid := rawString(a.MergeRequestIID)
 	if iid == "" {
 		if len(a.TargetProjectID) > 0 && string(a.TargetProjectID) != "null" {
@@ -129,10 +129,10 @@ func (g *gitlab) saveMergeRequest(c *broker.Call, a *toolArgs) broker.Decision {
 
 // saveNote comments on or reviews a merge request from an agent branch;
 // never approves.
-func (g *gitlab) saveNote(c *broker.Call, a *toolArgs) broker.Decision {
+func (g *Checks) saveNote(c *broker.Call, a *toolArgs) broker.Decision {
 	switch a.Method {
 	case "approve", "unapprove":
-		return broker.Deny(neverApprove)
+		return broker.Deny(broker.NeverApprove)
 	case "post_duo_review":
 		return broker.Deny("post_duo_review isn't on the broker's list")
 	}
@@ -146,7 +146,7 @@ func (g *gitlab) saveNote(c *broker.Call, a *toolArgs) broker.Decision {
 
 // addToBranch commits to or creates a branch: an agent branch, in the
 // same project.
-func (g *gitlab) addToBranch(_ *broker.Call, a *toolArgs) broker.Decision {
+func (g *Checks) addToBranch(_ *broker.Call, a *toolArgs) broker.Decision {
 	if a.StartProject != "" {
 		return broker.Deny("start_project isn't allowed")
 	}
@@ -161,10 +161,10 @@ var mrURLRE = regexp.MustCompile(`^/(.+?)/-/merge_requests/([0-9]+)/?$`)
 
 // mrTarget finds the merge request a note or review names: url, or
 // project_id with merge_request_iid. ok is false if it names anything else.
-func (g *gitlab) mrTarget(a *toolArgs) (pid, iid string, ok bool) {
+func (g *Checks) mrTarget(a *toolArgs) (pid, iid string, ok bool) {
 	if a.URL != "" {
 		u, err := url.Parse(a.URL)
-		if err != nil || !strings.EqualFold(u.Host, g.Upstream.Host) {
+		if err != nil || !strings.EqualFold(u.Host, g.API.URL.Host) {
 			return "", "", false
 		}
 		m := mrURLRE.FindStringSubmatch(u.Path)

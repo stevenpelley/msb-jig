@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"mcp-restrict/broker"
-	"mcp-restrict/broker/gitlab"
+	"mcp-restrict/broker/providers"
 )
 
 // sbx mode: plain HTTP, Host host.docker.internal:<port>, a session
@@ -23,10 +23,8 @@ func TestSbxMode(t *testing.T) {
 		w.WriteHeader(http.StatusFound)
 	}))
 	t.Cleanup(up.Close)
-	u, _ := url.Parse(up.URL)
 	pub := &url.URL{Scheme: "http", Host: "host.docker.internal:18443"}
-	p := gitlab.New(gitlab.Config{User: "alice", Token: func() (string, error) { return tok, nil }, Upstream: u,
-		Public: pub, Client: broker.NewUpstreamClient()})
+	p := build(providers.Config{GitLabUser: "alice", GitLabURL: up.URL, GitLabTokenCmd: "echo " + tok}, pub, nil)[providers.GitLabHost]
 	srv := httptest.NewServer(sessionCheck("s3ssion", &broker.Server{Providers: map[string]http.Handler{pub.Hostname(): p}}))
 	t.Cleanup(srv.Close)
 	c := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}

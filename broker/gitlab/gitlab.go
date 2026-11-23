@@ -1,16 +1,15 @@
 // Package gitlab is the broker's GitLab provider, served as
 // gitlab.broker.internal: git smart HTTP, LFS, REST v4, GraphQL and
 // GitLab's hosted MCP server, forwarded to one GitLab (gitlab.com by
-// default) with the user's token. routes.go lists every request it serves.
+// default) with the user's token. Its routes are in routes.go;
+// here are their checks.
 package gitlab
 
 import (
 	"bytes"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
-	"log/slog"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -19,71 +18,26 @@ import (
 	"mcp-restrict/broker"
 )
 
-// Config configures the provider.
-type Config struct {
-	User     string                 // the GitLab user the agent acts for
-	Token    func() (string, error) // the user's token (glab's login, or the Keychain)
-	MCPToken func() (string, error) // for the MCP endpoint, if not Token (fine-grained PAT)
-	Upstream *url.URL               // https://gitlab.com
-	Public   *url.URL               // https://gitlab.broker.internal (sbx: http://host.docker.internal:<port>)
-	Client   *http.Client           // broker.NewUpstreamClient()
-	Log      *slog.Logger
-}
-
-type gitlab struct {
-	Config
-	git, api, mcp *broker.Upstream
-}
-
-// New returns the provider.
-func New(c Config) *broker.Provider {
-	g := &gitlab{Config: c}
-	up := func(auth func(http.Header) error) *broker.Upstream {
-		return &broker.Upstream{URL: c.Upstream, Auth: auth, Public: c.Public, Client: c.Client,
-			NoCredential: "no GitLab credential: run investigator login gitlab"}
-	}
-	// git and LFS: HTTP Basic, user and token, as git sends it.
-	g.git = up(func(h http.Header) error {
-		tok, err := c.Token()
-		if err != nil {
-			return err
-		}
-		h.Set("Authorization", "Basic "+base64.StdEncoding.EncodeToString([]byte(c.User+":"+tok)))
-		return nil
-	})
-	// REST and GraphQL: the token as a Bearer token, which GitLab takes for
-	// PATs and OAuth tokens alike (PRIVATE-TOKEN takes only PATs, so glab's
-	// OAuth token got 401 there).
-	g.api = up(func(h http.Header) error { return bearer(h, c.Token) })
-	// The MCP server: its own token if there is one.
-	mcpTok := c.Token
-	if c.MCPToken != nil {
-		mcpTok = c.MCPToken
-	}
-	g.mcp = up(func(h http.Header) error { return bearer(h, mcpTok) })
-	return &broker.Provider{Name: "gitlab", Routes: g.routes(), Log: c.Log}
-}
-
-func bearer(h http.Header, tok func() (string, error)) error {
-	t, err := tok()
-	if err != nil {
-		return err
-	}
-	h.Set("Authorization", "Bearer "+t)
-	return nil
+// Checks are the GitLab provider's checks, which the routes (routes.go)
+// run. API is the REST upstream: lookups go through it, with
+// the user's credential, and LFS links are rewritten from its URL to its
+// Public one.
+type Checks struct {
+	User string // the GitLab user the agent acts for
+	API  *broker.Upstream
 }
 
 // --- lookups: what the provider says, never what the request claims ---
 
 // get calls the REST API with the user's token and decodes a 200 into v.
-func (g *gitlab) get(c *broker.Call, path, rawPath string, v any) bool {
-	u := *g.Upstream
+func (g *Checks) get(c *broker.Call, path, rawPath string, v any) bool {
+	u := *g.API.URL
 	u.Path, u.RawPath = path, rawPath
 	q, err := http.NewRequestWithContext(c.R.Context(), http.MethodGet, u.String(), nil)
-	if err != nil || g.api.Auth(q.Header) != nil {
+	if err != nil || g.API.Auth(q.Header) != nil {
 		return false
 	}
-	resp, err := g.Client.Do(q)
+	resp, err := g.API.Client.Do(q)
 	if err != nil {
 		return false
 	}
@@ -93,7 +47,7 @@ func (g *gitlab) get(c *broker.Call, path, rawPath string, v any) bool {
 
 // mrSource fetches a merge request's source branch. A fork's comes back as
 // "fork:<branch>", which never passes the policy. nil if the lookup failed.
-func (g *gitlab) mrSource(c *broker.Call, pid, iid string) *string {
+func (g *Checks) mrSource(c *broker.Call, pid, iid string) *string {
 	var mr struct {
 		SourceBranch    string `json:"source_branch"`
 		SourceProjectID int64  `json:"source_project_id"`
@@ -113,7 +67,7 @@ func (g *gitlab) mrSource(c *broker.Call, pid, iid string) *string {
 // project pid (a path or an ID). glab sends target_project_id as a number
 // while the URL names the project by path, so the path's ID is looked up.
 // Anything that can't be resolved counts as another project.
-func (g *gitlab) sameProject(c *broker.Call, pid, target string) bool {
+func (g *Checks) sameProject(c *broker.Call, pid, target string) bool {
 	if target == pid {
 		return true
 	}
@@ -190,10 +144,10 @@ func opt(p map[string]string, k string) *string {
 
 // --- responses ---
 
-// rewriteLFSBatch points every LFS action on the upstream host back
+// RewriteLFSBatch points every LFS action on the upstream host back
 // through the broker and removes the actions' headers, which carry
 // GitLab's short-lived LFS token.
-func (g *gitlab) rewriteLFSBatch(resp *http.Response) (io.Reader, error) {
+func (g *Checks) RewriteLFSBatch(resp *http.Response) (io.Reader, error) {
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, 16<<20))
 	if err != nil {
 		return nil, err
@@ -213,8 +167,8 @@ func (g *gitlab) rewriteLFSBatch(resp *http.Response) (io.Reader, error) {
 			}
 			delete(am, "header")
 			if href, _ := am["href"].(string); href != "" {
-				if u, err := url.Parse(href); err == nil && strings.EqualFold(u.Host, g.Upstream.Host) {
-					u.Scheme, u.Host = g.Public.Scheme, g.Public.Host
+				if u, err := url.Parse(href); err == nil && strings.EqualFold(u.Host, g.API.URL.Host) {
+					u.Scheme, u.Host = g.API.Public.Scheme, g.API.Public.Host
 					am["href"] = u.String()
 				}
 			}

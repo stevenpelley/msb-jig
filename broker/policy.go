@@ -33,6 +33,12 @@ func Any(*Call) Decision { return Allow() }
 // denial says why.
 func Never(reason string) Check { return func(*Call) Decision { return Deny("%s", reason) } }
 
+// The reasons merging and approving are denied, on every provider.
+const (
+	NeverMerge   = "merging is never allowed through the broker; a human merges"
+	NeverApprove = "approving is never allowed through the broker"
+)
+
 // Namespace is the branch prefix the agent may write under.
 func Namespace(user string) string { return "agent/" + user + "/" }
 

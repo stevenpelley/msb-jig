@@ -7,45 +7,48 @@
 package anthropic
 
 import (
-	"log/slog"
 	"net/http"
-	"net/url"
 	"strings"
 
 	"mcp-restrict/broker"
 )
 
-// Config configures the provider.
-type Config struct {
-	// Token returns the user's credential: an OAuth token from
-	// `claude setup-token` (sk-ant-oat…), sent as a Bearer token, or an API
-	// key, sent as x-api-key.
-	Token  func() (string, error)
-	API    *url.URL // https://api.anthropic.com
-	Public *url.URL // https://anthropic.broker.internal
-	Client *http.Client
-	Log    *slog.Logger
-}
+// Routes is every request the Anthropic provider serves: its upstream,
+// with the user's credential, then its routes. No per-request rules.
+func Routes(up broker.Upstreams, c Config) []broker.Route {
+	api := up.To(c.api(), auth(c.Token))
 
-// New returns the provider. Every request it serves:
-//
-//	any method  /v1/…   -> api.anthropic.com, with the credential
-//	any method  /api/…  -> api.anthropic.com, with the credential
-func New(c Config) *broker.Provider {
-	api := &broker.Upstream{URL: c.API, Public: c.Public, Client: c.Client,
-		NoCredential: "no Claude credential: run investigator login claude",
-		Auth: func(h http.Header) error {
-			tok, err := c.Token()
-			if err != nil {
-				return err
-			}
-			setAuth(h, tok)
-			return nil
-		}}
-	return &broker.Provider{Name: "anthropic", Log: c.Log, Routes: []broker.Route{
+	return []broker.Route{
 		{Method: "*", Path: "/v1/{path...}", Op: "anthropic.call", Check: broker.Any, To: api},
 		{Method: "*", Path: "/api/{path...}", Op: "anthropic.call", Check: broker.Any, To: api},
-	}}
+	}
+}
+
+// Config is what the provider needs from investigator login.
+type Config struct {
+	Token  broker.Token // the user's credential (the Keychain)
+	APIURL string       // tests: the API, if not https://api.anthropic.com
+}
+
+func (c Config) api() string {
+	if c.APIURL != "" {
+		return c.APIURL
+	}
+	return "https://api.anthropic.com"
+}
+
+// auth sends the user's credential: an OAuth token from
+// `claude setup-token` (sk-ant-oat…) as a Bearer token, or an API key as
+// x-api-key.
+func auth(tok broker.Token) func(http.Header) error {
+	return func(h http.Header) error {
+		t, err := tok()
+		if err != nil {
+			return err
+		}
+		setAuth(h, t)
+		return nil
+	}
 }
 
 // oauthBeta is the beta flag the API wants with OAuth tokens (as Claude

@@ -2,6 +2,7 @@ package broker
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -28,6 +29,53 @@ type Upstream struct {
 	Client *http.Client // NewUpstreamClient()
 	// NoCredential is the message when Auth fails (no login).
 	NoCredential string
+}
+
+// Upstreams makes a provider's upstreams, which share how the sandbox
+// reaches the provider, the HTTP client and the message for a missing
+// credential.
+type Upstreams struct {
+	Public       *url.URL
+	Client       *http.Client
+	NoCredential string
+}
+
+// To is an upstream at rawURL, with the credential auth sets. The URLs
+// come from the broker's checked configuration: a bad one panics.
+func (u Upstreams) To(rawURL string, auth func(http.Header) error) *Upstream {
+	t, err := url.Parse(rawURL)
+	if err != nil || t.Host == "" {
+		panic("upstream URL " + rawURL)
+	}
+	return &Upstream{URL: t, Auth: auth, Public: u.Public, Client: u.Client, NoCredential: u.NoCredential}
+}
+
+// Token returns the user's credential for a provider (a token command's
+// output, TokenSource).
+type Token func() (string, error)
+
+// Basic is an Upstream's Auth: HTTP Basic, user and token, as git sends it.
+func Basic(user string, tok Token) func(http.Header) error {
+	return func(h http.Header) error {
+		t, err := tok()
+		if err != nil {
+			return err
+		}
+		h.Set("Authorization", "Basic "+base64.StdEncoding.EncodeToString([]byte(user+":"+t)))
+		return nil
+	}
+}
+
+// Bearer is an Upstream's Auth: the token as a Bearer token.
+func Bearer(tok Token) func(http.Header) error {
+	return func(h http.Header) error {
+		t, err := tok()
+		if err != nil {
+			return err
+		}
+		h.Set("Authorization", "Bearer "+t)
+		return nil
+	}
 }
 
 // hopHeaders aren't forwarded in either direction.

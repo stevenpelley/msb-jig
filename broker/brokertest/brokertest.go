@@ -29,8 +29,8 @@ const (
 	Token = "real-token-for-test"
 )
 
-// TokenFunc returns Token.
-func TokenFunc() (string, error) { return Token, nil }
+// TokenCmd is a token command that prints Token.
+const TokenCmd = "echo " + Token
 
 // Public is the provider's public URL for host.
 func Public(host string) *url.URL { return &url.URL{Scheme: "https", Host: host} }

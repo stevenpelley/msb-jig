@@ -1,16 +1,14 @@
 // Package github is the broker's GitHub provider, served as
 // github.broker.internal: git smart HTTP (to github.com), and the API the
 // way gh calls a GitHub Enterprise Server, REST under /api/v3/ and GraphQL
-// at /api/graphql (to api.github.com). LFS isn't served. routes.go lists
-// every request it serves; graphql.go every mutation.
+// at /api/graphql (to api.github.com). LFS isn't served. Its routes are in
+// routes.go; here are their checks, and graphql.go has every mutation.
 package github
 
 import (
 	"bytes"
-	"encoding/base64"
 	"encoding/json"
 	"io"
-	"log/slog"
 	"net/http"
 	"net/url"
 	"strings"
@@ -18,53 +16,12 @@ import (
 	"mcp-restrict/broker"
 )
 
-// Config configures the provider.
-type Config struct {
-	User   string                 // the GitHub user the agent acts for
-	Token  func() (string, error) // the user's token (gh's login, or the Keychain)
-	Git    *url.URL               // https://github.com
-	API    *url.URL               // https://api.github.com
-	Public *url.URL               // https://github.broker.internal
-	Client *http.Client           // broker.NewUpstreamClient()
-	Log    *slog.Logger
-}
-
-type github struct {
-	Config
-	git, api, graphql *broker.Upstream
-}
-
-const noCredential = "no GitHub credential: run investigator login github"
-
-// New returns the provider.
-func New(c Config) *broker.Provider {
-	g := &github{Config: c}
-	// git: HTTP Basic, user and token, as git sends it.
-	g.git = &broker.Upstream{URL: c.Git, Public: c.Public, Client: c.Client, NoCredential: noCredential,
-		Auth: func(h http.Header) error {
-			tok, err := c.Token()
-			if err != nil {
-				return err
-			}
-			h.Set("Authorization", "Basic "+base64.StdEncoding.EncodeToString([]byte(c.User+":"+tok)))
-			return nil
-		}}
-	// REST: /api/v3/<path> is api.github.com/<path>, with a Bearer token.
-	g.api = &broker.Upstream{URL: c.API, Strip: "/api/v3", Public: c.Public, Client: c.Client,
-		NoCredential: noCredential, Auth: g.bearer}
-	// GraphQL: /api/graphql is api.github.com/graphql.
-	g.graphql = &broker.Upstream{URL: c.API, Path: "/graphql", Public: c.Public, Client: c.Client,
-		NoCredential: noCredential, Auth: g.bearer}
-	return &broker.Provider{Name: "github", Routes: g.routes(), Log: c.Log}
-}
-
-func (g *github) bearer(h http.Header) error {
-	tok, err := g.Token()
-	if err != nil {
-		return err
-	}
-	h.Set("Authorization", "Bearer "+tok)
-	return nil
+// Checks are the GitHub provider's checks, which the routes (routes.go)
+// run. API is the REST upstream (api.github.com): lookups go
+// through it, with the user's credential.
+type Checks struct {
+	User string // the GitHub user the agent acts for
+	API  *broker.Upstream
 }
 
 // --- lookups: what GitHub says, never what the request claims ---
@@ -72,7 +29,7 @@ func (g *github) bearer(h http.Header) error {
 // prHead fetches a pull request's head branch by number. A fork's comes
 // back as "fork:<branch>", which never passes the policy. nil if the
 // lookup failed or the number isn't a pull request.
-func (g *github) prHead(c *broker.Call) *string {
+func (g *Checks) prHead(c *broker.Call) *string {
 	var pr struct {
 		Head struct {
 			Ref  string `json:"ref"`
@@ -105,15 +62,15 @@ const nodePRQuery = `query($id: ID!) { node(id: $id) {
 } }`
 
 // nodePRHead is prHead for a GraphQL node ID.
-func (g *github) nodePRHead(c *broker.Call, id string) *string {
+func (g *Checks) nodePRHead(c *broker.Call, id string) *string {
 	if id == "" {
 		return nil
 	}
 	b, _ := json.Marshal(map[string]any{"query": nodePRQuery, "variables": map[string]any{"id": id}})
-	u := *g.API
+	u := *g.API.URL
 	u.Path, u.RawPath = "/graphql", ""
 	q, err := http.NewRequestWithContext(c.R.Context(), http.MethodPost, u.String(), bytes.NewReader(b))
-	if err != nil || g.bearer(q.Header) != nil {
+	if err != nil || g.API.Auth(q.Header) != nil {
 		return nil
 	}
 	q.Header.Set("Content-Type", "application/json")
@@ -146,23 +103,23 @@ func (g *github) nodePRHead(c *broker.Call, id string) *string {
 }
 
 // get calls the REST API with the user's token and decodes a 200 into v.
-func (g *github) get(c *broker.Call, escPath string, v any) bool {
-	u := *g.API
+func (g *Checks) get(c *broker.Call, escPath string, v any) bool {
+	u := *g.API.URL
 	p, err := url.PathUnescape(escPath)
 	if err != nil {
 		return false
 	}
 	u.Path, u.RawPath = p, escPath
 	q, err := http.NewRequestWithContext(c.R.Context(), http.MethodGet, u.String(), nil)
-	if err != nil || g.bearer(q.Header) != nil {
+	if err != nil || g.API.Auth(q.Header) != nil {
 		return false
 	}
 	return g.do(q, v)
 }
 
-func (g *github) do(q *http.Request, v any) bool {
+func (g *Checks) do(q *http.Request, v any) bool {
 	q.Header.Set("Accept", "application/vnd.github+json")
-	resp, err := g.Client.Do(q)
+	resp, err := g.API.Client.Do(q)
 	if err != nil {
 		return false
 	}
@@ -172,21 +129,21 @@ func (g *github) do(q *http.Request, v any) bool {
 
 // --- the log endpoints ---
 
-// logs serves a run or job log. GitHub answers with a redirect to signed
+// Logs serves a run or job log. GitHub answers with a redirect to signed
 // blob storage; the broker follows it itself, without the user's token,
 // so the sandbox needs no route to that storage (which would be a route
 // to anyone's).
-type logs struct{ g *github }
+type Logs struct{ API *broker.Upstream }
 
-func (l logs) Serve(w http.ResponseWriter, c *broker.Call) {
-	resp, err := l.g.api.Do(c)
+func (l Logs) Serve(w http.ResponseWriter, c *broker.Call) {
+	resp, err := l.API.Do(c)
 	if err != nil {
 		broker.HTTPError(w, http.StatusBadGateway, err.Error())
 		return
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode/100 != 3 {
-		l.g.api.CopyResponse(w, resp, resp.Body)
+		l.API.CopyResponse(w, resp, resp.Body)
 		return
 	}
 	loc, err := url.Parse(resp.Header.Get("Location"))
@@ -199,7 +156,7 @@ func (l logs) Serve(w http.ResponseWriter, c *broker.Call) {
 		broker.HTTPError(w, http.StatusBadGateway, "bad log redirect")
 		return
 	}
-	lr, err := l.g.Client.Do(q)
+	lr, err := l.API.Client.Do(q)
 	if err != nil {
 		broker.HTTPError(w, http.StatusBadGateway, "logs: "+err.Error())
 		return

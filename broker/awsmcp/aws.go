@@ -48,13 +48,21 @@ type Config struct {
 	Log     *slog.Logger
 }
 
-// New starts the proxy (until ctx ends) and returns the provider. Every
-// request it serves:
-//
-//	POST    /mcp  one JSON-RPC message: initialize, ping, tools/list,
-//	              tools/call, notifications -> the stdio proxy
-//	DELETE  /mcp  the end of a session: answered 200 (sessions hold nothing)
-func New(ctx context.Context, c Config) (*broker.Provider, error) {
+// Routes is every request the AWS provider serves, all to the proxy
+// (Start). No per-call rules: the profiles' IAM roles limit the agent.
+func Routes(proxy *Bridge) []broker.Route {
+	return []broker.Route{
+		// One JSON-RPC message: initialize, ping, tools/list, tools/call,
+		// notifications.
+		{Method: "POST", Path: Path, Op: "aws.mcp", Check: Call, To: proxy},
+		// The end of a session: sessions hold nothing.
+		{Method: "DELETE", Path: Path, Op: "aws.mcp.session", Check: broker.Any, To: broker.Answer(200)},
+	}
+}
+
+// Start starts the proxy (until ctx ends) and returns the bridge to it,
+// the target of the provider's MCP route.
+func Start(ctx context.Context, c Config) (*Bridge, error) {
 	argv, err := c.argv()
 	if err != nil {
 		return nil, err
@@ -66,15 +74,12 @@ func New(ctx context.Context, c Config) (*broker.Provider, error) {
 	c.Log.Info("aws mcp proxy", "argv", argv)
 	b := &Bridge{Command: argv, Stderr: stderr, Log: c.Log}
 	b.Start(ctx)
-	return &broker.Provider{Name: "aws", Log: c.Log, Routes: []broker.Route{
-		{Method: "POST", Path: Path, Op: "aws.mcp", Check: call, To: b},
-		{Method: "DELETE", Path: Path, Op: "aws.mcp.session", Check: broker.Any, To: broker.Answer(200)},
-	}}, nil
+	return b, nil
 }
 
-// call allows any MCP method on mcp.Methods, and notes the tool and
+// Call allows any MCP method on mcp.Methods, and notes the tool and
 // profile for the log.
-func call(c *broker.Call) broker.Decision {
+func Call(c *broker.Call) broker.Decision {
 	m, d := mcp.Read(c)
 	if !d.Allow || m.Method != "tools/call" {
 		return d

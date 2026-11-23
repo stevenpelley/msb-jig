@@ -1,23 +1,23 @@
-package anthropic
+package anthropic_test
 
 import (
 	"bufio"
-	"errors"
+	"context"
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
 	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"mcp-restrict/broker"
+	"mcp-restrict/broker/providers"
 )
 
 const anthropicHost = "anthropic.broker.internal"
 
-func anthropicBroker(t *testing.T, upstream http.Handler, tok func() (string, error)) (*httptest.Server, *atomic.Int32) {
+func anthropicBroker(t *testing.T, upstream http.Handler, tokenCmd string) (*httptest.Server, *atomic.Int32) {
 	t.Helper()
 	var calls atomic.Int32
 	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -25,9 +25,11 @@ func anthropicBroker(t *testing.T, upstream http.Handler, tok func() (string, er
 		upstream.ServeHTTP(w, r)
 	}))
 	t.Cleanup(up.Close)
-	u, _ := url.Parse(up.URL)
-	a := New(Config{Token: tok, API: u, Public: &url.URL{Scheme: "https", Host: anthropicHost}, Client: broker.NewUpstreamClient()})
-	srv := httptest.NewServer(&broker.Server{Providers: map[string]http.Handler{anthropicHost: a}})
+	ps, err := providers.Build(context.Background(), providers.Config{AnthropicTokenCmd: tokenCmd, AnthropicURL: up.URL}, "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(&broker.Server{Providers: ps})
 	t.Cleanup(srv.Close)
 	return srv, &calls
 }
@@ -62,7 +64,7 @@ func TestAnthropicCredential(t *testing.T) {
 			seen{auth: "Bearer sk-ant-oat01-real", beta: []string{"oauth-2025-04-20,claude-code-20250219"}}},
 		{"oauth token, no beta flag sent", "sk-ant-oat01-real",
 			map[string]string{"X-Api-Key": "placeholder"},
-			seen{auth: "Bearer sk-ant-oat01-real", beta: []string{oauthBeta}}},
+			seen{auth: "Bearer sk-ant-oat01-real", beta: []string{"oauth-2025-04-20"}}},
 		{"api key", "sk-ant-api03-real",
 			map[string]string{"Authorization": "Bearer placeholder", "X-Api-Key": "placeholder"},
 			seen{key: "sk-ant-api03-real"}},
@@ -74,7 +76,7 @@ func TestAnthropicCredential(t *testing.T) {
 				b, _ := io.ReadAll(r.Body)
 				got = seen{auth: r.Header.Get("Authorization"), key: r.Header.Get("X-Api-Key"), beta: r.Header.Values("Anthropic-Beta"), body: string(b)}
 				_, _ = io.WriteString(w, `{"ok":true}`)
-			}), func() (string, error) { return c.tok, nil })
+			}), "echo "+c.tok)
 			resp := anthropicReq(t, srv, "POST", "/v1/messages", `{"model":"m"}`, c.hdr)
 			if resp.StatusCode != 200 {
 				t.Fatalf("status %d", resp.StatusCode)
@@ -96,7 +98,7 @@ func TestAnthropicStreams(t *testing.T) {
 		w.(http.Flusher).Flush()
 		<-release
 		_, _ = io.WriteString(w, "event: message_stop\ndata: {}\n\n")
-	}), func() (string, error) { return "sk-ant-oat01-real", nil })
+	}), "echo sk-ant-oat01-real")
 	defer close(release)
 	resp := anthropicReq(t, srv, "POST", "/v1/messages", `{"stream":true}`, nil)
 	first := make(chan string, 1)
@@ -116,11 +118,11 @@ func TestAnthropicStreams(t *testing.T) {
 
 func TestAnthropicRefusals(t *testing.T) {
 	ok := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {})
-	srv, calls := anthropicBroker(t, ok, func() (string, error) { return "sk-ant-oat01-real", nil })
+	srv, calls := anthropicBroker(t, ok, "echo sk-ant-oat01-real")
 	if resp := anthropicReq(t, srv, "GET", "/admin", "", nil); resp.StatusCode != http.StatusForbidden {
 		t.Errorf("path outside /v1/ and /api/: %d", resp.StatusCode)
 	}
-	srv2, calls2 := anthropicBroker(t, ok, func() (string, error) { return "", errors.New("no item") })
+	srv2, calls2 := anthropicBroker(t, ok, "false")
 	if resp := anthropicReq(t, srv2, "POST", "/v1/messages", "{}", nil); resp.StatusCode != http.StatusServiceUnavailable {
 		t.Errorf("no credential: %d", resp.StatusCode)
 	}

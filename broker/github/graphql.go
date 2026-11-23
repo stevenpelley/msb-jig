@@ -11,22 +11,22 @@ import (
 )
 
 // mutationCheck decides one mutation from its input argument.
-type mutationCheck func(g *github, c *broker.Call, in map[string]any) broker.Decision
+type mutationCheck func(g *Checks, c *broker.Call, in map[string]any) broker.Decision
 
 // mutations is every GraphQL mutation the broker passes, with its check.
 // A request may hold queries and at most one mutation; any mutation not
 // here is denied.
 var mutations = map[string]mutationCheck{
-	"createPullRequest":               (*github).createPRMutation,
-	"updatePullRequest":               (*github).updatePRMutation,
+	"createPullRequest":               (*Checks).createPRMutation,
+	"updatePullRequest":               (*Checks).updatePRMutation,
 	"closePullRequest":                onPR("pullRequestId"),
 	"reopenPullRequest":               onPR("pullRequestId"),
 	"markPullRequestReadyForReview":   onPR("pullRequestId"),
 	"convertPullRequestToDraft":       onPR("pullRequestId"),
 	"requestReviews":                  onPR("pullRequestId"),
 	"addComment":                      onPR("subjectId"), // only on a pull request: an issue's lookup fails
-	"addPullRequestReview":            (*github).reviewMutation,
-	"submitPullRequestReview":         (*github).reviewMutation,
+	"addPullRequestReview":            (*Checks).reviewMutation,
+	"submitPullRequestReview":         (*Checks).reviewMutation,
 	"addPullRequestReviewThread":      onPR("pullRequestId"),
 	"addPullRequestReviewThreadReply": onPR("pullRequestReviewThreadId"),
 	"resolveReviewThread":             onPR("threadId"),
@@ -42,14 +42,14 @@ var merges = map[string]bool{"mergePullRequest": true, "enablePullRequestAutoMer
 // its input names (field) is the pull request, or one of its review
 // threads or reviews, looked up from GitHub.
 func onPR(field string) mutationCheck {
-	return func(g *github, c *broker.Call, in map[string]any) broker.Decision {
+	return func(g *Checks, c *broker.Call, in map[string]any) broker.Decision {
 		return broker.ExistingFromAgentBranch(g.User, g.nodePRHead(c, val(str(in, field))))
 	}
 }
 
 // createPRMutation: from an agent branch of the same repository, with a
 // tagged title.
-func (g *github) createPRMutation(_ *broker.Call, in map[string]any) broker.Decision {
+func (g *Checks) createPRMutation(_ *broker.Call, in map[string]any) broker.Decision {
 	head := val(str(in, "headRefName"))
 	if strings.Contains(head, ":") || (in["headRepositoryId"] != nil && in["headRepositoryId"] != in["repositoryId"]) {
 		return broker.Deny("pull requests from another repository aren't allowed")
@@ -57,14 +57,14 @@ func (g *github) createPRMutation(_ *broker.Call, in map[string]any) broker.Deci
 	return broker.All(broker.AgentBranch(g.User, head), broker.TaggedTitle(g.User, str(in, "title"), true))
 }
 
-func (g *github) updatePRMutation(c *broker.Call, in map[string]any) broker.Decision {
+func (g *Checks) updatePRMutation(c *broker.Call, in map[string]any) broker.Decision {
 	return broker.All(onPR("pullRequestId")(g, c, in), broker.TaggedTitle(g.User, str(in, "title"), false))
 }
 
 // reviewMutation: a review comment, never an approval.
-func (g *github) reviewMutation(c *broker.Call, in map[string]any) broker.Decision {
+func (g *Checks) reviewMutation(c *broker.Call, in map[string]any) broker.Decision {
 	if ev := str(in, "event"); ev != nil && strings.EqualFold(*ev, "APPROVE") {
-		return broker.Deny(neverApprove)
+		return broker.Deny(broker.NeverApprove)
 	}
 	if str(in, "pullRequestId") != nil {
 		return onPR("pullRequestId")(g, c, in)
@@ -79,9 +79,9 @@ func val(p *string) string {
 	return *p
 }
 
-// graphQL parses the document rather than trusting operation names.
+// GraphQL parses the document rather than trusting operation names.
 // Queries pass; a mutation is decided by its entry in mutations.
-func (g *github) graphQL(c *broker.Call) broker.Decision {
+func (g *Checks) GraphQL(c *broker.Call) broker.Decision {
 	b, err := c.ReadBody()
 	if err != nil {
 		return broker.Deny("%v", err)
@@ -119,7 +119,7 @@ func (g *github) graphQL(c *broker.Call) broker.Decision {
 	}
 	for _, f := range muts {
 		if merges[f.Name] {
-			return broker.Deny("%s (GraphQL %s)", neverMerge, f.Name)
+			return broker.Deny("%s (GraphQL %s)", broker.NeverMerge, f.Name)
 		}
 	}
 	if len(muts) > 1 {

@@ -11,6 +11,7 @@
 package main
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/subtle"
 	"encoding/base64"
@@ -27,8 +28,7 @@ import (
 	"time"
 
 	"mcp-restrict/broker"
-	"mcp-restrict/broker/github"
-	"mcp-restrict/broker/gitlab"
+	"mcp-restrict/broker/providers"
 )
 
 func fail(f string, a ...any) {
@@ -56,28 +56,44 @@ func main() {
 	}
 	log := slog.New(slog.NewJSONHandler(os.Stderr, nil))
 	errs := make(chan error, 2)
+	// Each provider on its own listener, from the same route table as the
+	// microsandbox broker (broker/providers).
 	if *glUser != "" {
 		up, err := url.Parse(*glURL)
 		if err != nil || up.Scheme != "https" {
 			fail("gitlab-url %q: want https://", *glURL)
 		}
 		pub := public(*glListen)
-		c := gitlab.Config{User: *glUser, Token: broker.TokenSource(*glTokenCmd, "INVESTIGATOR_GITLAB_TOKEN"),
-			Upstream: up, Public: pub, Client: broker.NewUpstreamClient(), Log: log}
-		if *glMCPTokenCmd != "" {
-			c.MCPToken = broker.TokenSource(*glMCPTokenCmd, "")
-		}
-		go func() { errs <- listen(*glListen, pub, gitlab.New(c), session, log) }()
+		p := build(providers.Config{GitLabUser: *glUser, GitLabURL: *glURL, GitLabMCPTokenCmd: *glMCPTokenCmd,
+			GitLabTokenCmd: tokenCmd(*glTokenCmd, "INVESTIGATOR_GITLAB_TOKEN")}, pub, log)[providers.GitLabHost]
+		go func() { errs <- listen(*glListen, pub, p, session, log) }()
 	}
 	if *ghUser != "" {
 		pub := public(*ghListen)
-		api, _ := url.Parse("https://api.github.com")
-		git, _ := url.Parse("https://github.com")
-		p := github.New(github.Config{User: *ghUser, Token: broker.TokenSource(*ghTokenCmd, "INVESTIGATOR_GITHUB_TOKEN"),
-			Git: git, API: api, Public: pub, Client: broker.NewUpstreamClient(), Log: log})
+		p := build(providers.Config{GitHubUser: *ghUser,
+			GitHubTokenCmd: tokenCmd(*ghTokenCmd, "INVESTIGATOR_GITHUB_TOKEN")}, pub, log)[providers.GitHubHost]
 		go func() { errs <- listen(*ghListen, pub, p, session, log) }()
 	}
 	fail("%v", <-errs)
+}
+
+// build builds one provider, reached by the sandbox at pub.
+func build(c providers.Config, pub *url.URL, log *slog.Logger) map[string]http.Handler {
+	c.Public = func(string) *url.URL { return pub }
+	ps, err := providers.Build(context.Background(), c, "", log)
+	if err != nil {
+		fail("%v", err)
+	}
+	return ps
+}
+
+// tokenCmd is the token command, else one printing the environment
+// variable env.
+func tokenCmd(cmd, env string) string {
+	if cmd != "" {
+		return cmd
+	}
+	return "printenv " + env
 }
 
 // public is how the sandbox reaches a listener: host.docker.internal on

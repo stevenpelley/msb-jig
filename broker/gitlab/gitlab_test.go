@@ -1,8 +1,9 @@
-package gitlab
+package gitlab_test
 
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -13,15 +14,19 @@ import (
 	"sync"
 	"testing"
 
-	"mcp-restrict/broker"
 	"mcp-restrict/broker/brokertest"
+	"mcp-restrict/broker/providers"
 )
 
 const host = "gitlab.broker.internal"
 
 func serve(t *testing.T, upstream *url.URL) (addr, caFile string) {
-	return brokertest.Serve(t, host, New(Config{User: brokertest.User, Token: brokertest.TokenFunc,
-		Upstream: upstream, Public: brokertest.Public(host), Client: broker.NewUpstreamClient()}))
+	ps, err := providers.Build(context.Background(), providers.Config{GitLabUser: brokertest.User,
+		GitLabURL: upstream.String(), GitLabTokenCmd: brokertest.TokenCmd}, "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return brokertest.Serve(t, host, ps[host])
 }
 
 // --- git, end to end ---

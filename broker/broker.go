@@ -3,11 +3,13 @@
 // under broker.internal; the broker holds the user's credentials and
 // decides every request before forwarding it.
 //
-// Reading the policy: start at broker/providers, which lists the
-// providers. Each provider's package has a routes.go with its route table:
-// every request it serves, the check run on it, and where it goes with
-// which credential. A request that matches no route is denied. The checks
-// the providers share (branch namespace, title tag) are in policy.go.
+// Reading the policy: start at broker/providers. Its Build lists the
+// providers: what turns each on, and its Routes function (routes.go in
+// the provider's package), which defines the provider's upstreams with
+// their credentials and then every request it serves, the check run on
+// it and where it goes. A request that matches no route is denied. The
+// checks are next to Routes; the ones providers share (branch namespace,
+// title tag) are in policy.go.
 //
 // A request's way through: Server (server.go) picks the provider by
 // hostname and drops any credential the sandbox sent; Provider.ServeHTTP

@@ -119,8 +119,8 @@ The agent runs on the Mac itself and asks before running commands.
 | `docs/prototype-plan.md` | The personal track, step by step, ending on microsandbox (6b): who tests what (this sandbox vs the user's Mac) |
 | `docs/microsandbox.md` | microsandbox as the VM layer (2026-11-22, msb 0.7.16): checks on the Mac, the broker over vsock, the supervisor, Docker, the environment |
 | `docs/enforcement.md` | Making the harness required (2026-11-22): threats, model-gated chain of trust, network and provider-side options, small provider asks |
-| `broker/providers/` | **Start reviewing here.** The list of providers and how each is configured from the CLI's settings |
-| `broker/<provider>/routes.go` | Each provider's route table (`gitlab`, `github`, `anthropic`, `awsmcp`): every request it serves, the check it runs and where it goes; anything unmatched is denied. The rest of the package is the checks and upstreams |
+| `broker/providers/` | **Start reviewing here.** `Build` lists the providers: what turns each on, and the `Routes` function that holds its policy |
+| `broker/<provider>/routes.go` | `Routes` (`gitlab`, `github`; in `anthropic.go` and `aws.go` for the two without per-request rules): the provider's upstreams with their credentials, then its route table (every request it serves, the check it runs, where it goes); anything unmatched is denied. The checks are beside it (`checks.go`, `mcp.go`, `graphql.go`); tests run through `providers.Build` |
 | `broker/` | The core: `broker.go` (routes, matching, decision log), `policy.go` (the shared rules: agent branches, title tags), `upstream.go` (credential injection, header rewriting), `server.go` (routing by host, SNI check), `listen.go` (TLS, Unix socket, token commands), `ca.go` (the name-constrained CA). `gitproto/` parses pushes, `mcp/` JSON-RPC, `brokertest/` the shared test fixtures |
 | `allowlist/` | The egress allowlist: groups (`lists/sbx-balanced.yaml`, copied from sbx's balanced policy, and `lists/groups.yaml`, ours and the providers'), the base layer, user and org layers; a provider's hosts drop out when the broker serves it |
 | `cmd/investigator/` | The CLI. `setup`, `login`, `logout`, `open`, `stop`, `uninstall` for users (`login.go`; settings in `~/.investigator/settings.json`, tokens in the Keychain, extra hosts in `~/.investigator/allowlist.yaml`); beneath them `up\|run\|down\|shell\|code\|ssh-config\|rm <name>` (`lifecycle.go`, `supervisor.go`: broker plus VM through the microsandbox Go SDK; `remote.go`: SSH and VS Code); `image.go`: `image build`, your own image from a Dockerfile (Docker or Podman, then `msb load`); `mounts.go`: the exchange folder, `--mount` at create, `cp`; `allowlist` prints the compiled list; `ssh-setup` for sshd-based sandboxes |
@@ -131,7 +131,9 @@ The agent runs on the Mac itself and asks before running commands.
 
 ## Working rules
 
-- Verify: `go vet ./... && go test ./...`, and `checks/step1-docker.sh`
+- Verify: `test -z "$(gofmt -l .)" && go vet ./... && go test ./...`
+  (`go vet` doesn't check formatting; `gofmt -l` lists unformatted
+  files without failing, hence the `test -z`), and `checks/step1-docker.sh`
   (needs Docker; builds `investigator-sandbox:dev`).
 - Research notes carry the date and tool versions they were checked
   against. Mark anything not tested or not confirmed in a source as
