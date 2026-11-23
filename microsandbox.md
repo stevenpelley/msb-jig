@@ -223,10 +223,44 @@ Still open:
 - **One authorization for every sandbox.** `msb ssh authorize` adds the key
   to `~/.microsandbox/ssh/authorized_keys`, which covers all sandboxes, not
   one. Fine for one user's Mac.
-- **Docker in the guest** isn't provisioned yet (there's no systemd).
 - **Rules are fixed at create time.** `msb modify` changes CPUs, memory,
   disk, env, secrets and ports, but not the network policy, so changing
   the layers needs `rm` and `up`, which loses the guest's files.
+
+### Docker in the guest (done)
+
+The guest's root is overlayfs (`/.msb/rootfs/lower` plus an upper layer), so
+Docker's overlay snapshots fail on it: "failed to mount … fstype: overlay
+… invalid argument". dockerd itself starts fine (6.12 kernel, cgroup v2,
+iptables). The fix is an ext4 disk of the sandbox's own at
+`/var/lib/docker` (`Mount.Owned`, kind disk; removed with the sandbox).
+
+- `investigator-msb` creates the sandbox with a 32 GiB root disk
+  (`INV_DISK`; the default was 4 GiB) and a 64 GiB Docker disk
+  (`INV_DOCKER_DISK`, 0 for none). Both are sparse: 121 MB on the Mac after
+  pulling a few images.
+- `provision.sh`'s `docker` component installs `docker.io`, `docker-buildx`
+  and `docker-compose-v2`, and adds the agent to the `docker` group.
+- dockerd runs as a root exec job, restarted if it ends, like the bridge;
+  there's no systemd.
+
+Checked on `inv2` as `agent`:
+- `hello-world`;
+- a BuildKit build;
+- `nginx` on a published port, reached with curl from the guest;
+- `alpine` reaching `proxy.golang.org`, while `pastebin.com` doesn't
+  resolve. Containers go out through the guest, so the sandbox's egress
+  policy covers them.
+- After `down` and `up`, the images are still there.
+
+Not covered: containers can't reach the broker, since the bridge listens on
+the guest's loopback. The `docker` group makes the agent root in the guest
+in effect, so it can edit `/etc/hosts` or stop the bridge. That only breaks
+its own access: the policy and the credentials stay on the Mac, and the
+VM remains the boundary.
+
+`claude` is linked into `/usr/local/bin`, so a session without a login
+shell finds it too.
 
 ### The environment outside login shells (fixed)
 
@@ -284,5 +318,4 @@ profile.d file written at the first provisioning.
 - **Not yet checked:**
   - #1998 (a Wi-Fi change with a sandbox running);
   - VS Code Remote-SSH itself (the SSH pieces it needs work);
-  - Docker inside the guest (our tests need it);
   - an image built from `provision.sh`.

@@ -22,6 +22,8 @@
 //	INV_IMAGE                 the OCI image (default ubuntu:26.04)
 //	INV_MEMORY                MiB (default 4096)
 //	INV_CPUS                  vCPUs (default 4)
+//	INV_DISK                  root disk, GiB (default 32; sparse)
+//	INV_DOCKER_DISK           the ext4 disk for /var/lib/docker, GiB (default 64; sparse); 0: no Docker
 //	INV_PROFILE, INV_LAYERS   the allowlist's profile and extra layer files
 //	INV_GITLAB_USER           the GitLab user the agent acts for; empty: no GitLab provider
 //	INV_GITLAB_URL            default https://gitlab.com
@@ -43,6 +45,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -58,6 +61,9 @@ const (
 	brokerPort  = 443 // the vsock port, and the guest's loopback port
 	guestCA     = "/usr/local/share/ca-certificates/investigator-broker-src.crt"
 	provisioned = "/var/lib/investigator/provisioned"
+	// dockerDir is on its own ext4 disk: the root is overlayfs, and Docker's
+	// overlay snapshots can't sit on overlayfs ("invalid argument").
+	dockerDir = "/var/lib/docker"
 	// brokerNames are pointed at the guest's bridge.
 	brokerNames = "gitlab.broker.internal github.broker.internal anthropic.broker.internal"
 )
@@ -262,6 +268,8 @@ type config struct {
 	image       string
 	memory      uint32
 	cpus        uint8
+	diskGiB     uint32 // the root disk
+	dockerGiB   uint32 // 0: no Docker
 	rules       []m.PolicyRule
 }
 
@@ -276,6 +284,15 @@ func loadConfig(name, state string) config {
 		fail("INV_CPUS: %v", err)
 	}
 	c.memory, c.cpus = uint32(mem), uint8(cpus)
+	disk, err := strconv.ParseUint(env("INV_DISK", "32"), 10, 16)
+	if err != nil || disk < 8 {
+		fail("INV_DISK: want GiB, at least 8")
+	}
+	docker, err := strconv.ParseUint(env("INV_DOCKER_DISK", "64"), 10, 16)
+	if err != nil {
+		fail("INV_DOCKER_DISK: %v", err)
+	}
+	c.diskGiB, c.dockerGiB = uint32(disk), uint32(docker)
 
 	user := env("INV_GITLAB_USER", "")
 	if user != "" && !regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,254}$`).MatchString(user) {
@@ -387,8 +404,20 @@ func run(name, state string) {
 		log.Info("sandbox stopped", "result", res, "err", err)
 		close(stopped)
 	}()
-	bridgeDone := make(chan struct{})
-	go func() { bridge(ctx, sb, log, stopped); close(bridgeDone) }()
+	// The bridge to the broker, and dockerd: root exec jobs, restarted if
+	// they end (there's no systemd; the guest's init is microsandbox's).
+	jobs := map[string]string{"bridge": hostsLine() + fmt.Sprintf(
+		"\nexec socat TCP-LISTEN:%d,bind=127.0.0.1,fork,reuseaddr VSOCK-CONNECT:2:%d", brokerPort, brokerPort)}
+	if c.dockerGiB > 0 {
+		// A sandbox provisioned before Docker was added has no dockerd.
+		jobs["dockerd"] = "command -v dockerd >/dev/null || exec sleep infinity\n" +
+			"rm -f /var/run/docker.pid; exec dockerd >>/var/log/dockerd.log 2>&1"
+	}
+	var jobsDone sync.WaitGroup
+	for name, cmd := range jobs {
+		jobsDone.Add(1)
+		go func() { defer jobsDone.Done(); keep(ctx, sb, log, stopped, name, cmd) }()
+	}
 	_ = os.WriteFile(filepath.Join(state, "ready"), nil, 0o600)
 	log.Info("ready", "name", name, "socket", sock)
 
@@ -405,7 +434,7 @@ func run(name, state string) {
 		cancel()
 		<-stopped
 	}
-	<-bridgeDone
+	jobsDone.Wait()
 	log.Info("down")
 }
 
@@ -450,6 +479,7 @@ func openSandbox(ctx context.Context, c config) (*m.Sandbox, bool, error) {
 		m.WithImage(c.image),
 		m.WithMemory(c.memory),
 		m.WithCPUs(c.cpus),
+		m.WithRootDisk(m.RootDisk.Managed(c.diskGiB*1024)),
 		m.WithNetwork(&m.NetworkConfig{
 			DefaultEgress:  m.PolicyActionDeny,
 			DefaultIngress: m.PolicyActionDeny,
@@ -460,6 +490,7 @@ func openSandbox(ctx context.Context, c config) (*m.Sandbox, bool, error) {
 			DisableStrict: true,
 		}),
 		m.WithEnv(clientEnv(c)),
+		m.WithMounts(mounts(c)),
 		m.WithVsock(m.VsockRoute{HostSocket: filepath.Join(c.state, "broker.sock"), Port: brokerPort}),
 		m.WithPatches(m.Patch.Text(guestCA, string(ca), m.PatchOptions{Mode: &mode, Replace: true})),
 	)
@@ -504,13 +535,13 @@ func provision(ctx context.Context, sb *m.Sandbox, c config, log *slog.Logger) e
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
 apt-get install -y -qq --no-install-recommends socat >/dev/null
-export SANDBOX_USER=%s PROVISION_COMPONENTS="base git broker claude"
+export SANDBOX_USER=%s PROVISION_COMPONENTS=%q
 export BROKER_GITLAB_URL=https://gitlab.broker.internal BROKER_GITHUB_URL=https://github.broker.internal
 export BROKER_GITLAB_USER=%q BROKER_GITLAB_MCP= BROKER_ANTHROPIC_URL=%q BROKER_CA_FILE=%s
 %s
 bash /root/provision.sh
 mkdir -p %s && touch %s
-`, guestUser, c.broker.GitLabUser, anthropic, guestCA, hostsLine(), filepath.Dir(provisioned), provisioned)
+`, guestUser, components(c), c.broker.GitLabUser, anthropic, guestCA, hostsLine(), filepath.Dir(provisioned), provisioned)
 	h, err := sb.ShellStream(ctx, script, m.WithExecUser("root"))
 	if err != nil {
 		return err
@@ -531,11 +562,9 @@ func hostsLine() string {
 	return fmt.Sprintf(`grep -q 'broker.internal' /etc/hosts || echo '127.0.0.1 %s' >>/etc/hosts`, brokerNames)
 }
 
-// bridge keeps the guest's loopback port 443 connected to the vsock route,
-// as root, so the agent user can't replace it. It restarts until the
-// sandbox stops or ctx ends.
-func bridge(ctx context.Context, sb *m.Sandbox, log *slog.Logger, stopped <-chan struct{}) {
-	cmd := hostsLine() + fmt.Sprintf("\nexec socat TCP-LISTEN:%d,bind=127.0.0.1,fork,reuseaddr VSOCK-CONNECT:2:%d", brokerPort, brokerPort)
+// keep runs cmd as a root exec job, so the agent user can't replace it,
+// and restarts it until the sandbox stops or ctx ends.
+func keep(ctx context.Context, sb *m.Sandbox, log *slog.Logger, stopped <-chan struct{}, name, cmd string) {
 	for {
 		h, err := sb.ShellStream(ctx, cmd, m.WithExecUser("root"))
 		if err == nil {
@@ -549,7 +578,23 @@ func bridge(ctx context.Context, sb *m.Sandbox, log *slog.Logger, stopped <-chan
 		case <-stopped:
 			return
 		case <-time.After(2 * time.Second):
-			log.Warn("bridge ended; restarting", "err", err)
+			log.Warn("job ended; restarting", "job", name, "err", err)
 		}
 	}
+}
+
+// mounts are the sandbox's own disks: Docker's, if it has one.
+func mounts(c config) map[string]m.MountConfig {
+	if c.dockerGiB == 0 {
+		return nil
+	}
+	return map[string]m.MountConfig{dockerDir: m.Mount.Owned(m.OwnedVolumeOptions{Kind: m.VolumeKindDisk, SizeMiB: c.dockerGiB * 1024})}
+}
+
+// components are provision.sh's, for this sandbox.
+func components(c config) string {
+	if c.dockerGiB > 0 {
+		return "base git broker docker claude"
+	}
+	return "base git broker claude"
 }

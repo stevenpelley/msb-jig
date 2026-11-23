@@ -179,7 +179,8 @@ fi
 # --- docker: the VM's own daemon, for tests ---
 if want docker; then
   log "docker"
-  apt-get install -y -qq --no-install-recommends docker.io >/dev/null
+  # buildx: BuildKit for docker build (the legacy builder is deprecated).
+  apt-get install -y -qq --no-install-recommends docker.io docker-buildx docker-compose-v2 >/dev/null
   usermod -aG docker "$SANDBOX_USER" 2>/dev/null || true
   if [[ -n "$PROVISION_PROXY" ]]; then
     install -d /etc/systemd/system/docker.service.d
@@ -202,6 +203,9 @@ if want claude; then
   log "claude code"
   su - "$SANDBOX_USER" -c 'curl -fsSL https://claude.ai/install.sh | bash' >/dev/null
   su - "$SANDBOX_USER" -c '~/.local/bin/claude --version'
+  # On PATH without a login shell too (ssh host cmd, VS Code's server). The
+  # installer's own link in ~/.local/bin follows its updates.
+  ln -sfn "$(getent passwd "$SANDBOX_USER" | cut -d: -f6)/.local/bin/claude" /usr/local/bin/claude
   # The credential stays on the Mac: Claude Code sends a placeholder to the
   # broker, which swaps in the user's token.
   if [[ -n "$BROKER_ANTHROPIC_URL" ]]; then
