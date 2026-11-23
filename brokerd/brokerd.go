@@ -29,6 +29,7 @@ import (
 // Hostnames the sandbox uses for each provider.
 const (
 	GitLabHost    = "gitlab.broker.internal"
+	GitHubHost    = "github.broker.internal"
 	AnthropicHost = "anthropic.broker.internal"
 	AWSHost       = "aws.broker.internal"
 )
@@ -43,6 +44,7 @@ var AWSProxyScript string
 // Flags configure the providers. Empty user or command leaves a provider out.
 type Flags struct {
 	GitLabUser, GitLabURL, GitLabTokenCmd, GitLabMCPTokenCmd string
+	GitHubUser, GitHubTokenCmd                               string
 	AnthropicTokenCmd, AnthropicURL                          string
 	// AWSProfiles are the proxy's --profile list; the first is the
 	// default, the rest are chosen per call with aws_profile.
@@ -56,6 +58,8 @@ func (f *Flags) Register(fs *flag.FlagSet) {
 	fs.StringVar(&f.GitLabURL, "gitlab-url", "https://gitlab.com", "the GitLab the broker forwards to")
 	fs.StringVar(&f.GitLabTokenCmd, "gitlab-token-command", "", "a command printing the user's GitLab token (default: $INVESTIGATOR_GITLAB_TOKEN)")
 	fs.StringVar(&f.GitLabMCPTokenCmd, "gitlab-mcp-token-command", "", "a command printing the token for GitLab's MCP server, a fine-grained PAT (default: $INVESTIGATOR_GITLAB_MCP_TOKEN, else the GitLab token)")
+	fs.StringVar(&f.GitHubUser, "github-user", "", "the GitHub user the agent acts for (no GitHub provider if empty); serves "+GitHubHost)
+	fs.StringVar(&f.GitHubTokenCmd, "github-token-command", "", "a command printing the user's GitHub token (default: $INVESTIGATOR_GITHUB_TOKEN)")
 	fs.StringVar(&f.AnthropicTokenCmd, "anthropic-token-command", "", "a command printing the Claude credential (`claude setup-token`'s OAuth token, or an API key); serves "+AnthropicHost)
 	fs.StringVar(&f.AnthropicURL, "anthropic-url", "https://api.anthropic.com", "the Anthropic API the broker forwards to")
 	fs.Func("aws-profile", "an AWS profile for the AWS MCP proxy (repeat; the first is the default); serves "+AWSHost, func(v string) error {
@@ -85,6 +89,12 @@ func (f *Flags) Providers(ctx context.Context, state string, log *slog.Logger) (
 			gl.MCPToken = TokenSource(f.GitLabMCPTokenCmd, "INVESTIGATOR_GITLAB_MCP_TOKEN")
 		}
 		providers[GitLabHost] = gl
+	}
+	if f.GitHubUser != "" {
+		g, _ := url.Parse("https://github.com")
+		a, _ := url.Parse("https://api.github.com")
+		providers[GitHubHost] = &broker.GitHub{User: f.GitHubUser, Token: TokenSource(f.GitHubTokenCmd, "INVESTIGATOR_GITHUB_TOKEN"),
+			Git: g, API: a, PublicHost: GitHubHost, Client: broker.NewUpstreamClient(), Log: log}
 	}
 	if f.AnthropicTokenCmd != "" {
 		up, err := url.Parse(f.AnthropicURL)

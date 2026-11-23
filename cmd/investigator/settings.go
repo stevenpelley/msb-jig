@@ -10,10 +10,12 @@ import (
 
 // settings are what investigator login records, in <root>/settings.json:
 // which providers the broker serves, and as whom. No secrets: tokens stay
-// in the Keychain (keychainGitLab, keychainClaude) or in glab's own login.
+// in the Keychain (keychainGitLab, keychainGitHub, keychainClaude) or in
+// glab's and gh's own logins.
 // The INV_* variables override them (loadConfig), for the checks.
 type settings struct {
 	GitLab *gitlabSettings `json:"gitlab,omitempty"`
+	GitHub *githubSettings `json:"github,omitempty"`
 	AWS    *awsSettings    `json:"aws,omitempty"`
 }
 
@@ -25,6 +27,14 @@ type gitlabSettings struct {
 	Token string `json:"token"`
 }
 
+// githubSettings: github.com only, for now.
+type githubSettings struct {
+	User string `json:"user"`
+	// Token: "gh" (the user's own gh login on the Mac) or "keychain"
+	// (keychainGitHub).
+	Token string `json:"token"`
+}
+
 type awsSettings struct {
 	// Profiles for the AWS MCP proxy, the first the default.
 	Profiles []string `json:"profiles"`
@@ -33,6 +43,7 @@ type awsSettings struct {
 // The Keychain items login writes and logout and uninstall delete.
 const (
 	keychainGitLab = "inv-gitlab"
+	keychainGitHub = "inv-github"
 	keychainClaude = "inv-claude"
 )
 
@@ -77,4 +88,12 @@ func gitlabTokenCommand(g gitlabSettings, host string) string {
 		return "security find-generic-password -s " + keychainGitLab + " -w"
 	}
 	return "glab api --hostname " + host + " user >/dev/null && glab config get token --host " + host
+}
+
+// githubTokenCommand prints the GitHub token for the broker.
+func githubTokenCommand(g githubSettings) string {
+	if g.Token == "keychain" {
+		return "security find-generic-password -s " + keychainGitHub + " -w"
+	}
+	return "gh auth token --hostname github.com"
 }

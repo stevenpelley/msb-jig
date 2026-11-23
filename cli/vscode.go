@@ -14,10 +14,18 @@ import (
 // They are user settings, so they are defaults, not rules: a workspace's
 // .vscode/settings.json, which the agent can write, overrides any of them
 // (prototype-plan.md step 2). What they close is what a repo didn't ask for.
-func VSCodeSettings(sshConfig string) map[string]any {
+//
+// hosts are the sandboxes' SSH host names: all Linux, so Remote-SSH
+// doesn't ask.
+func VSCodeSettings(sshConfig string, hosts []string) map[string]any {
+	platform := map[string]string{}
+	for _, h := range hosts {
+		platform[h] = "linux"
+	}
 	return map[string]any{
 		// SSH: our config file only, no agent forwarding, server fetched by the Mac.
 		"remote.SSH.configFile":            sshConfig,
+		"remote.SSH.remotePlatform":        platform,
 		"remote.SSH.enableAgentForwarding": false,
 		"remote.SSH.localServerDownload":   "always",
 		"remote.downloadExtensionsLocally": true, // checked 2026-11-22: the guest needs no marketplace
@@ -53,12 +61,12 @@ func VSCodeSettings(sshConfig string) map[string]any {
 
 // WriteVSCodeSettings writes settings.json into the harness instance's
 // user-data directory.
-func WriteVSCodeSettings(userDataDir, sshConfig string) (string, error) {
+func WriteVSCodeSettings(userDataDir, sshConfig string, hosts []string) (string, error) {
 	dir := filepath.Join(userDataDir, "User")
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return "", err
 	}
-	b, err := json.MarshalIndent(VSCodeSettings(sshConfig), "", "  ")
+	b, err := json.MarshalIndent(VSCodeSettings(sshConfig, hosts), "", "  ")
 	if err != nil {
 		return "", err
 	}

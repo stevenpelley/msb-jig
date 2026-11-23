@@ -16,16 +16,19 @@
 #                        (claude includes it), and aws-env sets up mcpcli for
 #                        the AWS MCP Server: the supervisor runs both on every
 #                        start (with broker-env), so they follow which providers the broker serves.
-#   BROKER_GITLAB_URL    the broker's GitLab endpoint (default https://gitlab.broker.internal;
-#                        sbx mode: http://host.docker.internal:<port>)
-#   BROKER_GITHUB_URL    the same for GitHub. Default empty: no broker serves GitHub
-#                        yet, so github.com stays github.com (anonymous, through
-#                        the domain filter)
+#   BROKER_GITLAB_URL    the broker's GitLab endpoint (default, when unset,
+#                        https://gitlab.broker.internal; sbx mode:
+#                        http://host.docker.internal:<port>). Empty: the broker
+#                        serves no GitLab, so gitlab.com stays gitlab.com
+#                        (anonymous, through the domain filter)
+#   BROKER_GITHUB_URL    the same for GitHub (https://github.broker.internal).
+#                        Default empty: github.com stays github.com
 #   BROKER_CA_FILE       the broker's CA certificate, installed as trusted if given
 #   BROKER_SESSION_TOKEN sbx mode only: the token investigator-net sbx requires,
 #                        sent by git (extraHeader), glab (its token) and the MCP client
 #   BROKER_GITLAB_USER   the GitLab user the agent acts for: writes the broker's
 #                        rules into the agent's instructions (~/.claude/CLAUDE.md)
+#   BROKER_GITHUB_USER   the same for GitHub
 #   BROKER_GITLAB_MCP    1 to register GitLab's MCP server (through the broker's
 #                        MCP filter) with Claude Code; it needs a token with the
 #                        mcp scope. Default: glab only.
@@ -44,11 +47,12 @@ set -euo pipefail
 
 SANDBOX_USER="${SANDBOX_USER:-agent}"
 PROVISION_COMPONENTS="${PROVISION_COMPONENTS:-base sshd git broker docker claude}"
-BROKER_GITLAB_URL="${BROKER_GITLAB_URL:-https://gitlab.broker.internal}"
+BROKER_GITLAB_URL="${BROKER_GITLAB_URL-https://gitlab.broker.internal}"
 BROKER_GITHUB_URL="${BROKER_GITHUB_URL:-}"
 BROKER_CA_FILE="${BROKER_CA_FILE:-}"
 BROKER_SESSION_TOKEN="${BROKER_SESSION_TOKEN:-}"
 BROKER_GITLAB_USER="${BROKER_GITLAB_USER:-}"
+BROKER_GITHUB_USER="${BROKER_GITHUB_USER:-}"
 BROKER_GITLAB_MCP="${BROKER_GITLAB_MCP:-}"
 BROKER_ANTHROPIC_URL="${BROKER_ANTHROPIC_URL:-}"
 BROKER_AWS_URL="${BROKER_AWS_URL:-}"
@@ -182,24 +186,28 @@ if want broker || want broker-env; then
   # placeholders. In sbx mode the broker listens on a Mac port, so every
   # tool sends the session token instead.
   tok="${BROKER_SESSION_TOKEN:-placeholder}"
-  if [[ -n "$BROKER_SESSION_TOKEN" ]]; then
+  if [[ -n "$BROKER_SESSION_TOKEN" && -n "$BROKER_GITLAB_URL" ]]; then
     git config --system "http.$BROKER_GITLAB_URL/.extraHeader" "X-Investigator-Session: $BROKER_SESSION_TOKEN"
   fi
   # The tools treat the broker as a self-hosted GitLab and GitHub Enterprise
   # Server. The broker injects the real tokens.
+  gl=()
   gh=()
+  [[ -n $BROKER_GITLAB_URL ]] && gl=("GITLAB_HOST=$gl_host" "GITLAB_TOKEN=$tok" "GITLAB_API_PROTOCOL=$gl_proto")
   [[ -n $BROKER_GITHUB_URL ]] && gh=("GH_HOST=$gh_host" "GH_ENTERPRISE_TOKEN=$tok")
-  client_env 81-investigator-broker \
-    "GITLAB_HOST=$gl_host" "GITLAB_TOKEN=$tok" "GITLAB_API_PROTOCOL=$gl_proto" "${gh[@]}"
+  client_env 81-investigator-broker "${gl[@]}" "${gh[@]}"
   # glab's own config too: auth status and clone read it, not GITLAB_HOST.
   # Only the broker's host: glab checks every host listed (its default
   # gitlab.com fails with the placeholder), and https, since glab repo clone
   # would otherwise use SSH, which the sandbox doesn't have. Rewritten on
-  # every start, like the rest.
+  # every start, like the rest; removed (if ours) when there's no GitLab.
   home="$(getent passwd "$SANDBOX_USER" | cut -d: -f6)"
-  install -d -m 0700 -o "$SANDBOX_USER" -g "$SANDBOX_USER" "$home/.config" "$home/.config/glab-cli"
-  cat >"$home/.config/glab-cli/config.yml" <<EOF
-# Written by investigator provision.sh; rewritten on every start.
+  glab_cfg="$home/.config/glab-cli/config.yml"
+  glab_mark="# Written by investigator provision.sh; rewritten on every start."
+  if [[ -n $BROKER_GITLAB_URL ]]; then
+    install -d -m 0700 -o "$SANDBOX_USER" -g "$SANDBOX_USER" "$home/.config" "$home/.config/glab-cli"
+    cat >"$glab_cfg" <<EOF
+$glab_mark
 host: $gl_host
 git_protocol: https
 check_update: false
@@ -208,8 +216,11 @@ hosts:
         api_protocol: $gl_proto
         git_protocol: https
 EOF
-  chown "$SANDBOX_USER:$SANDBOX_USER" "$home/.config/glab-cli/config.yml"
-  chmod 0600 "$home/.config/glab-cli/config.yml"
+    chown "$SANDBOX_USER:$SANDBOX_USER" "$glab_cfg"
+    chmod 0600 "$glab_cfg"
+  elif [[ -e $glab_cfg && "$(head -n1 "$glab_cfg")" == "$glab_mark" ]]; then
+    rm -f "$glab_cfg"
+  fi
 fi
 if want broker; then
   if [[ -n "$BROKER_CA_FILE" ]]; then
@@ -277,7 +288,7 @@ if want claude; then
   # token), only when asked: glab through the broker does everything it does,
   # with one credential fewer (prototype-plan.md, step 6).
   su - "$SANDBOX_USER" -c "~/.local/bin/claude mcp remove --scope user gitlab >/dev/null 2>&1" || true
-  if [[ "$BROKER_GITLAB_MCP" == 1 ]]; then
+  if [[ "$BROKER_GITLAB_MCP" == 1 && -n "$BROKER_GITLAB_URL" ]]; then
     su - "$SANDBOX_USER" -c "~/.local/bin/claude mcp add --scope user --transport http gitlab '$BROKER_GITLAB_URL/api/v4/mcp' ${BROKER_SESSION_TOKEN:+--header 'X-Investigator-Session: $BROKER_SESSION_TOKEN'}" >/dev/null
   fi
 fi
@@ -311,7 +322,7 @@ if want claude || want claude-env; then
   marker="<!-- Written by investigator provision.sh; edits are lost on reprovisioning. -->"
   if [[ -e $md ]] && [[ "$(head -n1 "$md")" != "$marker" ]]; then
     log "$md exists and isn't ours: left alone"
-  elif [[ -z "$BROKER_GITLAB_USER" && -z "$BROKER_AWS_URL" ]]; then
+  elif [[ -z "$BROKER_GITLAB_USER" && -z "$BROKER_GITHUB_USER" && -z "$BROKER_AWS_URL" ]]; then
     rm -f "$md"
   else
     install -d -o "$SANDBOX_USER" -g "$SANDBOX_USER" "$home/.claude"
@@ -345,6 +356,28 @@ EOF
 - For anything \`glab\` has no command for, use \`glab api\` (REST, or
   \`glab api graphql\` for queries). Save large responses to a file and read
   what you need with \`jq\`, \`head\` or \`grep\`.
+EOF
+      fi
+      if [[ -n "$BROKER_GITHUB_USER" ]]; then
+        u="$BROKER_GITHUB_USER"
+        cat <<EOF
+
+## GitHub
+
+- Use \`git\` and \`gh\` as usual: github.com URLs are routed to the broker,
+  and \`gh\` is already configured (\`GH_HOST\`).
+- Push only to branches under \`agent/$u/\`, e.g. \`agent/$u/fix-timeout\`.
+  Pushes to any other branch, and push options, are refused. Then open a
+  pull request: \`gh pr create --head agent/$u/<branch> --base <target>\`.
+- Pull request titles must start with \`[agent/$u]\`. Only pull requests
+  from \`agent/$u/\` branches can be edited, closed or commented on; for a
+  stack, target the branch below.
+- Never merge, approve or set auto-merge: a human does that.
+- Run \`gh\` non-interactively: pass \`--title\` and \`--body\` (or
+  \`--fill\`), and \`-R <owner>/<repo>\` when outside a clone.
+- CI: \`gh pr checks\`, \`gh run view --log-failed\`. For anything else,
+  \`gh api\` (REST) or \`gh api graphql\`. Writing files, refs or releases
+  through the API is refused: push instead.
 EOF
       fi
       if [[ -n "$BROKER_AWS_URL" ]]; then

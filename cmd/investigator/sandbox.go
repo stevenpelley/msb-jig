@@ -45,6 +45,7 @@ const (
 var (
 	nameRE       = regexp.MustCompile(`^[a-z][a-z0-9-]{0,30}$`)
 	gitlabUserRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,254}$`)
+	githubUserRE = regexp.MustCompile(`^[A-Za-z0-9](?:[A-Za-z0-9]|-[A-Za-z0-9]){0,38}$`)
 )
 
 func fail(f string, a ...any) {
@@ -85,6 +86,8 @@ func env(k, def string) string {
 //	INV_GITLAB_USER           the GitLab user the agent acts for; empty: no GitLab provider
 //	INV_GITLAB_URL            default https://gitlab.com
 //	INV_GITLAB_TOKEN_COMMAND  default: glab's own login, or the Keychain item inv-gitlab
+//	INV_GITHUB_USER           the GitHub user the agent acts for (github.com); empty: no GitHub provider
+//	INV_GITHUB_TOKEN_COMMAND  default: gh's own login, or the Keychain item inv-github
 //	INV_CLAUDE_TOKEN_COMMAND  default: the Keychain item inv-claude, if it exists
 //	INV_AWS_PROFILES          AWS profiles for the AWS MCP proxy, the first the default, space-separated; empty: no AWS
 //	INV_AWS_MCP_COMMAND       default: the embedded aws-mcp-proxy wrapper under uv
@@ -292,6 +295,15 @@ func sshConfig(name, state string) string {
 
 func sshHost(name string) string { return "investigator-" + name }
 
+// sshHosts are the host names of every sandbox under root.
+func sshHosts(root string) []string {
+	var hs []string
+	for _, n := range sandboxNames(root) {
+		hs = append(hs, sshHost(n))
+	}
+	return hs
+}
+
 // code opens the harness's own VS Code instance (its own user data and
 // extensions, under <root>/_vscode) on the sandbox, with the settings
 // that close the credential bridges (cli.VSCodeSettings), on dir (relative
@@ -303,7 +315,7 @@ func code(name, state string, args []string) {
 	sshConfig(name, state)
 	root := filepath.Dir(state)
 	data, ext := filepath.Join(root, "_vscode"), filepath.Join(root, "_vscode-ext")
-	if _, err := cli.WriteVSCodeSettings(data, filepath.Join(root, "ssh_config")); err != nil {
+	if _, err := cli.WriteVSCodeSettings(data, filepath.Join(root, "ssh_config"), sshHosts(root)); err != nil {
 		fail("%v", err)
 	}
 	bin, err := exec.LookPath("code")
@@ -383,6 +395,17 @@ func loadConfig(name, state string) config {
 		}
 		c.broker.GitLabTokenCmd = env("INV_GITLAB_TOKEN_COMMAND", gitlabTokenCommand(gl, u.Host))
 	}
+	gh := githubSettings{Token: "gh"}
+	if s.GitHub != nil {
+		gh = *s.GitHub
+	}
+	c.broker.GitHubUser = env("INV_GITHUB_USER", gh.User)
+	if c.broker.GitHubUser != "" {
+		if !githubUserRE.MatchString(c.broker.GitHubUser) {
+			fail("the GitHub user %q isn't a GitHub username", c.broker.GitHubUser)
+		}
+		c.broker.GitHubTokenCmd = env("INV_GITHUB_TOKEN_COMMAND", githubTokenCommand(gh))
+	}
 	claude, set := os.LookupEnv("INV_CLAUDE_TOKEN_COMMAND")
 	if !set && keychainHas(keychainClaude) {
 		claude = "security find-generic-password -s " + keychainClaude + " -w"
@@ -460,7 +483,7 @@ func run(name, state string) {
 	}
 	defer os.Remove(sock)
 	if len(providers) == 0 {
-		log.Warn("no broker provider configured (INV_GITLAB_USER, INV_CLAUDE_TOKEN_COMMAND, INV_AWS_PROFILES): the broker answers 404")
+		log.Warn("no broker provider configured (investigator login): the broker answers 404")
 	}
 	srv, err := brokerd.Serve(l, providers, state, name, log)
 	if err != nil {
@@ -544,7 +567,7 @@ func openSandbox(ctx context.Context, c config) (*m.Sandbox, bool, error) {
 		// older supervisor, or whose Claude setting changed, matches it.
 		env := clientEnv(c)
 		var gone []string
-		for _, k := range []string{"ANTHROPIC_BASE_URL", "CLAUDE_CODE_OAUTH_TOKEN", "MCP_GATEWAY_URL"} {
+		for _, k := range optionalEnv {
 			if _, ok := env[k]; !ok {
 				gone = append(gone, k)
 			}
@@ -596,8 +619,13 @@ func openSandbox(ctx context.Context, c config) (*m.Sandbox, bool, error) {
 func clientEnv(c config) map[string]string {
 	env := map[string]string{
 		"GIT_TERMINAL_PROMPT": "0",
-		"GITLAB_HOST":         brokerd.GitLabHost, "GITLAB_TOKEN": "placeholder", "GITLAB_API_PROTOCOL": "https",
 		"NODE_EXTRA_CA_CERTS": "/etc/ssl/certs/ca-certificates.crt",
+	}
+	if c.broker.GitLabUser != "" {
+		env["GITLAB_HOST"], env["GITLAB_TOKEN"], env["GITLAB_API_PROTOCOL"] = brokerd.GitLabHost, "placeholder", "https"
+	}
+	if c.broker.GitHubUser != "" {
+		env["GH_HOST"], env["GH_ENTERPRISE_TOKEN"] = brokerd.GitHubHost, "placeholder"
 	}
 	if c.broker.AnthropicTokenCmd != "" {
 		env["ANTHROPIC_BASE_URL"] = "https://" + brokerd.AnthropicHost
@@ -608,6 +636,11 @@ func clientEnv(c config) map[string]string {
 	}
 	return env
 }
+
+// optionalEnv are the clientEnv variables a provider adds: removed from a
+// sandbox whose provider has gone.
+var optionalEnv = []string{"GITLAB_HOST", "GITLAB_TOKEN", "GITLAB_API_PROTOCOL", "GH_HOST", "GH_ENTERPRISE_TOKEN",
+	"ANTHROPIC_BASE_URL", "CLAUDE_CODE_OAUTH_TOKEN", "MCP_GATEWAY_URL"}
 
 // awsURL is the broker's AWS MCP endpoint, for mcpcli and curl.
 const awsURL = "https://" + brokerd.AWSHost + broker.AWSMCPPath
@@ -641,6 +674,13 @@ func provision(ctx context.Context, sb *m.Sandbox, c config, log *slog.Logger) e
 	if c.awsOn() {
 		aws = awsURL
 	}
+	gitlab, github := "", ""
+	if c.broker.GitLabUser != "" {
+		gitlab = "https://" + brokerd.GitLabHost
+	}
+	if c.broker.GitHubUser != "" {
+		github = "https://" + brokerd.GitHubHost
+	}
 	anthropic := ""
 	if c.broker.AnthropicTokenCmd != "" {
 		anthropic = "https://" + brokerd.AnthropicHost
@@ -657,12 +697,12 @@ apt-get install -y -qq --no-install-recommends socat >/dev/null
 	script := fmt.Sprintf(`set -euo pipefail
 %s
 export SANDBOX_USER=%s PROVISION_COMPONENTS=%q
-export BROKER_GITLAB_URL=https://gitlab.broker.internal BROKER_GITHUB_URL=
-export BROKER_GITLAB_USER=%q BROKER_GITLAB_MCP= BROKER_ANTHROPIC_URL=%q BROKER_CA_FILE=%s
+export BROKER_GITLAB_URL=%q BROKER_GITHUB_URL=%q
+export BROKER_GITLAB_USER=%q BROKER_GITHUB_USER=%q BROKER_GITLAB_MCP= BROKER_ANTHROPIC_URL=%q BROKER_CA_FILE=%s
 export BROKER_AWS_URL=%q BROKER_AWS_PROFILES=%q MCPCLI_DIR=%s
 bash /root/provision.sh
 mkdir -p %s && touch %s
-`, first, guestUser, comps, c.broker.GitLabUser, anthropic, guestCA,
+`, first, guestUser, comps, gitlab, github, c.broker.GitLabUser, c.broker.GitHubUser, anthropic, guestCA,
 		aws, strings.Join(c.broker.AWSProfiles, " "), mcpcliDir, filepath.Dir(provisioned), provisioned)
 	h, err := sb.ShellStream(ctx, script, m.WithExecUser("root"))
 	if err != nil {

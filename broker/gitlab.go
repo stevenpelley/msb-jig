@@ -3,7 +3,6 @@ package broker
 import (
 	"bufio"
 	"bytes"
-	"compress/gzip"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -64,10 +63,7 @@ func (g *GitLab) scheme() string {
 
 func (g *GitLab) decide(req *Request) Decision {
 	d := Decide(*req)
-	if g.Log != nil {
-		g.Log.Info("decision", "provider", req.Provider, "user", req.User, "op", req.Op, "repo", req.Repo,
-			"method", req.Method, "path", req.Path, "refs", req.Refs, "allow", d.Allow, "reason", d.Reason)
-	}
+	logDecision(g.Log, req, d)
 	return d
 }
 
@@ -165,52 +161,9 @@ func (g *GitLab) git(w http.ResponseWriter, r *http.Request, req *Request) {
 }
 
 func (g *GitLab) receivePack(w http.ResponseWriter, r *http.Request, req *Request) {
-	req.Op = OpGitPush
-	var body io.Reader = r.Body
-	switch enc := strings.ToLower(r.Header.Get("Content-Encoding")); enc {
-	case "", "identity":
-	case "gzip":
-		zr, err := gzip.NewReader(r.Body)
-		if err != nil {
-			httpError(w, http.StatusBadRequest, "bad gzip body")
-			return
-		}
-		body = zr
-	default:
-		httpError(w, http.StatusUnsupportedMediaType, "unsupported Content-Encoding "+enc)
-		return
+	if body, ok := pushBody(w, r, req, g.Log); ok {
+		g.forward(w, r, body, g.gitAuth, nil)
 	}
-	br := bufio.NewReaderSize(body, 64<<10)
-	p, err := parsePushRequest(br)
-	if err != nil {
-		httpError(w, http.StatusBadRequest, "can't parse push: "+err.Error())
-		return
-	}
-	req.Refs = p.Updates
-	var d Decision
-	switch {
-	case p.PushCert:
-		d = deny("signed pushes aren't supported")
-	case p.PushOptions:
-		d = deny("push options (git push -o) aren't allowed")
-	default:
-		d = Decide(*req)
-	}
-	if g.Log != nil {
-		g.Log.Info("decision", "provider", req.Provider, "user", req.User, "op", req.Op, "repo", req.Repo,
-			"method", req.Method, "path", req.Path, "refs", req.Refs, "allow", d.Allow, "reason", d.Reason)
-	}
-	if !d.Allow {
-		// Read the rest, so git sees our status instead of a broken pipe.
-		_, _ = io.Copy(io.Discard, io.LimitReader(br, 4<<30))
-		w.Header().Set("Content-Type", "application/x-git-receive-pack-result")
-		w.Header().Set("Cache-Control", "no-cache")
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write(rejectPush(p, d.Reason))
-		return
-	}
-	r.Header.Del("Content-Encoding") // the body is forwarded decompressed
-	g.forward(w, r, io.MultiReader(bytes.NewReader(p.Prefix), br), g.gitAuth, nil)
 }
 
 // stripPushCaps removes push-options and push-cert from the advertisement,

@@ -53,6 +53,7 @@ func setup() {
 	ok = ok && hasCode
 	fmt.Println("optional, for login:")
 	need("glab", "GitLab with your own glab login", "brew install glab, or login gitlab --keychain")
+	need("gh", "GitHub with your own gh login", "brew install gh, or login github --keychain")
 	need("claude", "claude setup-token makes the Claude token", "https://claude.com/claude-code")
 	need("aws", "AWS SSO login", "brew install awscli")
 	need("uv", "runs AWS's MCP proxy", "brew install uv")
@@ -62,7 +63,7 @@ func setup() {
 	if err := os.MkdirAll(root, 0o700); err != nil {
 		fail("%v", err)
 	}
-	if _, err := cli.WriteVSCodeSettings(data, filepath.Join(root, "ssh_config")); err != nil {
+	if _, err := cli.WriteVSCodeSettings(data, filepath.Join(root, "ssh_config"), sshHosts(root)); err != nil {
 		fail("%v", err)
 	}
 	if hasCode {
@@ -101,6 +102,8 @@ func login(args []string) {
 	switch args[0] {
 	case "gitlab":
 		loginGitLab(args[1:])
+	case "github":
+		loginGitHub(args[1:])
 	case "claude":
 		loginClaude(args[1:])
 	case "aws":
@@ -117,6 +120,11 @@ func loginStatus() {
 		fmt.Printf("gitlab  %s on %s, token from %s\n", s.GitLab.User, s.GitLab.URL, tokenSource(*s.GitLab))
 	} else {
 		fmt.Println("gitlab  not logged in (investigator login gitlab <user>)")
+	}
+	if s.GitHub != nil {
+		fmt.Printf("github  %s on github.com, token from %s\n", s.GitHub.User, githubTokenSource(*s.GitHub))
+	} else {
+		fmt.Println("github  not logged in (investigator login github <user>)")
 	}
 	if keychainHas(keychainClaude) {
 		fmt.Printf("claude  token in the Keychain (%s)\n", keychainClaude)
@@ -222,6 +230,90 @@ func gitlabUser(base, token string) (string, error) {
 	return u.Username, nil
 }
 
+func githubTokenSource(g githubSettings) string {
+	if g.Token == "keychain" {
+		return "the Keychain (" + keychainGitHub + ")"
+	}
+	return "your gh login"
+}
+
+// loginGitHub records the github.com user the agent acts for, and where
+// the broker gets their token: gh's login on the Mac (logging in if
+// needed), or a token pasted into the Keychain. It checks the token
+// belongs to the user.
+func loginGitHub(args []string) {
+	g := githubSettings{Token: "gh"}
+	var rest []string
+	for _, a := range args {
+		switch {
+		case a == "--keychain":
+			g.Token = "keychain"
+		case strings.HasPrefix(a, "-"):
+			usage()
+		default:
+			rest = append(rest, a)
+		}
+	}
+	if len(rest) != 1 || !githubUserRE.MatchString(rest[0]) {
+		usage()
+	}
+	g.User = rest[0]
+	if g.Token == "keychain" {
+		tok := readSecret(fmt.Sprintf("a GitHub token for %s (repo scope, or a fine-grained token with contents, pull requests and actions; input hidden): ", g.User))
+		keychainStore(keychainGitHub, "github.com", tok)
+	} else {
+		if _, err := exec.LookPath("gh"); err != nil {
+			fail("gh isn't installed: brew install gh, or use --keychain")
+		}
+		if exec.Command("gh", "auth", "token", "--hostname", "github.com").Run() != nil {
+			fmt.Println("gh isn't logged in to github.com: gh auth login")
+			c := exec.Command("gh", "auth", "login", "--hostname", "github.com", "--web")
+			c.Stdin, c.Stdout, c.Stderr = os.Stdin, os.Stdout, os.Stderr
+			if err := c.Run(); err != nil {
+				fail("gh auth login: %v", err)
+			}
+		}
+	}
+	out, err := exec.Command("sh", "-c", githubTokenCommand(g)).Output()
+	if err != nil {
+		fail("reading the token back: %v", err)
+	}
+	who, err := githubUser(strings.TrimSpace(string(out)))
+	if err != nil {
+		fail("checking the token: %v", err)
+	}
+	if !strings.EqualFold(who, g.User) {
+		fail("the token belongs to %s, not %s", who, g.User)
+	}
+	s := loadSettings()
+	s.GitHub = &g
+	saveSettings(s)
+	fmt.Printf("github: the agent acts for %s on github.com, with the token from %s\n", g.User, githubTokenSource(g))
+}
+
+// githubUser is the login a token belongs to.
+func githubUser(token string) (string, error) {
+	req, err := http.NewRequest("GET", "https://api.github.com/user", nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Accept", "application/vnd.github+json")
+	resp, err := (&http.Client{Timeout: 20 * time.Second}).Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("api.github.com/user: %s", resp.Status)
+	}
+	var u struct{ Login string }
+	if err := json.NewDecoder(resp.Body).Decode(&u); err != nil {
+		return "", err
+	}
+	return u.Login, nil
+}
+
 // loginClaude stores a long-lived Claude token, from claude setup-token
 // run on the Mac, in the Keychain. The broker sends it for the sandbox.
 func loginClaude(args []string) {
@@ -284,7 +376,7 @@ func loginAWS(args []string) {
 func logout(args []string) {
 	which := args
 	if len(which) == 0 {
-		which = []string{"gitlab", "claude", "aws"}
+		which = []string{"gitlab", "github", "claude", "aws"}
 	}
 	s := loadSettings()
 	for _, p := range which {
@@ -297,6 +389,14 @@ func logout(args []string) {
 			}
 			s.GitLab = nil
 			keychainDelete(keychainGitLab)
+		case "github":
+			if s.GitHub != nil && s.GitHub.Token == "gh" {
+				fmt.Println("github: forgotten; your own gh login stays (gh auth logout to end it)")
+			} else {
+				fmt.Println("github: forgotten")
+			}
+			s.GitHub = nil
+			keychainDelete(keychainGitHub)
 		case "claude":
 			keychainDelete(keychainClaude)
 			fmt.Println("claude: token removed from the Keychain; revoke it at claude.ai, Settings, Claude Code, if you're done with it")
@@ -397,8 +497,8 @@ func uninstall(args []string) {
 	setRuntimePaths()
 	root := stateRoot()
 	names := sandboxNames(root)
-	fmt.Printf("This removes:\n  the sandboxes %s, with their disks and everything in them\n  %s\n  the Keychain items %s and %s\n  their SSH keys from microsandbox\n",
-		strings.Join(names, " "), root, keychainGitLab, keychainClaude)
+	fmt.Printf("This removes:\n  the sandboxes %s, with their disks and everything in them\n  %s\n  the Keychain items %s, %s and %s\n  their SSH keys from microsandbox\n",
+		strings.Join(names, " "), root, keychainGitLab, keychainGitHub, keychainClaude)
 	if !yes {
 		fmt.Print("type yes to go on: ")
 		line, _ := bufio.NewReader(os.Stdin).ReadString('\n')
@@ -417,6 +517,7 @@ func uninstall(args []string) {
 		fail("%v", err)
 	}
 	keychainDelete(keychainGitLab)
+	keychainDelete(keychainGitHub)
 	keychainDelete(keychainClaude)
 	if err := os.RemoveAll(root); err != nil {
 		fail("%v", err)

@@ -58,6 +58,8 @@ func brokerFor(t *testing.T, upstream string, session string) (addr string, caFi
 
 type gitEnv struct {
 	t       *testing.T
+	host    string // the broker's name for the provider
+	repo    string // the repository's path on it
 	dir     string
 	addr    string
 	caFile  string
@@ -67,6 +69,15 @@ type gitEnv struct {
 }
 
 func newGitEnv(t *testing.T) *gitEnv {
+	return newGitEnvFor(t, testHost, "grp/sub/proj", func(up string) (string, string) {
+		addr, caFile, _ := brokerFor(t, up, "")
+		return addr, caFile
+	})
+}
+
+// newGitEnvFor serves a bare repository at repo behind a git-http-backend
+// upstream, and the broker that serve returns for it, as host.
+func newGitEnvFor(t *testing.T, host, repo string, serve func(upstream string) (addr, caFile string)) *gitEnv {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not installed")
 	}
@@ -75,9 +86,9 @@ func newGitEnv(t *testing.T) *gitEnv {
 	if _, err := os.Stat(backend); err != nil {
 		t.Skip("git-http-backend not found")
 	}
-	e := &gitEnv{t: t, dir: t.TempDir()}
+	e := &gitEnv{t: t, dir: t.TempDir(), host: host, repo: repo}
 	root := filepath.Join(e.dir, "upstream")
-	e.bare = filepath.Join(root, "grp", "sub", "proj.git")
+	e.bare = filepath.Join(root, filepath.FromSlash(repo)+".git")
 	e.run("", "git", "init", "-q", "--bare", "-b", "main", e.bare)
 	e.run(e.bare, "git", "config", "http.receivepack", "true")
 	e.run(e.bare, "git", "config", "receive.advertisePushOptions", "true")
@@ -105,7 +116,7 @@ func newGitEnv(t *testing.T) *gitEnv {
 		cgiH.ServeHTTP(w, r)
 	}))
 	t.Cleanup(up.Close)
-	e.addr, e.caFile, _ = brokerFor(t, up.URL, "")
+	e.addr, e.caFile = serve(up.URL)
 	return e
 }
 
@@ -123,7 +134,7 @@ func (e *gitEnv) env() []string {
 		"GIT_TERMINAL_PROMPT=0", "GIT_CONFIG_NOSYSTEM=1", "HOME="+e.dir,
 		"GIT_CONFIG_COUNT=3",
 		"GIT_CONFIG_KEY_0=http.sslCAInfo", "GIT_CONFIG_VALUE_0="+e.caFile,
-		"GIT_CONFIG_KEY_1=http.curloptResolve", "GIT_CONFIG_VALUE_1="+testHost+":"+port+":127.0.0.1",
+		"GIT_CONFIG_KEY_1=http.curloptResolve", "GIT_CONFIG_VALUE_1="+e.host+":"+port+":127.0.0.1",
 		"GIT_CONFIG_KEY_2=user.email", "GIT_CONFIG_VALUE_2=a@example.invalid",
 		"GIT_AUTHOR_NAME=a", "GIT_COMMITTER_NAME=a",
 	)
@@ -131,7 +142,7 @@ func (e *gitEnv) env() []string {
 
 func (e *gitEnv) url() string {
 	_, port, _ := net.SplitHostPort(e.addr)
-	return "https://" + testHost + ":" + port + "/grp/sub/proj.git"
+	return "https://" + e.host + ":" + port + "/" + e.repo + ".git"
 }
 
 func (e *gitEnv) git(dir string, args ...string) (string, error) {

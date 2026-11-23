@@ -3,7 +3,7 @@
 // (microsandbox.md); the commands taking a <name> manage one.
 //
 //	investigator setup              check the Mac, write the harness's VS Code profile, pull the image
-//	investigator login [provider]   record GitLab, Claude and AWS for the broker (login.go); alone: what's recorded
+//	investigator login [provider]   record GitLab, GitHub, Claude and AWS for the broker (login.go); alone: what's recorded
 //	investigator logout [provider]  forget them, and remove their Keychain items
 //	investigator open <name> [dir]  start the sandbox if needed (creating it the first time), then VS Code on dir
 //	investigator stop <name>        stop it
@@ -38,12 +38,14 @@ func usage() {
 	fmt.Fprintln(os.Stderr, `usage: investigator <command> ...
 
   setup                   check what's needed, set up the harness's VS Code, pull the image
-  login                   show what the broker uses for GitLab, Claude and AWS
+  login                   show what the broker uses for GitLab, GitHub, Claude and AWS
   login gitlab <user> [--url https://host] [--keychain]
                           act for <user>, with your glab login's token, or one you paste
+  login github <user> [--keychain]
+                          act for <user> on github.com, with your gh login's token, or one you paste
   login claude            store a token from claude setup-token
   login aws <profile>...  use these AWS profiles (signing in with SSO if needed)
-  logout [gitlab|claude|aws]
+  logout [gitlab|github|claude|aws]
                           forget them (all, if none named)
   open <name> [dir]       start the sandbox (creating it the first time) and open VS Code
                           on dir (relative to the sandbox user's home; default: home)
@@ -128,7 +130,7 @@ func sshSetup(args []string) {
 		fmt.Fprintln(os.Stderr, "ssh-setup:", err)
 		os.Exit(1)
 	}
-	vs, err := cli.WriteVSCodeSettings(filepath.Join(*state, "vscode"), p.Config)
+	vs, err := cli.WriteVSCodeSettings(filepath.Join(*state, "vscode"), p.Config, []string{e.Alias})
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "ssh-setup:", err)
 		os.Exit(1)

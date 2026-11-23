@@ -15,11 +15,10 @@ import (
 
 func main() {
 	mode, cfg, host := os.Args[1], os.Args[2], os.Args[3]
-	s := map[string]any{"remote.SSH.configFile": cfg}
+	s := map[string]any{"remote.SSH.configFile": cfg, "remote.SSH.remotePlatform": map[string]string{host: "linux"}}
 	if mode == "ours" {
-		s = cli.VSCodeSettings(cfg)
+		s = cli.VSCodeSettings(cfg, []string{host})
 	}
-	s["remote.SSH.remotePlatform"] = map[string]string{host: "linux"}
 	s["workbench.startupEditor"] = "none"
 	s["security.workspace.trust.enabled"] = false
 	if len(os.Args) > 4 && os.Args[4] != "" {
