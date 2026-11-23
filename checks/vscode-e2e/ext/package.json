@@ -1,0 +1,11 @@
+{
+  "name": "investigator-bridges-probe",
+  "displayName": "investigator bridges probe",
+  "description": "Test only (checks/vscode-e2e): runs bridges.sh in a remote terminal, saves the output, and quits.",
+  "version": "0.0.1",
+  "publisher": "investigator",
+  "engines": { "vscode": "^1.90.0" },
+  "extensionKind": ["workspace"],
+  "activationEvents": ["onStartupFinished"],
+  "main": "./extension.js"
+}

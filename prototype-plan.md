@@ -54,6 +54,17 @@ The agent writes scripts for each Mac step, and the user runs them and pastes th
    - Does `Developer: Show Running Extensions` list Claude Code as running on the remote?
    - Does Claude Code sign in and work inside the sandbox, from the VS Code terminal and from its extension?
 
+**Unattended run on microsandbox (2026-11-22, VS Code 1.147.0, Remote-SSH 0.128.0, sandbox `inv2`):** `checks/vscode-e2e/run.sh <sandbox> default|ours` opens VS Code with a fresh user-data directory and the harness's extensions directory, connects over our SSH config, and loads a probe extension on the remote for that run only (`--extensionDevelopmentPath=vscode-remote://…`). The probe opens an integrated terminal, runs `bridges.sh` there and quits VS Code. No one at the keyboard; it opens a window on the Mac.
+- **Default settings:** open: VS Code's git askpass (`GIT_ASKPASS`, `VSCODE_GIT_ASKPASS_*`), the git extension's socket (`VSCODE_GIT_IPC_HANDLE`), `BROWSER`, and the remote `code` CLI's channel to the editor (`VSCODE_IPC_HOOK_CLI`). The guest tried `update.code.visualstudio.com` (the server download, denied, then done by the Mac), telemetry hosts and cloud metadata addresses; all denied.
+- **Our settings:** askpass and `BROWSER` closed (so `BROWSER: null` in `terminal.integrated.env.linux` works); no denied hosts, since the Mac downloads the server. Still open:
+  - **The git extension's socket.** Its askpass handler answers whatever `git.useIntegratedAskPass` says. With `github.gitAuthentication: false` it returns no token by itself, but a request can put a username and password prompt in front of the user. Only `git.enabled: false` removes it. **Accepted (user, 2026-11-22):** git integration stays on, and a prompt can appear.
+  - **The remote `code` CLI.** `VSCODE_IPC_HOOK_CLI` is in the extension host's environment too, so extensions (Claude Code's) have it.
+  - Setting either to `null` in `terminal.integrated.env.linux` doesn't work: VS Code adds both after it (checked).
+  - `code --openExternal http://<Mac LAN address>/…` from the guest did **not** make the Mac's browser fetch the URL (a listener there got nothing; the guest's own request was blocked). Probably VS Code's prompt for untrusted domains stopped it; *unverified*, since screen capture failed with the screen locked.
+  - `token-env`: the broker's placeholders, expected.
+- `extensions.allowed` must include `ms-vscode.remote-explorer`, which Remote-SSH depends on (added).
+- **Not done yet:** the rest of item 4 (Claude Code's extension on the remote, extensions and ports after opening a repo with recommendations), and `investigator code` itself, which uses the same settings.
+
 ### 3. The broker's GitLab HTTP proxy (agent, in its sandbox)
 
 - **Core:** the broker's own endpoints per provider, credential injection, the policy decision, logging. No TLS interception and no general egress filtering.

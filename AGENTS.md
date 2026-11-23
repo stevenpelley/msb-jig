@@ -100,7 +100,7 @@ The Lima backend was removed the same day (in git at `695143a`), with its
 netstack and gvisor.
 
 Still open:
-- VS Code itself (`investigator code`, step 2);
+- VS Code: the bridges check runs unattended (`checks/vscode-e2e/`, step 2); the git extension's socket and the remote `code` CLI stay open; Claude Code's extension on the remote is unchecked;
 - allowing a host without `rm`: waiting for microsandbox#1538;
 - the work track.
 
@@ -119,7 +119,7 @@ The agent runs on the Mac itself and asks before running commands.
 | `broker/` | The broker: policy (`Decide`), receive-pack parsing, the GitLab adapter (git, LFS, REST, GraphQL, the hosted-MCP filter), the AWS MCP bridge (HTTP to the stdio proxy), the name-constrained CA, the shared server checks |
 | `brokerd/` | The broker as the supervisor and `investigator-net` run it: providers from flags, the TLS server under the sandbox's CA, the Unix-socket listener, token commands, the `aws-mcp-proxy.py` wrapper |
 | `microsandbox.md` | microsandbox as the VM layer (2026-11-22, msb 0.7.16): checks on the Mac, the broker over vsock, the supervisor, Docker, the environment |
-| `checks/` | `bridges.sh` (run in the editor's terminal), `step1-docker.sh` (step 1 against a container) |
+| `checks/` | `bridges.sh` (run in the editor's terminal), `vscode-e2e/` (VS Code over Remote-SSH, unattended, running `bridges.sh` through a probe extension), `step1-docker.sh` (step 1 against a container) |
 | `enforcement.md` | Making the harness required (2026-11-22): threats, model-gated chain of trust, network and provider-side options, small provider asks |
 
 ## Working rules

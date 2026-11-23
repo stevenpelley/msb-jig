@@ -28,12 +28,13 @@ func VSCodeSettings(sshConfig string) map[string]any {
 		// Dev Containers: don't copy .gitconfig or forward credentials (names unverified).
 		"dev.containers.copyGitConfig":                     false,
 		"dev.containers.gitCredentialHelperConfigLocation": "none",
-		// Remote terminals: no helper that opens URLs in the Mac's browser (unverified that null unsets it).
+		// Remote terminals: no helper that opens URLs in the Mac's browser (checked 2026-11-22, VS Code 1.147).
 		"terminal.integrated.env.linux": map[string]any{"BROWSER": nil},
 		// Extensions: our short list; repos can't recommend new ones in.
 		"extensions.allowed": map[string]any{
 			"ms-vscode-remote.remote-ssh":      true,
 			"ms-vscode-remote.remote-ssh-edit": true,
+			"ms-vscode.remote-explorer":        true, // Remote-SSH depends on it
 			"anthropic.claude-code":            true,
 		},
 		"extensions.ignoreRecommendations": true,
