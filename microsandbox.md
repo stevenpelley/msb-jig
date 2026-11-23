@@ -5,11 +5,11 @@ microsandbox 0.7.16, released 2026-11-18 and installed through Homebrew
 (`superradcompany/tap`). The results are under "What we checked". "Verify"
 marks what's still open.
 
-**Verdict:** it works as the VM layer (and `investigator-msb`, below, runs
-it end to end), and the broker fits behind it
-unchanged. The broker can live in the same process that owns the VM: the
-coupling we wanted, without Lima's fail-open problems. Recommended as the
-replacement for Lima plus `investigator-net`'s netstack and filter.
+**Verdict:** it works as the VM layer, and replaced Lima plus
+`investigator-net`'s netstack and filter on 2026-11-22. `investigator up`,
+below, runs it end to end, and the broker fits behind it unchanged. The
+broker lives in the same process that owns the VM: the coupling we wanted,
+without Lima's fail-open problems.
 
 ## Why look at it
 
@@ -167,9 +167,12 @@ Found on the way, not microsandbox's:
   "request not recognized". GitLab accepts both, and this happens on Lima
   too. Worth fixing in `broker/`.
 
-## The supervisor, built: `investigator-msb`
+## The supervisor, built: `investigator up`
 
-`cmd/investigator-msb` (2026-11-22) is the shape above, about 450 lines.
+Built 2026-11-22 as `cmd/investigator-msb`, about 450 lines, and folded into
+the `investigator` CLI the same day (`cmd/investigator/sandbox.go`), once
+microsandbox replaced Lima. The commands below are `investigator <cmd>`;
+`code <name>` opens VS Code on the sandbox with the harness's settings.
 The broker setup it shares with `investigator-net` lives in `brokerd/`.
 
 - `up <name>` starts `run <name>` in the background (setsid, log in
@@ -198,12 +201,12 @@ The broker setup it shares with `investigator-net` lives in `brokerd/`.
 - `shell` is `msb exec -t -u agent`.
 - `ssh-config` prints a Host block with `ProxyCommand msb ssh serve`.
 - `rm` is `down` plus removing the sandbox.
-- Configuration comes from the same variables as `lima/sandbox.sh`:
+- Configuration comes from `INV_*` variables (the header of `sandbox.go`):
   - `INV_GITLAB_USER`;
   - glab's login as the GitLab token by default;
   - the `inv-claude` Keychain item for Claude.
 
-Checked on the Mac with `INV_GITLAB_USER=<user> investigator-msb up inv2`:
+Checked on the Mac with `INV_GITLAB_USER=<user> investigator-msb up inv2` (now `investigator up inv2`):
 
 | Check | Result |
 |---|---|
@@ -235,7 +238,7 @@ Docker's overlay snapshots fail on it: "failed to mount … fstype: overlay
 iptables). The fix is an ext4 disk of the sandbox's own at
 `/var/lib/docker` (`Mount.Owned`, kind disk; removed with the sandbox).
 
-- `investigator-msb` creates the sandbox with a 32 GiB root disk
+- The supervisor creates the sandbox with a 32 GiB root disk
   (`INV_DISK`; the default was 4 GiB) and a 64 GiB Docker disk
   (`INV_DOCKER_DISK`, 0 for none). Both are sparse: 121 MB on the Mac after
   pulling a few images.
@@ -271,7 +274,7 @@ only, and a plain `ssh host cmd`, as VS Code's server is started, had no
 `ANTHROPIC_BASE_URL` or `GITLAB_HOST`. Checked with a throwaway sandbox: a
 variable set at create (`-e`) reaches both SSH and exec sessions.
 
-- `investigator-msb` sets the client variables (`clientEnv`) on the
+- The supervisor sets the client variables (`clientEnv`) on the
   sandbox at create. On every start it re-applies them to the stopped
   sandbox (`Modify` with `next_start`; a running sandbox refuses: "env
   requires restart"), so a sandbox from an older supervisor, or one whose

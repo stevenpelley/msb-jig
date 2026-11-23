@@ -382,6 +382,8 @@ The CLI's commands are in [Install and uninstall](#install-and-uninstall): `inve
 
 ## Packaging: one process per sandbox
 
+*Since 2026-11-22 the one process is the `investigator` supervisor, which holds the microsandbox VM and serves the broker (`microsandbox.md`). The Lima form below is kept as the record.*
+
 *Rewritten 2026-11-22. The earlier plan, a broker container stack under Podman with `docker/mcp-gateway`, is dropped: on a Mac without Docker Desktop a container means another VM (Podman machine), and whether a Lima VM could reach a port Podman forwards was unknown. Nothing runs under `launchd` either.*
 
 **Everything that runs continuously for a sandbox is packaged with it.** On the Mac that's two processes per sandbox, both started and stopped with the VM: Lima's host agent, which runs the VM, and ours, `investigator-net`.
@@ -527,6 +529,8 @@ Unknown hosts: sbx has an approval queue, which the CLI shows the user. Where th
 **Don't mount host files read-write.** The agent could write `.git/hooks` or `.vscode/settings.json` in a mounted repo, and the user's own tools on the Mac would later run them outside the sandbox. Clone inside the VM, as sbx's clone mode does, or mount read-only.
 
 ## Leaving sbx: Lima
+
+*Superseded 2026-11-22: microsandbox replaced Lima as the VM layer (`microsandbox.md`), and the Lima code (`lima/`, `net/`, `investigator-net lima`, `checks/lima-net.sh`) was removed. It is in git at `695143a`. What follows is kept as the record.*
 
 *Added 2026-11-22. The design must not depend on sbx, because we can't assume Docker accounts at work. This section is the path off it. Not yet tested. The networking details were checked against Lima v2.3.0's source the same day; the rest is from what I already knew and is unverified until the spike.*
 

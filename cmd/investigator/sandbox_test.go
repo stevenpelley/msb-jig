@@ -26,7 +26,7 @@ func TestEgressRules(t *testing.T) {
 	}
 }
 
-// The variables provision.sh writes for the components investigator-msb
+// The variables provision.sh writes for the components the supervisor
 // provisions (client_env 80-83: git, broker, node CA, claude) are the ones
 // clientEnv sets on the sandbox.
 func TestClientEnvMatchesProvision(t *testing.T) {

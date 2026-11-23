@@ -1,6 +1,7 @@
 // Package brokerd sets up the broker as the per-sandbox processes run it:
 // the providers from flags, and the TLS server under the sandbox's CA.
-// investigator-net (Lima, sbx) and investigator-msb (microsandbox) share it.
+// investigator-net (sbx, a bare broker) and the investigator supervisor
+// (microsandbox) share it.
 package brokerd
 
 import (

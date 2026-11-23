@@ -1,34 +1,3 @@
-// investigator-msb runs a sandbox on microsandbox, with the broker in the
-// same process that owns the VM (microsandbox.md, "Tying the broker's
-// lifecycle to the sandbox's").
-//
-//	investigator-msb up <name>      start the supervisor in the background (creates the sandbox once)
-//	investigator-msb run <name>     the supervisor, in the foreground
-//	investigator-msb down <name>    stop the supervisor, and with it the sandbox
-//	investigator-msb shell <name>   a login shell as the agent user
-//	investigator-msb ssh-config <name>  an OpenSSH Host block (VS Code Remote-SSH)
-//	investigator-msb rm <name>      down, then remove the sandbox (the state directory stays)
-//
-// The supervisor serves the broker on <state>/broker.sock and holds the
-// sandbox through the microsandbox SDK, attached: if the process dies, the
-// VM stops with it. The guest reaches the broker through a vsock route to
-// that socket. Its other egress is microsandbox's policy, compiled from the
-// filter's layers. Network rules and the vsock route are set when the
-// sandbox is created; rm and up again to change them.
-//
-// Environment (as lima/sandbox.sh):
-//
-//	INV_STATE                 state directories (default ~/.investigator)
-//	INV_IMAGE                 the OCI image (default ubuntu:26.04)
-//	INV_MEMORY                MiB (default 4096)
-//	INV_CPUS                  vCPUs (default 4)
-//	INV_DISK                  root disk, GiB (default 32; sparse)
-//	INV_DOCKER_DISK           the ext4 disk for /var/lib/docker, GiB (default 64; sparse); 0: no Docker
-//	INV_PROFILE, INV_LAYERS   the allowlist's profile and extra layer files
-//	INV_GITLAB_USER           the GitLab user the agent acts for; empty: no GitLab provider
-//	INV_GITLAB_URL            default https://gitlab.com
-//	INV_GITLAB_TOKEN_COMMAND  default: glab's own login
-//	INV_CLAUDE_TOKEN_COMMAND  default: the Keychain item inv-claude, if it exists
 package main
 
 import (
@@ -52,6 +21,7 @@ import (
 	m "github.com/superradcompany/microsandbox/sdk/go"
 
 	"mcp-restrict/brokerd"
+	"mcp-restrict/cli"
 	"mcp-restrict/filter"
 	"mcp-restrict/sandbox"
 )
@@ -70,13 +40,8 @@ const (
 
 var nameRE = regexp.MustCompile(`^[a-z][a-z0-9-]{0,30}$`)
 
-func usage() {
-	fmt.Fprintln(os.Stderr, "usage: investigator-msb up|run|down|shell|ssh-config|rm <name>")
-	os.Exit(2)
-}
-
 func fail(f string, a ...any) {
-	fmt.Fprintf(os.Stderr, "investigator-msb: "+f+"\n", a...)
+	fmt.Fprintf(os.Stderr, "investigator: "+f+"\n", a...)
 	os.Exit(1)
 }
 
@@ -87,11 +52,31 @@ func env(k, def string) string {
 	return def
 }
 
-func main() {
-	if len(os.Args) != 3 {
-		usage()
-	}
-	cmd, name := os.Args[1], os.Args[2]
+// The sandbox commands run a sandbox on microsandbox, with the broker in
+// the same process that owns the VM (microsandbox.md, "Tying the broker's
+// lifecycle to the sandbox's").
+//
+// The supervisor (run) serves the broker on <state>/broker.sock and holds
+// the sandbox through the microsandbox SDK, attached: if the process dies,
+// the VM stops with it. The guest reaches the broker through a vsock route
+// to that socket. Its other egress is microsandbox's policy, compiled from
+// the filter's layers. Network rules and the vsock route are set when the
+// sandbox is created; rm and up again to change them.
+//
+// Environment:
+//
+//	INV_STATE                 state directories (default ~/.investigator)
+//	INV_IMAGE                 the OCI image (default ubuntu:26.04)
+//	INV_MEMORY                MiB (default 4096)
+//	INV_CPUS                  vCPUs (default 4)
+//	INV_DISK                  root disk, GiB (default 32; sparse)
+//	INV_DOCKER_DISK           the ext4 disk for /var/lib/docker, GiB (default 64; sparse); 0: no Docker
+//	INV_PROFILE, INV_LAYERS   the allowlist's profile and extra layer files
+//	INV_GITLAB_USER           the GitLab user the agent acts for; empty: no GitLab provider
+//	INV_GITLAB_URL            default https://gitlab.com
+//	INV_GITLAB_TOKEN_COMMAND  default: glab's own login
+//	INV_CLAUDE_TOKEN_COMMAND  default: the Keychain item inv-claude, if it exists
+func sandboxCmd(cmd, name string) {
 	if !nameRE.MatchString(name) {
 		fail("name must be lowercase letters, digits and dashes, at most 31 characters")
 	}
@@ -108,15 +93,17 @@ func main() {
 	case "shell":
 		shell(name)
 	case "ssh-config":
-		sshConfig(name, state)
+		fmt.Print(sshConfig(name, state))
+	case "code":
+		code(name, state)
 	case "rm":
 		down(state)
 		if err := m.RemoveSandbox(context.Background(), name); err != nil && !m.IsKind(err, m.ErrSandboxNotFound) {
 			fail("remove: %v", err)
 		}
+		// The next sandbox of this name has a new host key.
+		_ = os.Remove(filepath.Join(state, "known_hosts"))
 		fmt.Println("removed", name, "(state kept in", state+")")
-	default:
-		usage()
 	}
 }
 
@@ -197,7 +184,7 @@ func up(name, state string) {
 			fail("not ready after 20 minutes; see %s", logPath)
 		case <-tick.C:
 			if _, err := os.Stat(ready); err == nil {
-				fmt.Printf("%s is up (supervisor pid %d)\n  shell:  investigator-msb shell %s\n  down:   investigator-msb down %s\n", name, c.Process.Pid, name, name)
+				fmt.Printf("%s is up (supervisor pid %d)\n  shell:   investigator shell %[3]s\n  VS Code: investigator code %[3]s\n  down:    investigator down %[3]s\n", name, c.Process.Pid, name)
 				return
 			}
 		}
@@ -237,7 +224,11 @@ func shell(name string) {
 	fail("%v", syscall.Exec(msb, []string{"msb", "exec", "-t", "-u", guestUser, name, "--", "bash", "-l"}, os.Environ()))
 }
 
-func sshConfig(name, state string) {
+// sshConfig writes the sandbox's Host block to <state>/ssh_config, and the
+// file VS Code reads (<root>/ssh_config) that includes every sandbox's, and
+// returns the block. The key is the sandbox's own; msb ssh authorize adds
+// it for all sandboxes (microsandbox.md).
+func sshConfig(name, state string) string {
 	key := filepath.Join(state, "ssh_key")
 	if _, err := os.Stat(key); err != nil {
 		if out, err := exec.Command("ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-C", "investigator-"+name, "-f", key).CombinedOutput(); err != nil {
@@ -247,17 +238,58 @@ func sshConfig(name, state string) {
 			fail("msb ssh authorize: %v: %s", err, out)
 		}
 	}
+	msb, err := exec.LookPath("msb")
+	if err != nil {
+		fail("msb not found")
+	}
 	// No agent or X11 forwarding: the Mac's credentials stay on the Mac.
-	fmt.Printf(`Host investigator-%[1]s
+	// The host key is new with each sandbox (rm removes known_hosts), so
+	// the first one is accepted; it reaches us over msb's own channel.
+	block := fmt.Sprintf(`Host %[1]s
   User %[2]s
   IdentityFile %[3]s
   IdentitiesOnly yes
   UserKnownHostsFile %[4]s
-  ProxyCommand msb ssh serve %[1]s --stdio
+  StrictHostKeyChecking accept-new
+  ProxyCommand %[5]s ssh serve %[6]s --stdio
   ForwardAgent no
   ForwardX11 no
   ClearAllForwardings no
-`, name, guestUser, key, filepath.Join(state, "known_hosts"))
+`, sshHost(name), guestUser, key, filepath.Join(state, "known_hosts"), msb, name)
+	if err := os.WriteFile(filepath.Join(state, "ssh_config"), []byte(block), 0o600); err != nil {
+		fail("%v", err)
+	}
+	root := filepath.Dir(state)
+	all := fmt.Sprintf("# Written by investigator: every sandbox's Host block.\nInclude %s\n", filepath.Join(root, "*", "ssh_config"))
+	if err := os.WriteFile(filepath.Join(root, "ssh_config"), []byte(all), 0o600); err != nil {
+		fail("%v", err)
+	}
+	return block
+}
+
+func sshHost(name string) string { return "investigator-" + name }
+
+// code opens the harness's own VS Code instance (its own user data and
+// extensions, under <root>/_vscode) on the sandbox, with the settings
+// that close the credential bridges (cli.VSCodeSettings).
+func code(name, state string) {
+	if pidOf(state) == 0 {
+		fail("%s isn't up: investigator up %s", name, name)
+	}
+	sshConfig(name, state)
+	root := filepath.Dir(state)
+	data, ext := filepath.Join(root, "_vscode"), filepath.Join(root, "_vscode-ext")
+	if _, err := cli.WriteVSCodeSettings(data, filepath.Join(root, "ssh_config")); err != nil {
+		fail("%v", err)
+	}
+	bin, err := exec.LookPath("code")
+	if err != nil {
+		fail("VS Code's code command isn't on PATH (VS Code: Shell Command: Install 'code' command in PATH)")
+	}
+	args := []string{"code", "--user-data-dir", data, "--extensions-dir", ext,
+		"--remote", "ssh-remote+" + sshHost(name), "/home/" + guestUser}
+	fmt.Println(strings.Join(args, " "))
+	fail("%v", syscall.Exec(bin, args, os.Environ()))
 }
 
 // --- run: the supervisor ---

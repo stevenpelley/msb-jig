@@ -1,6 +1,16 @@
-// Command investigator is the harness CLI. Only the pieces built so far are
-// here; the full command set (setup, login, open, stop, ...) comes with the
-// backends (prototype-plan.md step 7).
+// Command investigator is the harness CLI. A sandbox is a microsandbox VM
+// owned by a supervisor process that also serves the broker
+// (microsandbox.md); the commands taking a <name> manage one.
+//
+//	investigator up <name>          start the supervisor in the background (creates and provisions the sandbox once)
+//	investigator run <name>         the supervisor, in the foreground
+//	investigator down <name>        stop the supervisor, and with it the sandbox
+//	investigator shell <name>       a login shell as the agent user
+//	investigator code <name>        VS Code on the sandbox, with the harness's settings
+//	investigator ssh-config <name>  write and print the sandbox's OpenSSH Host block
+//	investigator rm <name>          down, then remove the sandbox and its disks (the state directory stays)
+//	investigator allowlist          compile the allowlist layers
+//	investigator ssh-setup          SSH keys and config for an sshd-based sandbox (sbx, checks/step1-docker.sh)
 package main
 
 import (
@@ -15,11 +25,20 @@ import (
 )
 
 func usage() {
-	fmt.Fprintln(os.Stderr, `usage: investigator <command> [flags]
+	fmt.Fprintln(os.Stderr, `usage: investigator <command> ...
 
-commands:
-  ssh-setup   generate a sandbox's SSH keys and write its SSH config
-  allowlist   compile the allowlist layers into the filter's ACL or sbx policy commands`)
+sandboxes (microsandbox):
+  up <name>          start the sandbox and its broker in the background (creates it the first time)
+  run <name>         the same, in the foreground
+  down <name>        stop it
+  shell <name>       a login shell as the agent user
+  code <name>        open VS Code on it, with the harness's settings
+  ssh-config <name>  write and print its OpenSSH Host block
+  rm <name>          stop and remove it, with its disks
+
+other:
+  allowlist [flags]  compile the allowlist layers into the filter's ACL or sbx policy commands
+  ssh-setup [flags]  SSH keys and config for an sshd-based sandbox (sbx, checks/step1-docker.sh)`)
 	os.Exit(2)
 }
 
@@ -32,6 +51,11 @@ func main() {
 		sshSetup(os.Args[2:])
 	case "allowlist":
 		allowlist(os.Args[2:])
+	case "up", "run", "down", "shell", "code", "ssh-config", "rm":
+		if len(os.Args) != 3 {
+			usage()
+		}
+		sandboxCmd(os.Args[1], os.Args[2])
 	default:
 		usage()
 	}

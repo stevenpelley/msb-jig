@@ -1,10 +1,11 @@
-// Command investigator-net is the per-sandbox network process
-// (investigator-design.md, "Packaging: one process per sandbox").
+// Command investigator-net serves the broker or the filter on their own,
+// outside the investigator supervisor (which runs the broker for a
+// microsandbox sandbox itself). Its Lima mode, the VM's whole network on
+// Lima's user-v2 sockets, was removed when microsandbox replaced Lima
+// (2026-11-22; microsandbox.md).
 //
-//	investigator-net lima   -name <net> -lima-dir <dir> -state <dir> ...
-//	    the VM's only network, on Lima's user-v2 sockets: DHCP, DNS for our
-//	    names only, the filter on the gateway's port 3128 and the broker on
-//	    its port 443. Nothing else is reachable.
+//	investigator-net broker -name <n> -state <dir> [-socket <path>] ...
+//	    only the broker, on a Unix socket.
 //	investigator-net sbx -gitlab-listen 127.0.0.1:<port> -session-token-file <f> ...
 //	    only the broker, in plain HTTP on the Mac's loopback, for an sbx
 //	    sandbox that reaches it at host.docker.internal:<port> through sbx's
@@ -28,7 +29,6 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -37,7 +37,6 @@ import (
 	"mcp-restrict/broker"
 	"mcp-restrict/brokerd"
 	"mcp-restrict/filter"
-	netstack "mcp-restrict/net"
 )
 
 type layerFlags []string
@@ -100,7 +99,7 @@ func (f *filterFlags) proxy(log *slog.Logger) *filter.Proxy {
 
 func main() {
 	if len(os.Args) < 2 {
-		fmt.Fprintln(os.Stderr, "usage: investigator-net lima|sbx|broker|filter [flags]")
+		fmt.Fprintln(os.Stderr, "usage: investigator-net sbx|broker|filter [flags]")
 		os.Exit(2)
 	}
 	log := slog.New(slog.NewJSONHandler(os.Stderr, nil))
@@ -113,8 +112,6 @@ func main() {
 		srv := &http.Server{Addr: *listen, Handler: ff.proxy(log), ReadHeaderTimeout: 30 * time.Second}
 		log.Info("filter listening", "addr", *listen)
 		fail("%v", srv.ListenAndServe())
-	case "lima":
-		lima(os.Args[2:], log)
 	case "sbx":
 		sbx(os.Args[2:], log)
 	case "broker":
@@ -164,78 +161,6 @@ func brokerOnSocket(args []string, log *slog.Logger) {
 	_ = srv.Close()
 	_ = os.Remove(*sock)
 	log.Info("broker down")
-}
-
-func lima(args []string, log *slog.Logger) {
-	fs := flag.NewFlagSet("lima", flag.ExitOnError)
-	name := fs.String("name", "", "the user-v2 network's name in Lima's networks.yaml")
-	limaDir := fs.String("lima-dir", "", "the network's socket directory ($LIMA_HOME/_networks/<name>)")
-	subnet := fs.String("subnet", "192.168.104.0/24", "the network's subnet, as in networks.yaml")
-	state := fs.String("state", "", "this sandbox's state directory (the broker's CA lives here)")
-	pidfile := fs.String("pidfile", "", "write our PID here (Lima's usernet_<name>.pid, until lima#5818)")
-	networksYAML := fs.String("networks-yaml", "", "on exit, remove -name from this networks.yaml ($LIMA_HOME/_config/networks.yaml), so Lima can't start its own daemon for it")
-	var bf brokerd.Flags
-	bf.Register(fs)
-	ff := addFilterFlags(fs)
-	_ = fs.Parse(args)
-	if *name == "" || *limaDir == "" || *state == "" {
-		fail("lima: -name, -lima-dir and -state are required")
-	}
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
-	defer stop()
-
-	n, err := netstack.New(netstack.Config{Subnet: *subnet, Log: log})
-	if err != nil {
-		fail("%v", err)
-	}
-	defer n.Close()
-	if err := n.ServeDNS(netstack.DefaultNames); err != nil {
-		fail("dns: %v", err)
-	}
-	ln, err := n.ListenTCP(3128)
-	if err != nil {
-		fail("%v", err)
-	}
-	go func() { _ = (&http.Server{Handler: ff.proxy(log), ReadHeaderTimeout: 30 * time.Second}).Serve(ln) }()
-
-	providers, err := bf.Providers(log)
-	if err != nil {
-		fail("%v", err)
-	}
-	if len(providers) > 0 {
-		bl, err := n.ListenTCP(443)
-		if err != nil {
-			fail("%v", err)
-		}
-		if _, err := brokerd.Serve(bl, providers, *state, *name, log); err != nil {
-			fail("%v", err)
-		}
-	}
-
-	if err := n.ServeLima(ctx, *limaDir, *name); err != nil {
-		fail("lima sockets: %v", err)
-	}
-	if *pidfile != "" {
-		if err := os.WriteFile(*pidfile, []byte(strconv.Itoa(os.Getpid())+"\n"), 0o600); err != nil {
-			fail("pidfile: %v", err)
-		}
-		defer os.Remove(*pidfile)
-	}
-	fd, qemu, ep := netstack.SocketPaths(*limaDir, *name)
-	log.Info("network up", "gateway", n.Gateway().String(), "fd", fd, "qemu", qemu, "ep", ep)
-	<-ctx.Done()
-	// First take the network out of Lima's config, then the sockets.
-	if *networksYAML != "" {
-		if err := dropNetwork(*networksYAML, *name); err != nil {
-			log.Error("networks.yaml: network left defined", "file", *networksYAML, "err", err)
-		} else {
-			log.Info("networks.yaml: network removed", "file", *networksYAML)
-		}
-	}
-	for _, p := range []string{fd, qemu, ep} {
-		_ = os.Remove(p)
-	}
-	log.Info("network down")
 }
 
 func sbx(args []string, log *slog.Logger) {

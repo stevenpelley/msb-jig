@@ -122,6 +122,8 @@ The agent writes scripts for each Mac step, and the user runs them and pastes th
 
 ### 6. The Lima backend (agent writes it, user runs it on the Mac)
 
+*Superseded 2026-11-22: microsandbox replaced Lima as the VM layer (`microsandbox.md`), and the Lima code (`lima/`, `net/`, `investigator-net lima`, `checks/lima-net.sh`) was removed. It is in git at `695143a`. What follows is kept as the record.*
+
 The design isn't done until this works. Details are in "Leaving sbx: Lima" in `investigator-design.md`.
 
 **Written (2026-11-22), not yet run with Lima.** Tested in this sandbox with a fake `limactl` and the real `investigator-net`: up, a second up, down and delete; the pidfile check; `networks.yaml`; the rendered template parses, with `provision.sh` and the CA intact; and the post-boot check catches a VM it can't match to a lease and stops it.
@@ -179,11 +181,15 @@ The design isn't done until this works. Details are in "Leaving sbx: Lima" in `i
 3. Check that credentials come from Keychain and the CLI's own AWS files, never `~/.aws`.
 4. Rerun steps 2 and 5 on Lima: VS Code over SSH, `checks/bridges.sh`, and the live GitLab checks.
 
+### 6b. microsandbox replaces Lima (2026-11-22)
+
+**Decision (user, 2026-11-22): microsandbox is the VM layer.** `investigator up|run|down|shell|code|ssh-config|rm <name>` (`cmd/investigator`) runs one supervisor per sandbox that owns the VM and serves the broker; details and checks in `microsandbox.md`. Passing on the Mac: GitLab (git push rules, glab), Claude Code through the broker, egress and DNS, fail-closed lifecycle, SSH, Docker in the guest. Open: VS Code itself (`investigator code`, step 2), the denial log, #1998.
+
 ### 7. After that
 
 - **AWS:** the AWS MCP proxy behind the broker, with personal read-only roles.
 - **The CLI:** `investigator setup`, `login`, `open`, `stop`, `logout`, `uninstall`, `allow`, `denied`, behind the sandbox backend interface.
-- **Packaging:** a Homebrew tap with `investigator` and `investigator-net`, and Lima as a dependency.
+- **Packaging:** a Homebrew tap with `investigator`, and microsandbox (its own tap) as a dependency.
 - **libkrun, if wanted:** embed it in `investigator-net` for one-process packaging, and try the same binary on a Linux host with KVM as the first step toward cloud sandboxes ("libkrun" in `investigator-design.md`).
 - **Then the work track:** the GitHub adapter, Datadog and Wiz through the MCP filter, Kiro as the agent, and Kiro IDE. Rerun `checks/bridges.sh` under Kiro, whose remote support is its own.
 
