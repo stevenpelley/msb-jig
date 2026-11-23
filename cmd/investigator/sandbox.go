@@ -419,6 +419,11 @@ func run(name, state string) {
 	}
 	defer srv.Close()
 
+	// Denials from this run start here (denials.go).
+	var logStart int64
+	if fi, err := os.Stat(runtimeLog(name)); err == nil {
+		logStart = fi.Size()
+	}
 	sb, created, err := openSandbox(ctx, c)
 	if err != nil {
 		fail("sandbox: %v", err)
@@ -446,6 +451,8 @@ func run(name, state string) {
 			"rm -f /var/run/docker.pid; exec dockerd >>/var/log/dockerd.log 2>&1"
 	}
 	var jobsDone sync.WaitGroup
+	jobsDone.Add(1)
+	go func() { defer jobsDone.Done(); followDenials(ctx, name, state, logStart, log, stopped) }()
 	for name, cmd := range jobs {
 		jobsDone.Add(1)
 		go func() { defer jobsDone.Done(); keep(ctx, sb, log, stopped, name, cmd) }()
@@ -522,6 +529,8 @@ func openSandbox(ctx context.Context, c config) (*m.Sandbox, bool, error) {
 			DisableStrict: true,
 		}),
 		m.WithEnv(clientEnv(c)),
+		// Debug: the only level that records denied names (denials.go).
+		m.WithLogLevel(m.LogLevelDebug),
 		m.WithMounts(mounts(c)),
 		m.WithVsock(m.VsockRoute{HostSocket: filepath.Join(c.state, "broker.sock"), Port: brokerPort}),
 		m.WithPatches(m.Patch.Text(guestCA, string(ca), m.PatchOptions{Mode: &mode, Replace: true})),

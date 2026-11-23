@@ -293,13 +293,23 @@ profile.d file written at the first provisioning.
 
 ## What we'd lose or have to settle
 
-- **The denial log.** Our filter writes `denials.jsonl`, which drives "ask the
-  user to allow it". Here a denied name just doesn't resolve in the guest.
-  The runtime logs denied names only at debug level, which is too noisy to
-  leave on (above). Options: run at debug and have the supervisor follow
-  `runtime.log`, keep only the `microsandbox_network` denial lines, and
-  truncate the file; or ask upstream for a per-module filter or a policy
-  event stream. Until then, the guest's error message is all the agent sees.
+- **The denial log: built.** In the guest, a denied name just doesn't
+  resolve. The runtime records denied names only at debug level, which is
+  too noisy to keep as is (above).
+  - The supervisor creates sandboxes at debug level and follows
+    `runtime.log` (`cmd/investigator/denials.go`).
+  - It appends each denial to `<state>/denials.jsonl`, in the filter's
+    `Denial` format (method `dns` or `connect`), and logs it in `run.log`.
+  - Once `runtime.log` passes 16 MB, the supervisor truncates it. The runtime
+    appends, so writing restarts at zero (checked); a line written between
+    the last read and the truncate is lost.
+  - Checked on `inv2`: `pastebin.com` and `api.anthropic.com` from the
+    agent, and `evil.example.net` from a Docker container, were all
+    recorded. So were Claude Code's direct calls to `api.anthropic.com`
+    during provisioning.
+  - Not recorded: a connect to a bare IP. Still to build: an
+    `investigator denied` command, and an upstream ask for a policy event
+    stream or a networking-only log level.
 - **Strict mode or TLS interception.** Strict mode with no interception
   breaks allowed hosts, so one of them has to give:
   - **Strict off:** hostname rules match on SNI plus DNS. The tests show it

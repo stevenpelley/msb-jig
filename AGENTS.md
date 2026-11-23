@@ -98,7 +98,7 @@ netstack and gvisor.
 
 Still open:
 - VS Code itself (`investigator code`, step 2);
-- a host-side denial log (debug-level only, `microsandbox.md`);
+- `investigator denied` over the new denial log (`denials.jsonl`);
 - the AWS provider (step 7);
 - the work track.
 
