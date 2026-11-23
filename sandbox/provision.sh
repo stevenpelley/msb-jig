@@ -10,9 +10,10 @@
 #                        On Lima this is Lima's own user, which must keep working.
 #   PROVISION_COMPONENTS space-separated subset of: base sshd git broker docker claude
 #                        (default: all of them). claude-env alone rewrites only
-#                        Claude Code's settings (claude includes it): the
-#                        supervisor runs it on every start, so they follow
-#                        whether the broker serves Claude.
+#                        Claude Code's settings and the agent's instructions
+#                        (claude includes it), and aws-env sets up mcpcli for
+#                        the AWS MCP Server: the supervisor runs both on every
+#                        start, so they follow which providers the broker serves.
 #   BROKER_GITLAB_URL    the broker's GitLab endpoint (default https://gitlab.broker.internal;
 #                        sbx mode: http://host.docker.internal:<port>)
 #   BROKER_GITHUB_URL    the same for GitHub (default https://github.broker.internal)
@@ -27,6 +28,11 @@
 #   BROKER_ANTHROPIC_URL the broker's Anthropic endpoint (https://anthropic.broker.internal):
 #                        Claude Code calls it with a placeholder token, and the
 #                        broker injects the user's. Empty: sign in inside the VM.
+#   BROKER_AWS_URL       the broker's AWS MCP endpoint (https://aws.broker.internal/mcp),
+#                        for mcpcli and curl. Empty: no AWS.
+#   BROKER_AWS_PROFILES  the profiles the broker's AWS MCP proxy signs with, the
+#                        first the default (for the agent's instructions)
+#   MCPCLI_DIR           where the supervisor wrote mcpcli (aws-env)
 #   PROVISION_PROXY      optional explicit proxy URL (e.g. http://proxy.internal:3128)
 #                        written for apt, dockerd and every session. Leave unset
 #                        where the runtime sets proxies itself (sbx).
@@ -41,6 +47,9 @@ BROKER_SESSION_TOKEN="${BROKER_SESSION_TOKEN:-}"
 BROKER_GITLAB_USER="${BROKER_GITLAB_USER:-}"
 BROKER_GITLAB_MCP="${BROKER_GITLAB_MCP:-}"
 BROKER_ANTHROPIC_URL="${BROKER_ANTHROPIC_URL:-}"
+BROKER_AWS_URL="${BROKER_AWS_URL:-}"
+BROKER_AWS_PROFILES="${BROKER_AWS_PROFILES:-}"
+MCPCLI_DIR="${MCPCLI_DIR:-/usr/local/lib/investigator/mcpcli}"
 PROVISION_PROXY="${PROVISION_PROXY:-}"
 export DEBIAN_FRONTEND=noninteractive
 
@@ -228,26 +237,60 @@ if want claude; then
   if [[ "$BROKER_GITLAB_MCP" == 1 ]]; then
     su - "$SANDBOX_USER" -c "~/.local/bin/claude mcp add --scope user --transport http gitlab '$BROKER_GITLAB_URL/api/v4/mcp' ${BROKER_SESSION_TOKEN:+--header 'X-Investigator-Session: $BROKER_SESSION_TOKEN'}" >/dev/null
   fi
-  # The broker's rules, so the agent follows them instead of learning them
-  # from 403s. Ours to rewrite only while it carries our first line.
-  if [[ -n "$BROKER_GITLAB_USER" ]]; then
-    home="$(getent passwd "$SANDBOX_USER" | cut -d: -f6)"
-    md="$home/.claude/CLAUDE.md"
-    marker="<!-- Written by investigator provision.sh; edits are lost on reprovisioning. -->"
-    if [[ ! -e $md ]] || [[ "$(head -n1 "$md")" == "$marker" ]]; then
-      install -d -o "$SANDBOX_USER" -g "$SANDBOX_USER" "$home/.claude"
-      u="$BROKER_GITLAB_USER"
-      cat >"$md" <<EOF
+fi
+
+# --- AWS: mcpcli, the agent's client for the broker's AWS MCP endpoint ---
+# The agent calls the AWS MCP Server from the shell (mcpcli or curl), never
+# as native MCP tools, so it chooses what enters its context. The supervisor
+# writes mcpcli to $MCPCLI_DIR on every start.
+if want aws-env; then
+  if [[ -n "$BROKER_AWS_URL" ]]; then
+    if ! python3 -c 'import ensurepip, venv' 2>/dev/null; then
+      log "python3-venv (mcpcli)"
+      apt-get update -qq
+      apt-get install -y -qq --no-install-recommends python3 python3-venv >/dev/null
+    fi
+    chmod 0755 "$MCPCLI_DIR" "$MCPCLI_DIR/mcpcli" "$MCPCLI_DIR/mcpcli.py"
+    ln -sfn "$MCPCLI_DIR/mcpcli" /usr/local/bin/mcpcli
+    client_env 84-investigator-aws "MCP_GATEWAY_URL=$BROKER_AWS_URL"
+  else
+    rm -f /usr/local/bin/mcpcli
+    client_env 84-investigator-aws
+  fi
+fi
+
+# --- the agent's instructions: the broker's rules, per provider ---
+# So the agent follows them instead of learning them from refusals. Ours to
+# rewrite only while it carries our first line.
+if want claude || want claude-env; then
+  home="$(getent passwd "$SANDBOX_USER" | cut -d: -f6)"
+  md="$home/.claude/CLAUDE.md"
+  marker="<!-- Written by investigator provision.sh; edits are lost on reprovisioning. -->"
+  if [[ -e $md ]] && [[ "$(head -n1 "$md")" != "$marker" ]]; then
+    log "$md exists and isn't ours: left alone"
+  elif [[ -z "$BROKER_GITLAB_USER" && -z "$BROKER_AWS_URL" ]]; then
+    rm -f "$md"
+  else
+    install -d -o "$SANDBOX_USER" -g "$SANDBOX_USER" "$home/.claude"
+    {
+      cat <<EOF
 $marker
 # Working in the investigator sandbox
 
-GitLab is reached only through the investigator broker, which holds the
-credentials and enforces these rules. Requests that break them get a 403
-from "investigator broker" that says why.
+The investigator broker, on the user's Mac, holds the credentials for the
+services below and enforces their rules. Its refusals come from
+"investigator broker" and say why. Don't log in, and don't ask for tokens.
+Other hosts go through a domain filter; if one is blocked, ask the user to
+allow it rather than working around it.
+EOF
+      if [[ -n "$BROKER_GITLAB_USER" ]]; then
+        u="$BROKER_GITLAB_USER"
+        cat <<EOF
+
+## GitLab
 
 - Use \`git\` and \`glab\` as usual: gitlab.com URLs are routed to the broker,
-  and \`glab\` is already configured (\`GITLAB_HOST\`). Don't log in, and
-  don't ask for tokens.
+  and \`glab\` is already configured (\`GITLAB_HOST\`).
 - Push only to branches under \`agent/$u/\`, e.g. \`agent/$u/fix-timeout\`.
   Pushes to any other branch, and push options (\`git push -o\`), are refused.
 - Merge request titles must start with \`[agent/$u]\`, after an optional
@@ -259,14 +302,51 @@ from "investigator broker" that says why.
 - For anything \`glab\` has no command for, use \`glab api\` (REST, or
   \`glab api graphql\` for queries). Save large responses to a file and read
   what you need with \`jq\`, \`head\` or \`grep\`.
-- Other hosts go through a domain filter. A 403 from it names the host;
-  ask the user to allow it rather than working around it.
 EOF
-      chown "$SANDBOX_USER:$SANDBOX_USER" "$md"
-      chmod 0644 "$md"
-    else
-      log "$md exists and isn't ours: left alone"
-    fi
+      fi
+      if [[ -n "$BROKER_AWS_URL" ]]; then
+        read -r -a profiles <<<"$BROKER_AWS_PROFILES"
+        cat <<EOF
+
+## AWS
+
+The AWS MCP Server is at \`\$MCP_GATEWAY_URL\` ($BROKER_AWS_URL). The
+broker signs each call on the Mac with the user's AWS profile
+\`${profiles[0]:-?}\`. There are no AWS credentials or CLI logins in the
+sandbox, and none are needed.
+
+- Call it from the shell with \`mcpcli\`, never as native MCP tools. Send
+  results to a file and read what you need with \`jq\`, \`head\` or \`grep\`:
+
+      mcpcli tools [substring]              # tool names
+      mcpcli describe <tool>                # description and input schema
+      mcpcli call <tool> '<json-args>' >out.json
+      mcpcli py '<python>' | @file.py       # aws___run_script, in AWS's sandbox
+      mcpcli logs <minutes> '<query>' --session <id> --group <log-group>
+
+- \`aws___run_script\` is the tool that reaches AWS. Its Python can't import
+  boto3: it calls \`await call_boto3(service_name=..., operation_name=...,
+  params={...})\` and ends with \`result = ...\` then \`result\`. Read
+  \`mcpcli describe aws___run_script\` before the first script.
+- CloudWatch Logs Insights queries cost money per GB scanned. Run them only
+  with \`mcpcli logs\`, which estimates first and enforces spend budgets
+  (\`mcpcli spend --session <id>\`), with your session's id; raise a budget
+  only when the user says so.
+- \`curl\` works too, without a session, for one-off calls:
+  \`curl -s \$MCP_GATEWAY_URL -H 'Content-Type: application/json' -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'\`
+- An access denied from AWS is the role's: report it, don't look for
+  another way in.
+EOF
+        if (( ${#profiles[@]} > 1 )); then
+          cat <<EOF
+- Other profiles: ${profiles[*]:1}. Pick one per call with the tools'
+  \`aws_profile\` argument (\`mcpcli py --profile <p>\`).
+EOF
+        fi
+      fi
+    } >"$md"
+    chown "$SANDBOX_USER:$SANDBOX_USER" "$md"
+    chmod 0644 "$md"
   fi
 fi
 

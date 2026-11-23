@@ -139,19 +139,19 @@ func brokerOnSocket(args []string, log *slog.Logger) {
 	if *sock == "" {
 		*sock = filepath.Join(*state, "broker.sock")
 	}
-	providers, err := bf.Providers(log)
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+	providers, err := bf.Providers(ctx, *state, log)
 	if err != nil {
 		fail("%v", err)
 	}
 	if len(providers) == 0 {
-		fail("broker: no provider configured (-gitlab-user, -anthropic-token-command)")
+		fail("broker: no provider configured (-gitlab-user, -anthropic-token-command, -aws-profile)")
 	}
 	l, err := brokerd.ListenUnix(*sock)
 	if err != nil {
 		fail("%v", err)
 	}
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
-	defer stop()
 	srv, err := brokerd.Serve(l, providers, *state, *name, log)
 	if err != nil {
 		fail("%v", err)

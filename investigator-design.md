@@ -324,7 +324,7 @@ Built for GitLab in `broker/mcp.go` (2026-11-22): each tool call maps onto the H
 Keep the current pattern:
 - `okta-aws-cli` (or AWS SSO) refreshes credentials on the Mac, in the CLI's own AWS files.
 - Profiles assume MCP-specific, read-only roles.
-- The broker proxies the remote AWS MCP server at `mcp.broker.internal/aws` and signs each request with SigV4, using those role credentials (the AWS SDK for Go's signer). That replaces the local `mcp-proxy-for-aws` process. The signing isn't designed in detail yet.
+- ~~The broker signs requests itself with the AWS SDK for Go's signer.~~ *Superseded 2026-11-22 (built, `prototype-plan.md` step 7):* the broker runs AWS's own `mcp-proxy-for-aws` on the Mac, one per sandbox, and serves it as MCP over plain HTTP at `aws.broker.internal/mcp` for `mcpcli` and `curl`. Keeping the proxy keeps its per-call profile switching (`aws_profile`), which work needs for its many accounts.
 
 ### Datadog
 

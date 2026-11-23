@@ -5,7 +5,9 @@
 package brokerd
 
 import (
+	"context"
 	"crypto/tls"
+	_ "embed"
 	"errors"
 	"flag"
 	"fmt"
@@ -28,12 +30,24 @@ import (
 const (
 	GitLabHost    = "gitlab.broker.internal"
 	AnthropicHost = "anthropic.broker.internal"
+	AWSHost       = "aws.broker.internal"
 )
+
+// AWSProxyScript is the aws-mcp-proxy wrapper around AWS's
+// mcp-proxy-for-aws: it starts while the SSO login has expired, and signs
+// again after the next login, without a restart.
+//
+//go:embed aws-mcp-proxy.py
+var AWSProxyScript string
 
 // Flags configure the providers. Empty user or command leaves a provider out.
 type Flags struct {
 	GitLabUser, GitLabURL, GitLabTokenCmd, GitLabMCPTokenCmd string
 	AnthropicTokenCmd, AnthropicURL                          string
+	// AWSProfiles are the proxy's --profile list; the first is the
+	// default, the rest are chosen per call with aws_profile.
+	AWSProfiles              []string
+	AWSMCPURL, AWSMCPCommand string
 }
 
 // Register adds the provider flags to fs.
@@ -44,10 +58,21 @@ func (f *Flags) Register(fs *flag.FlagSet) {
 	fs.StringVar(&f.GitLabMCPTokenCmd, "gitlab-mcp-token-command", "", "a command printing the token for GitLab's MCP server, a fine-grained PAT (default: $INVESTIGATOR_GITLAB_MCP_TOKEN, else the GitLab token)")
 	fs.StringVar(&f.AnthropicTokenCmd, "anthropic-token-command", "", "a command printing the Claude credential (`claude setup-token`'s OAuth token, or an API key); serves "+AnthropicHost)
 	fs.StringVar(&f.AnthropicURL, "anthropic-url", "https://api.anthropic.com", "the Anthropic API the broker forwards to")
+	fs.Func("aws-profile", "an AWS profile for the AWS MCP proxy (repeat; the first is the default); serves "+AWSHost, func(v string) error {
+		f.AWSProfiles = append(f.AWSProfiles, v)
+		return nil
+	})
+	fs.StringVar(&f.AWSMCPURL, "aws-mcp-url", DefaultAWSMCPURL, "the AWS MCP Server")
+	fs.StringVar(&f.AWSMCPCommand, "aws-mcp-command", "", "a shell command that runs a stdio MCP proxy (default: the embedded aws-mcp-proxy under uv, with the profiles)")
 }
 
+// DefaultAWSMCPURL is the AWS MCP Server's endpoint.
+const DefaultAWSMCPURL = "https://aws-mcp.us-east-1.api.aws/mcp"
+
 // Providers builds the providers by hostname; empty if none is configured.
-func (f *Flags) Providers(log *slog.Logger) (map[string]http.Handler, error) {
+// Processes they run (the AWS MCP proxy) stop when ctx ends; their files
+// go in state.
+func (f *Flags) Providers(ctx context.Context, state string, log *slog.Logger) (map[string]http.Handler, error) {
 	providers := map[string]http.Handler{}
 	if f.GitLabUser != "" {
 		up, err := url.Parse(f.GitLabURL)
@@ -69,7 +94,42 @@ func (f *Flags) Providers(log *slog.Logger) (map[string]http.Handler, error) {
 		providers[AnthropicHost] = &broker.Anthropic{Token: TokenSource(f.AnthropicTokenCmd, ""), Upstream: up,
 			PublicHost: AnthropicHost, Client: broker.NewUpstreamClient(), Log: log}
 	}
+	if len(f.AWSProfiles) > 0 || f.AWSMCPCommand != "" {
+		a, err := f.awsMCP(state, log)
+		if err != nil {
+			return nil, err
+		}
+		a.Start(ctx)
+		providers[AWSHost] = a
+	}
 	return providers, nil
+}
+
+// awsMCP runs the AWS MCP proxy: the embedded wrapper, written to the
+// state directory, under uv. Its stderr goes to <state>/aws-mcp.log.
+func (f *Flags) awsMCP(state string, log *slog.Logger) (*broker.AWSMCP, error) {
+	if err := os.MkdirAll(state, 0o700); err != nil {
+		return nil, err
+	}
+	argv := []string{"/bin/sh", "-c", "exec " + f.AWSMCPCommand}
+	if f.AWSMCPCommand == "" {
+		uv, err := exec.LookPath("uv")
+		if err != nil {
+			return nil, errors.New("the AWS MCP proxy needs uv on PATH (brew install uv)")
+		}
+		script := filepath.Join(state, "aws-mcp-proxy.py")
+		if err := os.WriteFile(script, []byte(AWSProxyScript), 0o700); err != nil {
+			return nil, err
+		}
+		argv = []string{uv, "run", "--script", "--quiet", script, f.AWSMCPURL, "--skip-auth", "--profile"}
+		argv = append(argv, f.AWSProfiles...)
+	}
+	stderr, err := os.OpenFile(filepath.Join(state, "aws-mcp.log"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		return nil, err
+	}
+	log.Info("aws mcp proxy", "argv", argv)
+	return &broker.AWSMCP{Command: argv, Stderr: stderr, Log: log}, nil
 }
 
 // CAFile is where the sandbox's CA certificate lives (its key is beside it).

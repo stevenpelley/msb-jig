@@ -20,6 +20,7 @@ import (
 
 	m "github.com/superradcompany/microsandbox/sdk/go"
 
+	"mcp-restrict/broker"
 	"mcp-restrict/brokerd"
 	"mcp-restrict/cli"
 	"mcp-restrict/filter"
@@ -35,7 +36,9 @@ const (
 	// overlay snapshots can't sit on overlayfs ("invalid argument").
 	dockerDir = "/var/lib/docker"
 	// brokerNames are pointed at the guest's bridge.
-	brokerNames = "gitlab.broker.internal github.broker.internal anthropic.broker.internal"
+	brokerNames = "gitlab.broker.internal github.broker.internal anthropic.broker.internal aws.broker.internal"
+	// mcpcliDir is where the supervisor writes mcpcli, on every start.
+	mcpcliDir = "/usr/local/lib/investigator/mcpcli"
 )
 
 var nameRE = regexp.MustCompile(`^[a-z][a-z0-9-]{0,30}$`)
@@ -76,6 +79,8 @@ func env(k, def string) string {
 //	INV_GITLAB_URL            default https://gitlab.com
 //	INV_GITLAB_TOKEN_COMMAND  default: glab's own login
 //	INV_CLAUDE_TOKEN_COMMAND  default: the Keychain item inv-claude, if it exists
+//	INV_AWS_PROFILES          AWS profiles for the AWS MCP proxy, the first the default; empty: no AWS
+//	INV_AWS_MCP_COMMAND       default: the embedded aws-mcp-proxy wrapper under uv
 func sandboxCmd(cmd, name string) {
 	if !nameRE.MatchString(name) {
 		fail("name must be lowercase letters, digits and dashes, at most 31 characters")
@@ -348,6 +353,9 @@ func loadConfig(name, state string) config {
 		claude = "security find-generic-password -s inv-claude -w"
 	}
 	c.broker.AnthropicTokenCmd = claude
+	c.broker.AWSProfiles = strings.Fields(env("INV_AWS_PROFILES", ""))
+	c.broker.AWSMCPCommand = env("INV_AWS_MCP_COMMAND", "")
+	c.broker.AWSMCPURL = brokerd.DefaultAWSMCPURL
 
 	layers, err := filter.Layers(env("INV_PROFILE", "investigator"), strings.Fields(env("INV_LAYERS", ""))...)
 	if err != nil {
@@ -402,7 +410,7 @@ func run(name, state string) {
 	defer os.Remove(filepath.Join(state, "ready"))
 
 	// The broker first: the guest's route needs the socket to exist.
-	providers, err := c.broker.Providers(log)
+	providers, err := c.broker.Providers(ctx, state, log)
 	if err != nil {
 		fail("%v", err)
 	}
@@ -413,7 +421,7 @@ func run(name, state string) {
 	}
 	defer os.Remove(sock)
 	if len(providers) == 0 {
-		log.Warn("no broker provider configured (INV_GITLAB_USER, INV_CLAUDE_TOKEN_COMMAND): the broker answers 404")
+		log.Warn("no broker provider configured (INV_GITLAB_USER, INV_CLAUDE_TOKEN_COMMAND, INV_AWS_PROFILES): the broker answers 404")
 	}
 	srv, err := brokerd.Serve(l, providers, state, name, log)
 	if err != nil {
@@ -497,7 +505,7 @@ func openSandbox(ctx context.Context, c config) (*m.Sandbox, bool, error) {
 		// older supervisor, or whose Claude setting changed, matches it.
 		env := clientEnv(c)
 		var gone []string
-		for _, k := range []string{"ANTHROPIC_BASE_URL", "CLAUDE_CODE_OAUTH_TOKEN"} {
+		for _, k := range []string{"ANTHROPIC_BASE_URL", "CLAUDE_CODE_OAUTH_TOKEN", "MCP_GATEWAY_URL"} {
 			if _, ok := env[k]; !ok {
 				gone = append(gone, k)
 			}
@@ -541,7 +549,7 @@ func openSandbox(ctx context.Context, c config) (*m.Sandbox, bool, error) {
 }
 
 // clientEnv is what provision.sh writes to /etc/profile.d and
-// /etc/environment for the broker, git and claude components. Neither file
+// /etc/environment for the broker, git, claude and aws-env components. Neither file
 // reaches a microsandbox session: msb ssh and exec run /bin/sh -c from the
 // guest's init, without PAM or a login shell. The sandbox's own environment
 // does: it is set at create and re-applied on every start (openSandbox).
@@ -557,14 +565,24 @@ func clientEnv(c config) map[string]string {
 		env["ANTHROPIC_BASE_URL"] = "https://" + brokerd.AnthropicHost
 		env["CLAUDE_CODE_OAUTH_TOKEN"] = "placeholder"
 	}
+	if c.awsOn() {
+		env["MCP_GATEWAY_URL"] = awsURL
+	}
 	return env
 }
 
+// awsURL is the broker's AWS MCP endpoint, for mcpcli and curl.
+const awsURL = "https://" + brokerd.AWSHost + broker.AWSMCPPath
+
+func (c config) awsOn() bool {
+	return len(c.broker.AWSProfiles) > 0 || c.broker.AWSMCPCommand != ""
+}
+
 // provision runs provision.sh as root: all of it on the first start (a
-// marker in the guest records it), and on later starts only claude-env, so
-// Claude Code's settings for login shells and sshd sessions follow the
-// broker (clientEnv does the same for the sandbox's own env). The script
-// is written from this binary each time.
+// marker in the guest records it), and on later starts only claude-env and
+// aws-env, so Claude Code's settings, the agent's instructions and mcpcli
+// follow the broker's providers (clientEnv does the same for the sandbox's
+// own env). The script and mcpcli are written from this binary each time.
 func provision(ctx context.Context, sb *m.Sandbox, c config, log *slog.Logger) error {
 	done, err := sb.FS().Exists(ctx, provisioned)
 	if err != nil {
@@ -573,11 +591,23 @@ func provision(ctx context.Context, sb *m.Sandbox, c config, log *slog.Logger) e
 	if err := sb.FS().WriteString(ctx, "/root/provision.sh", sandbox.ProvisionScript); err != nil {
 		return err
 	}
+	if err := sb.FS().Mkdir(ctx, mcpcliDir); err != nil {
+		return err
+	}
+	for name, body := range sandbox.MCPCLI {
+		if err := sb.FS().WriteString(ctx, mcpcliDir+"/"+name, body); err != nil {
+			return err
+		}
+	}
+	aws := ""
+	if c.awsOn() {
+		aws = awsURL
+	}
 	anthropic := ""
 	if c.broker.AnthropicTokenCmd != "" {
 		anthropic = "https://" + brokerd.AnthropicHost
 	}
-	first, comps := "", "claude-env"
+	first, comps := "", "claude-env aws-env"
 	if !done {
 		log.Info("provisioning the guest (first start)")
 		first = `export DEBIAN_FRONTEND=noninteractive
@@ -591,9 +621,11 @@ apt-get install -y -qq --no-install-recommends socat >/dev/null
 export SANDBOX_USER=%s PROVISION_COMPONENTS=%q
 export BROKER_GITLAB_URL=https://gitlab.broker.internal BROKER_GITHUB_URL=https://github.broker.internal
 export BROKER_GITLAB_USER=%q BROKER_GITLAB_MCP= BROKER_ANTHROPIC_URL=%q BROKER_CA_FILE=%s
+export BROKER_AWS_URL=%q BROKER_AWS_PROFILES=%q MCPCLI_DIR=%s
 bash /root/provision.sh
 mkdir -p %s && touch %s
-`, first, guestUser, comps, c.broker.GitLabUser, anthropic, guestCA, filepath.Dir(provisioned), provisioned)
+`, first, guestUser, comps, c.broker.GitLabUser, anthropic, guestCA,
+		aws, strings.Join(c.broker.AWSProfiles, " "), mcpcliDir, filepath.Dir(provisioned), provisioned)
 	h, err := sb.ShellStream(ctx, script, m.WithExecUser("root"))
 	if err != nil {
 		return err
@@ -610,8 +642,10 @@ mkdir -p %s && touch %s
 	return nil
 }
 
+// hostsLine points the broker's names at the bridge, replacing an older
+// line, so names added since the sandbox was made are there too.
 func hostsLine() string {
-	return fmt.Sprintf(`grep -q 'broker.internal' /etc/hosts || echo '127.0.0.1 %s' >>/etc/hosts`, brokerNames)
+	return fmt.Sprintf(`h=$(grep -v 'broker\.internal' /etc/hosts || true); printf '%%s\n127.0.0.1 %s\n' "$h" >/etc/hosts`, brokerNames)
 }
 
 // keep runs cmd as a root exec job, so the agent user can't replace it,
@@ -646,7 +680,7 @@ func mounts(c config) map[string]m.MountConfig {
 // components are provision.sh's, for this sandbox.
 func components(c config) string {
 	if c.dockerGiB > 0 {
-		return "base git broker docker claude"
+		return "base git broker docker claude aws-env"
 	}
-	return "base git broker claude"
+	return "base git broker claude aws-env"
 }

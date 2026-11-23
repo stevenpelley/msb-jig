@@ -91,7 +91,10 @@ On the user's Mac, against `<user>/test`, these pass:
 - egress and DNS limited to the allowlist;
 - the lifecycle: down and up, SIGKILL fails closed;
 - SSH;
-- Docker in the guest, on its own ext4 disk.
+- Docker in the guest, on its own ext4 disk;
+- AWS: the agent calls the AWS MCP Server with `mcpcli` or `curl` at
+  `aws.broker.internal/mcp`; the broker runs AWS's stdio proxy on the Mac
+  (`prototype-plan.md` step 7).
 
 The Lima backend was removed the same day (in git at `695143a`), with its
 netstack and gvisor.
@@ -99,7 +102,6 @@ netstack and gvisor.
 Still open:
 - VS Code itself (`investigator code`, step 2);
 - allowing a host without `rm`: waiting for microsandbox#1538;
-- the AWS provider (step 7);
 - the work track.
 
 The agent runs on the Mac itself and asks before running commands.
@@ -110,12 +112,12 @@ The agent runs on the Mac itself and asks before running commands.
 |---|---|
 | `investigator-design.md` | The harness design (2026-11-21; editor over SSH added 2026-11-22): the two tracks, VS Code then Kiro over SSH into the sandbox, egress filtering, packaging as one process per sandbox (`investigator-net`), leaving sbx for Lima and libraries that boot VMs (libkrun and the cloud path), dev containers, the broker (core plus per-provider adapters, GitLab and GitHub, hosted-MCP tool filtering), the sandbox backend interface, whether OpenShell is easier behind an IDE, packaging, open questions |
 | `prototype-plan.md` | The personal track, step by step, ending on microsandbox (6b): who tests what (this sandbox vs the user's Mac) |
-| `sandbox/` | `provision.sh` (one script for the sbx image and the microsandbox guest), `install-keys.sh`, the image's `Dockerfile` |
+| `sandbox/` | `provision.sh` (one script for the sbx image and the microsandbox guest), `install-keys.sh`, the image's `Dockerfile`, `mcpcli/` (the agent's MCP client, copied from the `sbx-mcp-client` skill) |
 | `cli/`, `cmd/investigator/` | The CLI. `up\|run\|down\|shell\|code\|ssh-config\|rm <name>`: the microsandbox supervisor (broker plus VM, Go SDK, attached), SSH config and VS Code settings; `allowlist` compiles the layers; `ssh-setup` for sshd-based sandboxes |
 | `filter/` | The domain filter: allowlist groups and layers (`lists/*.yaml`, embedded), the ACL, our explicit proxy (direct or chained to an upstream) |
 | `cmd/investigator-net/` | The broker or the filter on their own: `sbx` (the broker on the Mac's loopback), `broker` (on a Unix socket), `filter` (on TCP) |
-| `broker/` | The broker: policy (`Decide`), receive-pack parsing, the GitLab adapter (git, LFS, REST, GraphQL, the hosted-MCP filter), the name-constrained CA, the shared server checks |
-| `brokerd/` | The broker as the supervisor and `investigator-net` run it: providers from flags, the TLS server under the sandbox's CA, the Unix-socket listener, token commands |
+| `broker/` | The broker: policy (`Decide`), receive-pack parsing, the GitLab adapter (git, LFS, REST, GraphQL, the hosted-MCP filter), the AWS MCP bridge (HTTP to the stdio proxy), the name-constrained CA, the shared server checks |
+| `brokerd/` | The broker as the supervisor and `investigator-net` run it: providers from flags, the TLS server under the sandbox's CA, the Unix-socket listener, token commands, the `aws-mcp-proxy.py` wrapper |
 | `microsandbox.md` | microsandbox as the VM layer (2026-11-22, msb 0.7.16): checks on the Mac, the broker over vsock, the supervisor, Docker, the environment |
 | `checks/` | `bridges.sh` (run in the editor's terminal), `step1-docker.sh` (step 1 against a container) |
 | `enforcement.md` | Making the harness required (2026-11-22): threats, model-gated chain of trust, network and provider-side options, small provider asks |

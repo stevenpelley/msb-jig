@@ -32,11 +32,11 @@ func TestEgressRules(t *testing.T) {
 }
 
 // The variables provision.sh writes for the components the supervisor
-// provisions (client_env 80-83: git, broker, node CA, claude) are the ones
+// provisions (client_env 80-84: git, broker, node CA, claude, aws) are the ones
 // clientEnv sets on the sandbox.
 func TestClientEnvMatchesProvision(t *testing.T) {
 	var want []string
-	call := regexp.MustCompile(`(?m)^\s*client_env 8[0-3]-\S+((?:.*\\\n)*.*)$`)
+	call := regexp.MustCompile(`(?m)^\s*client_env 8[0-4]-\S+((?:.*\\\n)*.*)$`)
 	name := regexp.MustCompile(`([A-Z_]+)=`)
 	for _, c := range call.FindAllStringSubmatch(sandbox.ProvisionScript, -1) {
 		for _, n := range name.FindAllStringSubmatch(c[1], -1) {
@@ -45,6 +45,7 @@ func TestClientEnvMatchesProvision(t *testing.T) {
 	}
 	var c config
 	c.broker.AnthropicTokenCmd = "true"
+	c.broker.AWSProfiles = []string{"p"}
 	var got []string
 	for k := range clientEnv(c) {
 		got = append(got, k)
