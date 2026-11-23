@@ -10,13 +10,19 @@ import (
 // instance (code --user-data-dir <state>/vscode). They close the credential
 // bridges listed in investigator-design.md, "The new trust boundary: the IDE
 // connection". Settings marked unverified there need step 2's check.
+//
+// They are user settings, so they are defaults, not rules: a workspace's
+// .vscode/settings.json, which the agent can write, overrides any of them
+// (prototype-plan.md step 2). What they close is what a repo didn't ask for.
 func VSCodeSettings(sshConfig string) map[string]any {
 	return map[string]any{
 		// SSH: our config file only, no agent forwarding, server fetched by the Mac.
 		"remote.SSH.configFile":            sshConfig,
 		"remote.SSH.enableAgentForwarding": false,
 		"remote.SSH.localServerDownload":   "always",
-		"remote.downloadExtensionsLocally": true, // unverified name
+		"remote.downloadExtensionsLocally": true, // checked 2026-11-22: the guest needs no marketplace
+		// Claude Code's extension, installed on the remote at connect (checked 2026-11-22).
+		"remote.SSH.defaultExtensions": []string{"anthropic.claude-code"},
 		// Ports: nothing forwarded unless the user asks.
 		"remote.autoForwardPorts":      false,
 		"remote.restoreForwardedPorts": false,

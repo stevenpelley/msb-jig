@@ -3,7 +3,7 @@
 // Remote-SSH needs to find the host), plus the host's platform so
 // Remote-SSH doesn't ask.
 //
-//	go run ./checks/vscode-e2e/settings ours|default <ssh_config> <host>
+//	go run ./checks/vscode-e2e/settings ours|default <ssh_config> <host> [<json to merge>]
 package main
 
 import (
@@ -22,6 +22,11 @@ func main() {
 	s["remote.SSH.remotePlatform"] = map[string]string{host: "linux"}
 	s["workbench.startupEditor"] = "none"
 	s["security.workspace.trust.enabled"] = false
+	if len(os.Args) > 4 && os.Args[4] != "" {
+		if err := json.Unmarshal([]byte(os.Args[4]), &s); err != nil {
+			panic(err)
+		}
+	}
 	enc := json.NewEncoder(os.Stdout)
 	enc.SetIndent("", "  ")
 	_ = enc.Encode(s)

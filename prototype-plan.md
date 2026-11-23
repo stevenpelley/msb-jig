@@ -52,7 +52,7 @@ The agent writes scripts for each Mac step, and the user runs them and pastes th
    - With Microsoft hosts denied, does the server install through `remote.SSH.localServerDownload: "always"`, and does the Claude Code extension install on the remote through `remote.downloadExtensionsLocally`?
    - With `remote.autoForwardPorts: false` and `extensions.allowed` set, are ports and extensions unchanged after opening a repo with recommendations?
    - Does `Developer: Show Running Extensions` list Claude Code as running on the remote?
-   - Does Claude Code sign in and work inside the sandbox, from the VS Code terminal and from its extension?
+   - Does Claude Code sign in and work inside the sandbox, from the VS Code terminal and from its extension? (Yes, below.)
 
 **Unattended run on microsandbox (2026-11-22, VS Code 1.147.0, Remote-SSH 0.128.0, sandbox `inv2`):** `checks/vscode-e2e/run.sh <sandbox> default|ours` opens VS Code with a fresh user-data directory and the harness's extensions directory, connects over our SSH config, and loads a probe extension on the remote for that run only (`--extensionDevelopmentPath=vscode-remote://…`). The probe opens an integrated terminal, runs `bridges.sh` there and quits VS Code. No one at the keyboard; it opens a window on the Mac.
 - **Default settings:** open: VS Code's git askpass (`GIT_ASKPASS`, `VSCODE_GIT_ASKPASS_*`), the git extension's socket (`VSCODE_GIT_IPC_HANDLE`), `BROWSER`, and the remote `code` CLI's channel to the editor (`VSCODE_IPC_HOOK_CLI`). The guest tried `update.code.visualstudio.com` (the server download, denied, then done by the Mac), telemetry hosts and cloud metadata addresses; all denied.
@@ -63,7 +63,16 @@ The agent writes scripts for each Mac step, and the user runs them and pastes th
   - `code --openExternal http://<Mac LAN address>/…` from the guest did **not** make the Mac's browser fetch the URL (a listener there got nothing; the guest's own request was blocked). Probably VS Code's prompt for untrusted domains stopped it; *unverified*, since screen capture failed with the screen locked.
   - `token-env`: the broker's placeholders, expected.
 - `extensions.allowed` must include `ms-vscode.remote-explorer`, which Remote-SSH depends on (added).
-- **Not done yet:** the rest of item 4 (Claude Code's extension on the remote, extensions and ports after opening a repo with recommendations), and `investigator code` itself, which uses the same settings.
+- **Claude Code's extension (2026-11-22, 2.1.330):** with `remote.SSH.defaultExtensions: ["anthropic.claude-code"]` (now in our settings) Remote-SSH installs it on the remote at connect. `remote.downloadExtensionsLocally` is a real setting: the Mac downloaded the linux-arm64 build and uploaded it (about 45 s), and the guest, which can't resolve the marketplace, needed nothing. It runs in the remote extension host and activates; its own binary, started with the extension host's environment (`ANTHROPIC_BASE_URL`, the placeholder token, `NODE_EXTRA_CA_CERTS` from `/etc/environment`), answered `claude -p` through the broker. `claude -p` from the integrated terminal works too. The chat panel itself wasn't driven (a webview).
+- **Extensions:** installing one not in `extensions.allowed` is refused, with a misleading message ("not compatible with the current version"); the same extension installs once allowed (`ms-vscode.makefile-tools`, both ways). A publisher VS Code hasn't seen before (`mechatroner`) got no answer in 45 s, probably its "trust this publisher" dialog. Recommendations only ever suggest; with `extensions.ignoreRecommendations` nothing is offered.
+- **Ports:** with our settings a listener in the guest (`python3 -m http.server 18123`, its URL also printed in the terminal) was not forwarded.
+- **A repo's `.vscode/settings.json` overrides our settings.** Every setting above has window or resource scope, so a workspace can set it, and the agent can write that file. Checked with workspace trust off (`security.workspace.trust.enabled: false` in the test), from a repo that sets them:
+  - `remote.autoForwardPorts: true`: the guest's port 18123 was forwarded to the Mac's `127.0.0.1:18123`. A forward lets the Mac reach the guest, not the other way, but a page served by the agent then opens with a `localhost` origin in the Mac's browser.
+  - `terminal.integrated.env.linux.BROWSER`: set to the repo's value.
+  - `git.useIntegratedAskPass`, `git.terminalAuthentication`, `github.gitAuthentication: true`: `GIT_ASKPASS` and `VSCODE_GIT_ASKPASS_*` are back. `git credential fill` for github.com and gitlab.com got nothing: the harness's instance has no GitHub sign-in, so the most it can do is put a prompt in front of the user.
+  - None of this opens a bridge our settings leave closed: the git socket and the remote `code` CLI are open anyway (above), and the agent could set `GIT_ASKPASS` to VS Code's script itself. So our settings set the defaults; the boundary is the broker, plus a user who doesn't answer prompts they didn't expect.
+  - `terminal.integrated.env.*` is `restricted`: ignored in an untrusted workspace (Restricted Mode). Not checked with trust on.
+- **Not done yet:** `investigator code` itself, which uses the same settings.
 
 ### 3. The broker's GitLab HTTP proxy (agent, in its sandbox)
 

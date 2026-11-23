@@ -100,7 +100,7 @@ The Lima backend was removed the same day (in git at `695143a`), with its
 netstack and gvisor.
 
 Still open:
-- VS Code: the bridges check runs unattended (`checks/vscode-e2e/`, step 2); the git extension's socket and the remote `code` CLI stay open; Claude Code's extension on the remote is unchecked;
+- VS Code: the bridges check runs unattended (`checks/vscode-e2e/`, step 2); the git extension's socket and the remote `code` CLI stay open; Claude Code's extension installs and works on the remote; a repo's `.vscode/settings.json` overrides our settings (no new bridge, but ports and askpass come back);
 - allowing a host without `rm`: waiting for microsandbox#1538;
 - the work track.
 
