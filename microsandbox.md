@@ -307,8 +307,8 @@ profile.d file written at the first provisioning.
     agent, and `evil.example.net` from a Docker container, were all
     recorded. So were Claude Code's direct calls to `api.anthropic.com`
     during provisioning.
-  - Not recorded: a connect to a bare IP. Still to build: an
-    `investigator denied` command, and an upstream ask for a policy event
+  - Not recorded: a connect to a bare IP. `investigator denied <name>`
+    lists the hosts, most recent first. Still to do: an upstream ask for a policy event
     stream or a networking-only log level.
 - **Strict mode or TLS interception.** Strict mode with no interception
   breaks allowed hosts, so one of them has to give:

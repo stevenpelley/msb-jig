@@ -8,6 +8,7 @@
 //	investigator shell <name>       a login shell as the agent user
 //	investigator code <name>        VS Code on the sandbox, with the harness's settings
 //	investigator ssh-config <name>  write and print the sandbox's OpenSSH Host block
+//	investigator denied <name>      the hosts its egress policy refused (denials.jsonl)
 //	investigator rm <name>          down, then remove the sandbox and its disks (the state directory stays)
 //	investigator allowlist          compile the allowlist layers
 //	investigator ssh-setup          SSH keys and config for an sshd-based sandbox (sbx, checks/step1-docker.sh)
@@ -34,6 +35,7 @@ sandboxes (microsandbox):
   shell <name>       a login shell as the agent user
   code <name>        open VS Code on it, with the harness's settings
   ssh-config <name>  write and print its OpenSSH Host block
+  denied <name>      hosts the sandbox was refused, most recent first
   rm <name>          stop and remove it, with its disks
 
 other:
@@ -51,7 +53,7 @@ func main() {
 		sshSetup(os.Args[2:])
 	case "allowlist":
 		allowlist(os.Args[2:])
-	case "up", "run", "down", "shell", "code", "ssh-config", "rm":
+	case "up", "run", "down", "shell", "code", "ssh-config", "denied", "rm":
 		if len(os.Args) != 3 {
 			usage()
 		}

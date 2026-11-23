@@ -96,6 +96,8 @@ func sandboxCmd(cmd, name string) {
 		fmt.Print(sshConfig(name, state))
 	case "code":
 		code(name, state)
+	case "denied":
+		denied(state)
 	case "rm":
 		down(state)
 		if err := m.RemoveSandbox(context.Background(), name); err != nil && !m.IsKind(err, m.ErrSandboxNotFound) {

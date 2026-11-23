@@ -5,12 +5,14 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"net"
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -139,4 +141,59 @@ func drainDenials(src string, off int64, name string, out io.Writer, last *filte
 		}
 	}
 	return off
+}
+
+// denied prints the sandbox's denied hosts, most recent first, with counts.
+func denied(state string) {
+	f, err := os.Open(filepath.Join(state, "denials.jsonl"))
+	if err != nil {
+		fail("no denials recorded (%v)", err)
+	}
+	defer f.Close()
+	type agg struct {
+		host  string
+		n     int
+		ports map[int]bool
+		last  time.Time
+	}
+	byHost := map[string]*agg{}
+	sc := bufio.NewScanner(f)
+	for sc.Scan() {
+		var d filter.Denial
+		if json.Unmarshal(sc.Bytes(), &d) != nil || d.Host == "" {
+			continue
+		}
+		a := byHost[d.Host]
+		if a == nil {
+			a = &agg{host: d.Host, ports: map[int]bool{}}
+			byHost[d.Host] = a
+		}
+		a.n++
+		if d.Port != 0 {
+			a.ports[d.Port] = true
+		}
+		if d.Time.After(a.last) {
+			a.last = d.Time
+		}
+	}
+	list := make([]*agg, 0, len(byHost))
+	for _, a := range byHost {
+		list = append(list, a)
+	}
+	sort.Slice(list, func(i, j int) bool { return list[i].last.After(list[j].last) })
+	for _, a := range list {
+		var ps []string
+		for p := range a.ports {
+			ps = append(ps, strconv.Itoa(p))
+		}
+		sort.Strings(ps)
+		port := ""
+		if len(ps) > 0 {
+			port = " port " + strings.Join(ps, ",")
+		}
+		fmt.Printf("%s  %-40s %4d×%s\n", a.last.Local().Format("2006-01-02 15:04:05"), a.host, a.n, port)
+	}
+	if len(list) > 0 {
+		fmt.Println("\nTo allow a host: add it to a layer file, pass it in INV_LAYERS, then investigator rm and up (rules are fixed at create).")
+	}
 }

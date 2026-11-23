@@ -98,7 +98,7 @@ netstack and gvisor.
 
 Still open:
 - VS Code itself (`investigator code`, step 2);
-- `investigator denied` over the new denial log (`denials.jsonl`);
+- a way to allow a host without `rm` (microsandbox fixes rules at create);
 - the AWS provider (step 7);
 - the work track.
 
