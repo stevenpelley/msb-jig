@@ -1,8 +1,8 @@
 package gitlab
 
 import (
-	"mono-jig/broker"
-	"mono-jig/broker/gitproto"
+	"msb-jig/broker"
+	"msb-jig/broker/gitproto"
 )
 
 // Config is what the provider needs from mono-jig login.

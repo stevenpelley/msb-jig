@@ -6,8 +6,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"mono-jig/broker"
-	"mono-jig/broker/providers"
+	"msb-jig/broker"
+	"msb-jig/broker/providers"
 )
 
 // startBroker serves the broker for c on <state>/broker.sock (the guest

@@ -5,10 +5,10 @@ import (
 	"path/filepath"
 	"strings"
 
-	"mono-jig/agent"
-	"mono-jig/editor"
-	"mono-jig/guest"
-	"mono-jig/sandbox"
+	"msb-jig/agent"
+	"msb-jig/editor"
+	"msb-jig/guest"
+	"msb-jig/sandbox"
 )
 
 // Track is what differs between the personal and the work harness

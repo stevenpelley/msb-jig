@@ -5,9 +5,9 @@ import (
 	"strings"
 	"testing"
 
-	"mono-jig/agent"
-	"mono-jig/broker/providers"
-	"mono-jig/guest"
+	"msb-jig/agent"
+	"msb-jig/broker/providers"
+	"msb-jig/guest"
 )
 
 func allOn(proxy bool) config {

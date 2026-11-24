@@ -9,8 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"mono-jig/guest"
-	"mono-jig/sandbox"
+	"msb-jig/guest"
+	"msb-jig/sandbox"
 )
 
 // provision runs provision.sh as root: all of it on the first start (a

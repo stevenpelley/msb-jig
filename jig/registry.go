@@ -5,7 +5,7 @@ import (
 	"slices"
 	"strings"
 
-	"mono-jig/broker/providers"
+	"msb-jig/broker/providers"
 )
 
 // ProviderCLI is a provider's command-line side: mono-jig login and

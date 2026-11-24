@@ -1,4 +1,4 @@
-module mono-jig
+module msb-jig
 
 go 1.26.0
 

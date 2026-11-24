@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"mono-jig/broker/providers"
+	"msb-jig/broker/providers"
 )
 
 // GitLab's command-line side (ProviderCLI).

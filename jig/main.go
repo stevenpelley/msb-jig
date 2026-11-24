@@ -1,6 +1,7 @@
 // Package jig is the harness CLI, as a library: a track (Track: its
 // providers, agent, editor, VM runtime and base image) calls Main from its
-// own command, as cmd/mono-jig does with Personal (docs/library-split.md).
+// own command, as the personal track's mono-jig does with Personal
+// (docs/library-split.md).
 // A sandbox is a microsandbox VM owned by a supervisor process that also
 // serves the broker (docs/microsandbox.md); the commands taking a <name>
 // manage one.
@@ -34,8 +35,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"mono-jig/allowlist"
-	"mono-jig/editor"
+	"msb-jig/allowlist"
+	"msb-jig/editor"
 )
 
 func usage() {

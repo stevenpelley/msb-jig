@@ -8,8 +8,8 @@ import (
 	_ "embed"
 	"strings"
 
-	"mono-jig/broker/providers"
-	"mono-jig/guest"
+	"msb-jig/broker/providers"
+	"msb-jig/guest"
 )
 
 // Agent is a coding agent.

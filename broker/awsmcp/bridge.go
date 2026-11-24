@@ -19,8 +19,8 @@ import (
 	"syscall"
 	"time"
 
-	"mono-jig/broker"
-	"mono-jig/broker/mcp"
+	"msb-jig/broker"
+	"msb-jig/broker/mcp"
 )
 
 // Bridge is the plumbing between HTTP and AWS's stdio proxy.

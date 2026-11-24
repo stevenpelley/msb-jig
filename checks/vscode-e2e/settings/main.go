@@ -10,7 +10,7 @@ import (
 	"encoding/json"
 	"os"
 
-	"mono-jig/editor"
+	"msb-jig/editor"
 )
 
 func main() {

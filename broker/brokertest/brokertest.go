@@ -21,7 +21,7 @@ import (
 	"sync"
 	"testing"
 
-	"mono-jig/broker"
+	"msb-jig/broker"
 )
 
 const (

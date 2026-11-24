@@ -12,7 +12,7 @@ import (
 	"net/http"
 	"strings"
 
-	"mono-jig/broker"
+	"msb-jig/broker"
 )
 
 // Message is one JSON-RPC message.

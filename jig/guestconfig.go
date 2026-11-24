@@ -6,7 +6,7 @@ import (
 	"slices"
 	"strings"
 
-	"mono-jig/guest"
+	"msb-jig/guest"
 )
 
 // The guest's Settings for this sandbox's providers, broker mode and

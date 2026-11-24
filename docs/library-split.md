@@ -432,7 +432,10 @@ through the new code is* unverified.
 
 ## Step 7 so far
 
-*2026-11-24. Unit tests.*
+*2026-11-24. Unit tests. Since the same day this is its own repository,
+module `msb-jig`, with the history of `mono-jig/` (and `mcp-restrict/`
+before it) carried over; `cmd/mono-jig` stayed in the personal monorepo,
+which imports this module.*
 
 - The CLI is package `jig` (`jig/`, moved from `cmd/mono-jig/`), with
   `Track` (`Providers`, `Agent`, `Editor`, `Backend`, `BaseImage`),

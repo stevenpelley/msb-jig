@@ -27,8 +27,8 @@ import (
 	"strings"
 	"time"
 
-	"mono-jig/broker"
-	"mono-jig/broker/providers"
+	"msb-jig/broker"
+	"msb-jig/broker/providers"
 )
 
 func fail(f string, a ...any) {

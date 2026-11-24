@@ -7,8 +7,8 @@ import (
 	"slices"
 	"strings"
 
-	"mono-jig/broker/awsmcp"
-	"mono-jig/guest"
+	"msb-jig/broker/awsmcp"
+	"msb-jig/guest"
 )
 
 // AWSURL is the broker's AWS MCP endpoint, for mcpcli and curl.

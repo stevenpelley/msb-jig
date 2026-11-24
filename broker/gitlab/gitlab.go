@@ -15,7 +15,7 @@ import (
 	"strconv"
 	"strings"
 
-	"mono-jig/broker"
+	"msb-jig/broker"
 )
 
 // Checks are the GitLab provider's checks, which the routes (routes.go)

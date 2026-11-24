@@ -7,8 +7,8 @@ import (
 	"net/url"
 	"strings"
 
-	"mono-jig/broker/gitlab"
-	"mono-jig/guest"
+	"msb-jig/broker/gitlab"
+	"msb-jig/guest"
 )
 
 // GitLab: git, LFS, REST, GraphQL and GitLab's MCP server, for one user.

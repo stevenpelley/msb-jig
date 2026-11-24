@@ -15,9 +15,9 @@ import (
 	"syscall"
 	"time"
 
-	"mono-jig/allowlist"
-	"mono-jig/broker/providers"
-	"mono-jig/sandbox"
+	"msb-jig/allowlist"
+	"msb-jig/broker/providers"
+	"msb-jig/sandbox"
 )
 
 // The supervisor (mono-jig run): one process per sandbox that serves

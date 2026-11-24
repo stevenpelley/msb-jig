@@ -6,8 +6,15 @@ than a sandbox product plus settings (what sets it apart from sbx and
 OpenShell). It serves one-shot investigations and vulnerability
 remediation, and everyday development. It limits what the agent can
 reach, mainly over the network, with finer rules than the providers' own
-roles and tokens allow. Design notes plus the code (Go module `mono-jig`,
+roles and tokens allow. Design notes plus the code (Go module `msb-jig`,
 `docs/prototype-plan.md`).
+
+**This repository is the library** (since 2026-11-24, split from the
+user's personal monorepo with its history; `docs/library-split.md`). The
+personal track's command, `mono-jig` (`jig.Main(jig.Personal())`), stays
+in that monorepo and imports this module; the commands, state directory
+and Keychain items keep the name `mono-jig`. A work track is its own
+command in its own repository.
 
 **Named mono-jig on 2026-11-23** (user): before that the project was
 `mcp-restrict` (directory and branch) and the CLI `investigator`
@@ -139,7 +146,6 @@ The agent runs on the Mac itself and asks before running commands.
 | `broker/<provider>/routes.go` | `Routes` (`gitlab`; `github` has `ServerRoutes` and `ProxyRoutes`, one set of tables per mode, from shared route lists; in `anthropic.go` and `aws.go` for the two without per-request rules): the provider's upstreams with their credentials, then its route table (every request it serves, the check it runs, where it goes); anything unmatched is denied, except in proxy mode, where GitHub and GitLab forward unmatched reads without the credential (their last route, `anonymous.read`). The checks are beside it (`checks.go`, `mcp.go`, `graphql.go`); tests run through `providers.Build` |
 | `broker/` | The core: `broker.go` (routes, matching, decision log), `policy.go` (the shared rules: agent branches; no title tag since 2026-11-24), `upstream.go` (credential injection, header rewriting), `request.go` (reading requests as the provider does: no dot segments, no case-variant JSON keys, no URL parameters beside a checked body), `server.go` (routing by host, SNI check), `listen.go` (TLS, Unix socket, token commands), `connect.go` (proxy mode's front end: microsandbox's CONNECT proxy; terminates brokered SNI, splices the rest, refuses TLS without SNI), `ca.go` (the name-constrained CA). `gitproto/` parses pushes, `mcp/` JSON-RPC, `brokertest/` the shared test fixtures |
 | `allowlist/` | The egress allowlist: groups (`lists/sbx-balanced.yaml`, copied from sbx's balanced policy, and `lists/groups.yaml`, ours and the providers'), the base layer, user and org layers; a provider's hosts drop out when the broker serves it |
-| `cmd/mono-jig/` | The personal track's command: `jig.Main(jig.Personal())` |
 | `jig/` | The CLI, as a library (`Track`: providers, agent, editor, backend, base image; `Main`; `Personal`). `setup`, `login`, `logout`, `open`, `stop`, `uninstall` for users (`login.go`; each provider's login, status, settings and broker provider in `login_<name>.go`, listed in `registry.go`; settings in `~/.mono-jig/settings.json`, by provider, tokens in the Keychain, extra hosts in `~/.mono-jig/allowlist.yaml`); beneath them `up\|run\|down\|shell\|code\|ssh-config\|rm <name>` (`lifecycle.go`, `supervisor.go`: broker plus VM (`brokerhost.go` the broker, `spec.go` the sandbox from the config, `provision.go` the guest, through `sandbox.Backend`); `guestconfig.go`: the guest's settings, from the providers and the agent; `track.go`: the agent and editor in use; `remote.go`: SSH and VS Code); `ca.go`: `ca`, extra CA certificates (a TLS-inspecting proxy's root) for the image build and every start; `image.go`: `image build`, your own image from a Dockerfile (Docker or Podman, then `msb load`); `mounts.go`: the exchange folder, `--mount` at create (read-only unless `:rw`), `cp`; `brokermode.go`: `--broker server\|proxy` at create, the proxy's port and password; `allowlist` prints the compiled list; `ssh-setup` for sshd-based sandboxes |
 | `cmd/mono-jig-sbx/` | The broker for an sbx sandbox: on the Mac's loopback, plain HTTP, behind a session token |
 | `sandbox/` | The VM runtime (`Backend`: open from a `Spec`, exists, remove; `Guest`: files, run, jobs, stop) and `Microsandbox`, the only place the CLI's sandboxes touch the microsandbox SDK |

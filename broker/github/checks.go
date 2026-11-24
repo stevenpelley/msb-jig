@@ -5,8 +5,8 @@ import (
 	"regexp"
 	"strings"
 
-	"mono-jig/broker"
-	"mono-jig/broker/gitproto"
+	"msb-jig/broker"
+	"msb-jig/broker/gitproto"
 )
 
 // The checks on the GitHub routes (routes.go).

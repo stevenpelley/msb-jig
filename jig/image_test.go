@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"mono-jig/guest"
+	"msb-jig/guest"
 )
 
 func TestParseImageFile(t *testing.T) {

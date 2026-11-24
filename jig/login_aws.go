@@ -7,7 +7,7 @@ import (
 	"slices"
 	"strings"
 
-	"mono-jig/broker/providers"
+	"msb-jig/broker/providers"
 )
 
 // AWS's command-line side (ProviderCLI): the profiles for the AWS MCP

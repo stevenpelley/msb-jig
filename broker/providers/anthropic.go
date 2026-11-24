@@ -4,8 +4,8 @@ import (
 	"context"
 	"net/http"
 
-	"mono-jig/broker/anthropic"
-	"mono-jig/guest"
+	"msb-jig/broker/anthropic"
+	"msb-jig/guest"
 )
 
 // AnthropicAPIHost is the Claude API's real host, which proxy mode
