@@ -5,7 +5,10 @@ and docs (the version `mono-jig` uses) and sbx v0.54.0's help text. The
 microsandbox hook was tested on the user's Mac with a toy proxy on
 2026-11-24 (see "What we checked"). Proxy mode is built, beside server
 mode, as `mono-jig up|open <name> --broker proxy` (2026-11-24; see
-"Proxy mode as built").
+"Proxy mode as built"). Letting the broker decide all egress, with
+microsandbox allowing everything but a few fixed rules, was investigated
+and tested on 2026-11-24 but not built (see "Egress decided by the
+broker").
 "Verify" marks what's open, and *unverified* marks claims not confirmed
 in a source.
 
@@ -176,7 +179,8 @@ creates or starts the sandbox.
 
 Still open:
 - UDP other than DNS. HTTP CONNECT blocks it, per the docs; we didn't test
-  what breaks.
+  what breaks. (Later checked: none gets out; see "Egress decided by the
+  broker".)
 
 ### The variant with strict mode on (not recommended)
 
@@ -493,6 +497,112 @@ Not covered: AWS in proxy mode, Claude Code with a real token, pushes
 and merge-request writes (the routes are the same as server mode's and are
 unit-tested), LFS, and UDP.
 
+## Egress decided by the broker (investigated 2026-11-24, not built)
+
+The idea: in proxy mode, microsandbox allows nearly everything and the
+broker decides. The allow list is then one the supervisor can change
+while the sandbox runs (microsandbox fixes its rules at create, #1538),
+and every denial is logged with its name, with no debug-log follower
+(`docs/microsandbox.md`, #691). Counts per domain per period and the
+most recent time would be worked out from `denials.jsonl` when asked.
+
+### What microsandbox does today that we'd have to do
+
+- **The name and the IP.** microsandbox allows a domain rule only for an
+  IP the sandbox resolved that name to. With everything allowed, the
+  guest can send `SNI: github.com` to any IP. The proxy would ignore the
+  CONNECT's IP and dial the SNI (or `Host`) name itself, on the same port.
+- **The Mac's own addresses.** The proxy dials from the Mac, so it must
+  refuse loopback, private and link-local addresses, checked on the
+  address it actually dials (a name can resolve to 127.0.0.1).
+- **Connections with no name** (SSH, raw TCP): only an IP and port.
+  Denied unless an IP or CIDR rule allows them.
+- **DNS.** With everything allowed, every name resolves, and DNS is open
+  as a channel out again, which is why the `AllowDNS` rule was removed
+  (`docs/microsandbox.md`). The answer is a resolver of our own, below.
+- **Encrypted ClientHello** shows only a front name, such as a CDN's.
+  curl, Go and git don't send it.
+
+### DNS through a resolver on the Mac
+
+From microsandbox 0.7.16's source and docs:
+- `NetworkConfig.DNS.Nameservers` takes `ip:port` entries, fixed at
+  create. A query to the gateway (the guest's only nameserver) goes to
+  them, from the Mac, not through the outbound proxy. A source comment
+  expects the configured upstream "on the host's loopback"
+  (`engine/dns/forwarder.rs`, `client_for`).
+- A query aimed at another resolver (`dig @8.8.8.8`) is sent there
+  directly if the egress rules allow that resolver's IP on port 53;
+  otherwise microsandbox answers NXDOMAIN (`decide_upstream_with_platform`).
+- Lookups are matched only by `*`, `host`, domain and domain-suffix rules,
+  never by IP, CIDR or group rules like `public`
+  (`model/policy/types.rs`, `evaluate_dns_query_inner`). So "deny `public`
+  port 53" stops direct resolvers without touching gateway lookups.
+- Rebinding protection (private addresses dropped from answers) still
+  applies, which is harmless here.
+- UDP datagrams are dropped when the proxy is HTTP CONNECT
+  (`engine/udp/relay.rs`, `select_upstream`).
+- A connection whose destination microsandbox rewrites (the host alias,
+  `host.microsandbox.internal`) goes out directly, not through the proxy
+  (`proxy/types.rs`, `select_for_destination`).
+
+That gives these fixed rules (first match wins), with all name decisions
+in the supervisor's resolver and proxy:
+
+| # | Rule | Why |
+|---|---|---|
+| 1 | allow `host`, UDP and TCP, port 53 | gateway lookups reach our resolver |
+| 2 | deny `host`, `loopback`, `private`, `link-local`, `metadata`, `multicast` | the Mac and the LAN; the host alias skips the proxy |
+| 3 | deny `public`, UDP and TCP, port 53 | no resolver but ours |
+| 4 | deny `*`, UDP | already dropped by HTTP CONNECT; stated anyway |
+| — | default egress: allow | all other TCP goes to the proxy |
+
+### What we checked (2026-11-24)
+
+On the user's Mac, through the Go SDK v0.7.16: three throwaway
+`alpine:3.20` sandboxes with the rules above, strict off, and the
+nameserver set to a test resolver on `127.0.0.1:<port>`. The resolver
+logged each question, answered NXDOMAIN itself for names containing
+"blocked", and forwarded the rest to the Mac's resolver. A plain CONNECT
+proxy logged and spliced, and a listener on the Mac's loopback stood in
+for a local service. All were removed afterwards.
+
+| Check | Result |
+|---|---|
+| Lookups through the gateway, UDP and TCP (`nslookup`, `dig`, `dig +tcp`) | Reached our resolver, which logged each name; the answers came back |
+| A name our resolver refuses | The guest got our NXDOMAIN |
+| `dig @8.8.8.8`, UDP and TCP | NXDOMAIN from microsandbox for a name that exists. Our resolver never saw it |
+| HTTP and HTTPS (`wget`, `apk add`) | Looked up through our resolver, then `CONNECT <ip>:80` and `:443` through the proxy |
+| Other TCP (`1.1.1.1:443`, `:8443`) | Through the proxy |
+| TCP to `1.1.1.1:853` (DNS over TLS) | Refused by microsandbox, never reaching the proxy, though no rule names 853. *Why is unverified*; it looks like its DNS-over-TLS handling refusing without TLS inspection. Clients fall back to port 53 |
+| The host alias over TCP, with rule 2 | Refused |
+| **The host alias over TCP, without `host` in rule 2** | **Reached the listener on the Mac's loopback**, and the proxy never saw it. Rule 2 is required |
+| The host alias, looked up | Still resolves (`172.16.0.9`) |
+| A private IP (`10.1.2.3`) | Refused |
+| UDP other than DNS (port 5353, NTP) | Nothing got out |
+
+Not checked: IPv6 (the sandbox had none), the resolver being down, and
+whether a fixed loopback upstream avoids #1998.
+
+### Is it worth it?
+
+It works, but it moves the guardrail. Today microsandbox denies by
+default, and the broker can only narrow what it allows: a bug in the
+broker exposes brokered hosts, not egress. Here, microsandbox allows by
+default and our code is the only fence: a bug in the resolver's or the
+proxy's decision, or in the address checks, opens egress. And the fixed
+rules rest on microsandbox behavior that the docs don't state (the host
+alias skipping the proxy, port 853), seen at one version; an upgrade
+could change it quietly.
+
+What it buys is changing the list without `mono-jig rm`, and better
+denial logs. So it's worth building only if recreating a sandbox for a
+new host is a real cost in practice. If it is:
+- keep the decision small and in one package, shared by the resolver
+  and the proxy, failing closed;
+- turn this check into a script in `checks/` and run it on every
+  microsandbox upgrade.
+
 ## Order of work
 
 1. **Check the hook on the Mac.** Done 2026-11-24; see "What we checked".
@@ -531,6 +641,8 @@ unit-tested), LFS, and UDP.
   - `crates/network/lib/engine/tcp/proxy.rs` (`try_run`,
     `strict_hostname_allow_is_opaque`), `engine/tcp/upstream.rs`,
     `engine/tls/proxy.rs`, `proxy/http_connect.rs`, `proxy/types.rs`;
+  - `engine/dns/forwarder.rs`, `engine/udp/relay.rs`,
+    `model/policy/types.rs`;
   - `sdk/go` `options.go` (`WithProxy`, `HTTPConnectProxy`, `TLSConfig`).
 - sbx v0.54.0: `sbx settings ls`, `sbx policy --help`,
   `sbx policy allow network --help`, `sbx secret --help`.
