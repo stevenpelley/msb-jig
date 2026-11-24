@@ -137,7 +137,7 @@ func allowed(b providers.Config) ([]allowlist.Entry, error) {
 	if _, err := os.Stat(userAllowlist()); err == nil {
 		files = append(files, userAllowlist())
 	}
-	layers, err := allowlist.Layers(files...)
+	layers, err := allowlist.Layers(track.Allowlist, files...)
 	if err != nil {
 		return nil, err
 	}

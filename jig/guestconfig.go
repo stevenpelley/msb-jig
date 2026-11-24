@@ -31,6 +31,7 @@ func guestConfig(c config) guest.Config {
 		GitClear: legacyGitKeys,
 	}
 	g.Add(c.broker.Guest())
+	g.Add(track.Guest)
 	if len(g.Instructions) > 0 {
 		g.Instructions = slices.Insert(g.Instructions, 0, guest.Instructions("header", nil))
 	}

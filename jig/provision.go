@@ -93,12 +93,12 @@ func components(c config) string {
 	if c.dockerGiB > 0 {
 		comps += " docker"
 	}
-	return comps + " " + agentComponents()
+	return comps + " " + addedComponents()
 }
 
 // imageComponents are the parts of provision.sh mono-jig image build
 // puts in the base image: those that depend only on the image.
-func imageComponents() string { return "base git docker " + agentComponents() }
+func imageComponents() string { return "base git docker " + addedComponents() }
 
 // imageFile is where the base image records its parts and provision.sh.
 const imageFile = "/etc/mono-jig/image"

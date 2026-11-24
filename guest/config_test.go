@@ -80,3 +80,14 @@ func TestProvision(t *testing.T) {
 		}
 	}
 }
+
+func TestComponentName(t *testing.T) {
+	for p, want := range map[string]string{
+		"components/20-base.sh": "base", "components/65-work-tools.sh": "work-tools",
+		"lib.sh": "", "components/x/10-a.sh": "", "components/base.sh": "", "components/10-a.txt": "",
+	} {
+		if got := ComponentName(p); got != want {
+			t.Errorf("%s: %q, want %q", p, got, want)
+		}
+	}
+}

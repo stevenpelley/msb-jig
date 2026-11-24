@@ -64,7 +64,8 @@ func main() { jig.Main(jig.Personal()) }
 `jig.Personal()` is GitLab, GitHub, Claude and AWS; Claude Code; VS Code;
 microsandbox; Ubuntu. Another track replaces any of those with its own
 implementations of `providers.Provider`, `agent.Agent`, `editor.Editor` and
-`sandbox.Backend` (`docs/library-split.md`).
+`sandbox.Backend`, and adds its own allowlist layer, provisioning and guest
+settings (`docs/tracks.md`).
 
 ## Using it
 
@@ -94,7 +95,8 @@ State lives in `~/.mono-jig`: settings, your allowlist layer
 | `docs/design.md` | The design |
 | `docs/microsandbox.md` | microsandbox as the VM layer, and the checks behind it |
 | `docs/transparent-broker.md` | Proxy mode: the broker as the VM's outbound proxy |
-| `docs/library-split.md` | The library and its tracks |
+| `docs/tracks.md` | Writing a track: what you can customize, and how |
+| `docs/library-split.md` | How the library and its seams were made |
 | `docs/enforcement.md` | What could make a harness like this required |
 
 ## License

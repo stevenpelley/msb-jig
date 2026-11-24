@@ -15,11 +15,10 @@ import (
 // Agent is a coding agent.
 type Agent interface {
 	Name() string
-	// Components are the provision files it adds (components/NN-<name>.sh,
-	// as guest.Provision), and ComponentNames the components to run: at
-	// the image build and a first start.
+	// Components are the provision files it adds, by path
+	// (components/NN-<name>.sh, as guest.Provision): run at the image
+	// build and a sandbox's first start, to install it.
 	Components() map[string]string
-	ComponentNames() []string
 	// Guest is its settings for the providers that are on, with the
 	// instructions (the providers' sections) in its own file.
 	Guest(b providers.Config, instructions []string) guest.Config
@@ -41,8 +40,6 @@ func (ClaudeCode) Name() string { return "claude-code" }
 func (ClaudeCode) Components() map[string]string {
 	return map[string]string{"components/70-claude.sh": claudeComponent}
 }
-
-func (ClaudeCode) ComponentNames() []string { return []string{"claude"} }
 
 func (ClaudeCode) EditorExtensions() []string { return []string{"anthropic.claude-code"} }
 

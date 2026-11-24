@@ -55,7 +55,7 @@ func allows(es []Entry, host string, port int) (Entry, bool) {
 }
 
 func TestBase(t *testing.T) {
-	ls, err := Layers()
+	ls, err := Layers([]Layer{Base()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -112,7 +112,7 @@ func TestLayerFiles(t *testing.T) {
 	dir := t.TempDir()
 	user := filepath.Join(dir, "user.yaml")
 	os.WriteFile(user, []byte("groups: [mine]\nhosts: [extra.example.com]\ndefine:\n  mine:\n    hosts: ['*.mine.example']\n"), 0o600)
-	ls, err := Layers(user)
+	ls, err := Layers([]Layer{Base()}, user)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -134,7 +134,7 @@ func TestLayerFiles(t *testing.T) {
 	bad := filepath.Join(dir, "bad.yaml")
 	for _, body := range []string{"groups: [nosuch]\n", "hosts: [1.2.3.4]\n", "hostz: [a.com]\n", "define:\n  go:\n    hosts: [a.com]\n"} {
 		os.WriteFile(bad, []byte(body), 0o600)
-		ls, err := Layers(bad)
+		ls, err := Layers([]Layer{Base()}, bad)
 		if err == nil {
 			_, err = Compile(ls)
 		}

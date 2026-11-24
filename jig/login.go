@@ -94,10 +94,10 @@ func setup() {
 
 // --- login, logout ---
 
-// ask prints a prompt and reads one line from stdin. It reads a byte at
+// Ask prints a prompt and reads one line from stdin. It reads a byte at
 // a time, so nothing typed after the line is taken from the commands
 // that run next (glab, gh, aws sso login).
-func ask(prompt string) string {
+func Ask(prompt string) string {
 	fmt.Print(prompt)
 	var b []byte
 	one := make([]byte, 1)
@@ -113,8 +113,8 @@ func ask(prompt string) string {
 	}
 }
 
-// readSecret reads a line from the terminal without echo.
-func readSecret(prompt string) string {
+// ReadSecret reads a line from the terminal without echo.
+func ReadSecret(prompt string) string {
 	fmt.Print(prompt)
 	echo := func(on bool) {
 		a := "-echo"
@@ -137,18 +137,25 @@ func readSecret(prompt string) string {
 
 var tokenRE = regexp.MustCompile(`^[A-Za-z0-9._~+/=-]{8,1000}$`)
 
-func keychainHas(service string) bool {
+// The helpers below are for a track's own ProviderCLI: its Login asks
+// with Ask and ReadSecret, keeps a token with KeychainStore, and its
+// Broker reads it back with KeychainCommand (a token command, run by the
+// broker). Fail ends the command with a message.
+
+// KeychainHas reports whether the Keychain has a generic password for
+// service.
+func KeychainHas(service string) bool {
 	return exec.Command("security", "find-generic-password", "-s", service).Run() == nil
 }
 
-// keychainStore writes a generic password through security's own
+// KeychainStore writes a generic password through security's own
 // command reader, so the token never appears in a process's arguments.
-func keychainStore(service, account, secret string) {
+func KeychainStore(service, account, secret string) {
 	if !tokenRE.MatchString(secret) {
 		fail("that doesn't look like a token")
 	}
 	// One item per service: the broker reads the first match.
-	keychainDelete(service)
+	KeychainDelete(service)
 	c := exec.Command("security", "-i")
 	c.Stdin = strings.NewReader(fmt.Sprintf("add-generic-password -s %s -a %s -l %s -w %s\n", service, account, service, secret))
 	out, err := c.CombinedOutput()
@@ -159,8 +166,14 @@ func keychainStore(service, account, secret string) {
 	}
 }
 
-func keychainDelete(service string) {
-	for keychainHas(service) {
+// KeychainCommand is the token command that prints service's password.
+func KeychainCommand(service string) string {
+	return "security find-generic-password -s " + service + " -w"
+}
+
+// KeychainDelete removes every generic password for service.
+func KeychainDelete(service string) {
+	for KeychainHas(service) {
 		if exec.Command("security", "delete-generic-password", "-s", service).Run() != nil {
 			fail("deleting %s from the Keychain", service)
 		}
@@ -219,7 +232,7 @@ func uninstall(args []string) {
 		fail("%v", err)
 	}
 	for _, k := range keychainItems() {
-		keychainDelete(k)
+		KeychainDelete(k)
 	}
 	if err := os.RemoveAll(root); err != nil {
 		fail("%v", err)

@@ -26,7 +26,8 @@ type gitlabSettings struct {
 const keychainGitLab = "mono-jig-gitlab"
 
 var GitLab = ProviderCLI{
-	Name: "gitlab", Keychain: keychainGitLab, Login: loginGitLab,
+	Name:  "gitlab",
+	Usage: "login gitlab [<user>] [--url https://host] [--keychain]\n                        act for the user of your glab login's token, or one you paste\n                        (given <user>, check that it's theirs)\n", Keychain: keychainGitLab, Login: loginGitLab,
 	Status: func(s Settings) string {
 		g := ProviderSettings[gitlabSettings](s, "gitlab")
 		if g == nil {
@@ -69,7 +70,7 @@ func gitlabBroker(s Settings) providers.Provider {
 // gitlabTokenCommand prints the GitLab token for the broker.
 func gitlabTokenCommand(g gitlabSettings, host string) string {
 	if g.Token == "keychain" {
-		return "security find-generic-password -s " + keychainGitLab + " -w"
+		return KeychainCommand(keychainGitLab)
 	}
 	return "glab api --hostname " + host + " user >/dev/null && glab config get token --host " + host
 }
@@ -113,8 +114,8 @@ func loginGitLab(args []string) {
 		fail("--url: want https://host")
 	}
 	if g.Token == "keychain" {
-		tok := readSecret(fmt.Sprintf("a GitLab token on %s (api scope; input hidden): ", u.Host))
-		keychainStore(keychainGitLab, u.Host, tok)
+		tok := ReadSecret(fmt.Sprintf("a GitLab token on %s (api scope; input hidden): ", u.Host))
+		KeychainStore(keychainGitLab, u.Host, tok)
 	} else {
 		if _, err := exec.LookPath("glab"); err != nil {
 			fail("glab isn't installed: brew install glab, or use --keychain")

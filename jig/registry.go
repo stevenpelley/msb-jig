@@ -18,6 +18,10 @@ type ProviderCLI struct {
 	Name     string // mono-jig login <name>; its key in settings.json
 	Keychain string // its Keychain item, if any: logout and uninstall delete it
 	Login    func(args []string)
+	// Usage is its lines in the usage message: "login <name> [args]",
+	// then what it does, the next lines indented by 24 spaces. Empty: "login
+	// <name>".
+	Usage string
 	// Status says how it's logged in, or "" if it isn't.
 	Status func(s Settings) string
 	// Forgotten is what logout says, before the settings and the Keychain
@@ -88,7 +92,7 @@ func login(args []string) {
 // choose, with each login's defaults.
 func loginAll() {
 	for _, p := range cliProviders() {
-		if strings.EqualFold(ask("log in to "+p.Name+"? [y/N] "), "y") {
+		if strings.EqualFold(Ask("log in to "+p.Name+"? [y/N] "), "y") {
 			p.Login(nil)
 		}
 	}
@@ -124,7 +128,7 @@ func logout(args []string) {
 		fmt.Printf("%s: %s\n", p.Name, p.Forgotten(s))
 		s.SetProvider(p.Name, nil)
 		if p.Keychain != "" {
-			keychainDelete(p.Keychain)
+			KeychainDelete(p.Keychain)
 		}
 	}
 	SaveSettings(s)

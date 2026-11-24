@@ -14,7 +14,11 @@ user's personal monorepo with its history; `docs/library-split.md`). The
 personal track's command, `mono-jig` (`jig.Main(jig.Personal())`), stays
 in that monorepo and imports this module; the commands, state directory
 and Keychain items keep the name `mono-jig`. A work track is its own
-command in its own repository.
+command in its own repository. **To write or change a track, start with
+`docs/tracks.md`**: the `Track` fields, each seam, what's fixed, and a
+checklist. Work names (hosts, services, accounts, tools) never go in this
+repository; library changes a work track needs use placeholders
+(`example.org`).
 
 **Named mono-jig on 2026-11-23** (user): before that the project was
 `mcp-restrict` (directory and branch) and the CLI `investigator`
@@ -141,6 +145,7 @@ The agent runs on the Mac itself and asks before running commands.
 | `docs/prototype-plan.md` | The personal track, step by step, ending on microsandbox (6b): who tests what (this sandbox vs the user's Mac) |
 | `docs/microsandbox.md` | microsandbox as the VM layer (2026-11-22, msb 0.7.16): checks on the Mac, the broker over vsock, the supervisor, Docker, the environment |
 | `docs/transparent-broker.md` | A broker the guest doesn't name (2026-11-23, msb 0.7.16, sbx v0.54.0): the broker as microsandbox's outbound CONNECT proxy, terminating brokered SNI and splicing the rest; sbx's upstream proxy; declarative rules (Go decoders, lookups, CEL) and the broker as a library; the hook tested with a toy proxy and through the Go SDK (2026-11-24); proxy mode as built, `--broker proxy` at create, and its end-to-end checks; egress decided by the broker, with DNS through a resolver on the Mac (investigated and tested 2026-11-24, not built) |
+| `docs/tracks.md` | Writing a track (2026-11-24): `jig.Track`'s fields; providers (broker and login halves), agent, editor, VM runtime, provisioning components, guest settings, allowlist layers, the CA; what a track can't change yet; a checklist for a new one |
 | `docs/library-split.md` | Splitting the harness into a common library and per-track modules (reviewed 2026-11-24, not built): where providers, base image, corporate CA, agent, editor and VM runtime are hardwired; proposed `Track`, `Provider`, `Agent`, `Editor`, `Backend` seams and the order to build them; the PR marker (branch vs title tag vs label) |
 | `docs/enforcement.md` | Making the harness required (2026-11-22): threats, model-gated chain of trust, network and provider-side options, small provider asks |
 | `broker/providers/` | **Start reviewing here.** The provider registry: `Provider` (name, hosts per mode, handlers, guest settings), one file per provider (`gitlab.go`, `github.go`, `anthropic.go`, `aws.go`) naming the `Routes` function that holds its policy; `Config.Providers` holds those that are on. In proxy mode (`Config.Proxy`) they're served under their real hostnames (`Hosts`); GitHub builds only the active mode's tables (`github.ServerRoutes`, or `ProxyRoutes` for its web and API hosts, github.com and api.github.com by default) |

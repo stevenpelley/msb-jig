@@ -38,7 +38,8 @@ func or(s, def string) string {
 const keychainGitHub = "mono-jig-github"
 
 var GitHub = ProviderCLI{
-	Name: "github", Keychain: keychainGitHub, Login: loginGitHub,
+	Name:  "github",
+	Usage: "login github [<user>] [--host <host>] [--keychain]\n                        the same on github.com (or <host>, with its API at\n                        api.<host>), with your gh login's token\n", Keychain: keychainGitHub, Login: loginGitHub,
 	Status: func(s Settings) string {
 		g := ProviderSettings[githubSettings](s, "github")
 		if g == nil {
@@ -80,7 +81,7 @@ func githubBroker(s Settings) providers.Provider {
 // githubTokenCommand prints the GitHub token for the broker.
 func githubTokenCommand(g githubSettings) string {
 	if g.Token == "keychain" {
-		return "security find-generic-password -s " + keychainGitHub + " -w"
+		return KeychainCommand(keychainGitHub)
 	}
 	return "gh auth token --hostname " + g.host()
 }
@@ -125,8 +126,8 @@ func loginGitHub(args []string) {
 		g.User = rest[0]
 	}
 	if g.Token == "keychain" {
-		tok := readSecret("a GitHub token (repo scope, or a fine-grained token with contents, pull requests and actions; input hidden): ")
-		keychainStore(keychainGitHub, g.host(), tok)
+		tok := ReadSecret("a GitHub token (repo scope, or a fine-grained token with contents, pull requests and actions; input hidden): ")
+		KeychainStore(keychainGitHub, g.host(), tok)
 	} else {
 		if _, err := exec.LookPath("gh"); err != nil {
 			fail("gh isn't installed: brew install gh, or use --keychain")

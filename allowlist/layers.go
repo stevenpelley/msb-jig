@@ -71,13 +71,27 @@ func Catalog() (map[string]Group, error) {
 	return out, nil
 }
 
-// Base returns the built-in base layer.
-func Base() (Layer, error) {
+// Base returns the built-in base layer: sbx's balanced groups, our own,
+// and the personal track's providers' and agent's groups.
+func Base() Layer {
 	b, err := lists.ReadFile("lists/base.yaml")
-	if err != nil {
-		return Layer{}, err
+	if err == nil {
+		var l Layer
+		if l, err = ParseLayer("base", b); err == nil {
+			return l
+		}
 	}
-	return parseLayer("base", b)
+	panic(err)
+}
+
+// MustParseLayer is ParseLayer for a layer built into a track (go:embed),
+// panicking on an error.
+func MustParseLayer(name string, yaml []byte) Layer {
+	l, err := ParseLayer(name, yaml)
+	if err != nil {
+		panic(err)
+	}
+	return l
 }
 
 // LoadLayer reads an org or user layer from a file.
@@ -86,10 +100,11 @@ func LoadLayer(file string) (Layer, error) {
 	if err != nil {
 		return Layer{}, err
 	}
-	return parseLayer(file, b)
+	return ParseLayer(file, b)
 }
 
-func parseLayer(name string, b []byte) (Layer, error) {
+// ParseLayer reads a layer (YAML) named name.
+func ParseLayer(name string, b []byte) (Layer, error) {
 	var l Layer
 	if len(strings.TrimSpace(string(b))) > 0 {
 		if err := decodeStrict(b, &l); err != nil {
@@ -100,13 +115,10 @@ func parseLayer(name string, b []byte) (Layer, error) {
 	return l, nil
 }
 
-// Layers returns the base layer, then the layer files (org, user) in order.
-func Layers(files ...string) ([]Layer, error) {
-	base, err := Base()
-	if err != nil {
-		return nil, err
-	}
-	out := []Layer{base}
+// Layers returns the built-in layers (a track's: Base, an org's), then
+// the layer files (an org's, the user's) in order.
+func Layers(builtin []Layer, files ...string) ([]Layer, error) {
+	out := append([]Layer{}, builtin...)
 	for _, f := range files {
 		l, err := LoadLayer(f)
 		if err != nil {

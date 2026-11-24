@@ -21,6 +21,9 @@ var (
 	hostRE = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$`)
 )
 
+// Fail prints a message and exits with status 1.
+func Fail(f string, a ...any) { fail(f, a...) }
+
 func fail(f string, a ...any) {
 	fmt.Fprintf(os.Stderr, "mono-jig: "+f+"\n", a...)
 	os.Exit(1)

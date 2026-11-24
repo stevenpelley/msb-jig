@@ -36,6 +36,20 @@ func Provision() map[string]string {
 //go:embed provision
 var provisionFS embed.FS
 
+// ComponentName is the component a provision file holds
+// (components/NN-<name>.sh: name), or "" for another file.
+func ComponentName(path string) string {
+	f, ok := strings.CutPrefix(path, "components/")
+	if !ok || strings.Contains(f, "/") || !strings.HasSuffix(f, ".sh") {
+		return ""
+	}
+	_, name, ok := strings.Cut(strings.TrimSuffix(f, ".sh"), "-")
+	if !ok {
+		return ""
+	}
+	return name
+}
+
 // ImageDockerfile builds the base image for microsandbox sandboxes, with
 // provision/ beside it.
 //

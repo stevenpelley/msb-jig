@@ -6,11 +6,11 @@
 // serves the broker (docs/microsandbox.md); the commands taking a <name>
 // manage one.
 //
-//	mono-jig setup              check the Mac, write the harness's VS Code profile, build the base image
-//	mono-jig login [provider]   record GitLab, GitHub, Claude and AWS for the broker (login.go); alone: what's recorded
+//	mono-jig setup              check the Mac, write the editor profile, build the base image
+//	mono-jig login [provider]   record the track's providers for the broker (login.go); alone: what's recorded
 //	mono-jig logout [provider]  forget them, and remove their Keychain items
 //	mono-jig image build        your own sandbox image, from a Dockerfile (image.go)
-//	mono-jig open <name> [dir]  start the sandbox if needed (creating it the first time), then VS Code on dir
+//	mono-jig open <name> [dir]  start the sandbox if needed (creating it the first time), then the editor on dir
 //	mono-jig stop <name>        stop it
 //	mono-jig cp <src> <dst>     copy files between the Mac and a sandbox (mounts.go: host folders)
 //	mono-jig uninstall          remove every sandbox, the state directory and the Keychain items
@@ -21,7 +21,7 @@
 //	mono-jig run <name>         the supervisor, in the foreground
 //	mono-jig down <name>        stop the supervisor, and with it the sandbox
 //	mono-jig shell <name>       a login shell as the agent user
-//	mono-jig code <name> [dir]  VS Code on the sandbox, with the harness's Settings
+//	mono-jig code <name> [dir]  the editor on the sandbox, with the harness's Settings
 //	mono-jig ssh-config <name>  write and print the sandbox's OpenSSH Host block
 //	mono-jig denied <name>      the hosts its egress policy refused (denials.jsonl)
 //	mono-jig rm <name>          down, then remove the sandbox and its disks (the state directory stays)
@@ -34,32 +34,40 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/stevenpelley/msb-jig/allowlist"
 	"github.com/stevenpelley/msb-jig/editor"
 )
 
+// providerUsage are the providers' login lines.
+func providerUsage() string {
+	var b strings.Builder
+	for _, p := range cliProviders() {
+		u := p.Usage
+		if u == "" {
+			u = "login " + p.Name + "\n"
+		}
+		for _, line := range strings.SplitAfter(strings.TrimSuffix(u, "\n")+"\n", "\n") {
+			if line != "" {
+				b.WriteString("  " + line)
+			}
+		}
+	}
+	return b.String()
+}
+
 func usage() {
 	fmt.Fprintln(os.Stderr, `usage: mono-jig <command> ...
 
-  setup                   check what's needed, set up the harness's VS Code, build the base image
-  login                   show what the broker uses for GitLab, GitHub, Claude and AWS
+  setup                   check what's needed, set up the editor profile, build the base image
+  login                   show what the broker uses for each provider (`+cliProviderNames()+`)
   login all               ask about each provider in turn and log in with the defaults
-  login gitlab [<user>] [--url https://host] [--keychain]
-                          act for the user of your glab login's token, or one you paste
-                          (given <user>, check that it's theirs)
-  login github [<user>] [--host <host>] [--keychain]
-                          the same on github.com (or <host>, with its API at
-                          api.<host>), with your gh login's token
-  login claude            store a token from claude setup-token
-  login aws [<profile>...]
-                          use these AWS profiles (signing in with SSO if needed); none: choose from a list
-  logout [gitlab|github|claude|aws]
-                          forget them (all, if none named)
+`+providerUsage()+`  logout [<provider>...]  forget them (all, if none named)
   ca [<pem-file>...|--clear]
                           extra CA certificates the sandboxes trust, such as a
                           TLS-inspecting proxy's root; none given: show them
-  open <name> [dir]       start the sandbox (creating it the first time) and open VS Code
+  open <name> [dir]       start the sandbox (creating it the first time) and open the editor
                           on dir (relative to the sandbox user's home; default: home)
   open <name> [dir] --mount host[:guest][:rw] ...
                           when creating it, also mount these Mac folders (guest path under
@@ -86,7 +94,7 @@ sandboxes, beneath open and stop:
   run <name>         the same, in the foreground
   down <name>        stop it
   shell <name>       a login shell as the agent user
-  code <name> [dir]  open VS Code on it
+  code <name> [dir]  open the editor on it
   ssh-config <name>  write and print its OpenSSH Host block
   rm <name>          stop and remove it, with its disks
 
@@ -98,7 +106,7 @@ other:
 
 // Main runs the command line for track t.
 func Main(t Track) {
-	track = t
+	track = t.withDefaults()
 	if len(os.Args) < 2 {
 		usage()
 	}

@@ -1,5 +1,7 @@
 # Splitting mono-jig into a library and tracks
 
+*How the seams were made. To write a track, see `docs/tracks.md`.*
+
 *Reviewed 2026-11-24, at commit 0491dc0 (msb 0.7.16, Go 1.26.0). Nothing
 here is built yet. Items marked* unverified *haven't been checked.*
 
@@ -449,8 +451,17 @@ which imports this module.*
   `GitHub`, `Claude` and `AWS`.
 - Not in `Track` yet: the name (`~/.mono-jig`, the Keychain items, the
   SSH host prefix, the CA's subject, image tags, `/etc/mono-jig`, the
-  refusal text), the agent's namespace (`broker/policy.go`'s
-  `agent/<user>/`), and the base allowlist layer.
+  refusal text) and the agent's namespace (`broker/policy.go`'s
+  `agent/<user>/`).
+- *Added after the review for a work track (2026-11-24, `docs/tracks.md`):*
+  `Track.Allowlist` (the built-in layers; `allowlist.Base()` and
+  `MustParseLayer`), `Track.Components` (provision files added or
+  replaced; a component's name is its file's, so `Agent.ComponentNames`
+  is gone), `Track.Guest` (the track's own `guest.Config`),
+  `ProviderCLI.Usage` (the usage message lists the track's providers),
+  exported login helpers (`Ask`, `ReadSecret`, `Fail`, `KeychainHas`,
+  `KeychainStore`, `KeychainDelete`, `KeychainCommand`), and defaults
+  for an empty `BaseImage` and `Allowlist`.
 
 Not done, because each needs a decision:
 

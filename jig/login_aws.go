@@ -19,7 +19,8 @@ type awsSettings struct {
 }
 
 var AWS = ProviderCLI{
-	Name: "aws", Login: loginAWS,
+	Name:  "aws",
+	Usage: "login aws [<profile>...]\n                        use these AWS profiles (signing in with SSO if needed); none: choose from a list\n", Login: loginAWS,
 	Status: func(s Settings) string {
 		a := ProviderSettings[awsSettings](s, "aws")
 		if a == nil || len(a.Profiles) == 0 {
@@ -69,7 +70,7 @@ func loginAWS(args []string) {
 			fail("no AWS profiles in your AWS config (aws configure sso)")
 		}
 		fmt.Println("your AWS profiles:\n  " + strings.Join(profiles, "\n  "))
-		args = strings.Fields(ask("profiles for the agent, the default first (space-separated): "))
+		args = strings.Fields(Ask("profiles for the agent, the default first (space-separated): "))
 		if len(args) == 0 {
 			fail("no profiles chosen")
 		}

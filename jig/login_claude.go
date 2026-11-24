@@ -14,9 +14,10 @@ import (
 const keychainClaude = "mono-jig-claude"
 
 var Claude = ProviderCLI{
-	Name: "claude", Keychain: keychainClaude, Login: loginClaude,
+	Name:  "claude",
+	Usage: "login claude            store a token from claude setup-token\n", Keychain: keychainClaude, Login: loginClaude,
 	Status: func(Settings) string {
-		if keychainHas(keychainClaude) {
+		if KeychainHas(keychainClaude) {
 			return "token in the Keychain (" + keychainClaude + ")"
 		}
 		return "not logged in (mono-jig login claude): the agent signs in inside the sandbox"
@@ -31,8 +32,8 @@ var Claude = ProviderCLI{
 // JIG_CLAUDE_TOKEN_COMMAND overrides (empty: off).
 func claudeBroker(Settings) providers.Provider {
 	cmd, set := os.LookupEnv("JIG_CLAUDE_TOKEN_COMMAND")
-	if !set && keychainHas(keychainClaude) {
-		cmd = "security find-generic-password -s " + keychainClaude + " -w"
+	if !set && KeychainHas(keychainClaude) {
+		cmd = KeychainCommand(keychainClaude)
 	}
 	if cmd == "" {
 		return nil
@@ -47,10 +48,10 @@ func loginClaude(args []string) {
 		usage()
 	}
 	fmt.Println("Run `claude setup-token` in another terminal on this Mac and sign in; it prints a token.")
-	tok := readSecret("paste the token (input hidden): ")
+	tok := ReadSecret("paste the token (input hidden): ")
 	if !strings.HasPrefix(tok, "sk-ant-") {
 		fail("that isn't a Claude token (sk-ant-…)")
 	}
-	keychainStore(keychainClaude, "mono-jig", tok)
+	KeychainStore(keychainClaude, "mono-jig", tok)
 	fmt.Println("claude: token stored in the Keychain as", keychainClaude)
 }
