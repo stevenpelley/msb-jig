@@ -4,12 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"os"
-	"os/exec"
 	"os/signal"
-	"path"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -18,21 +15,19 @@ import (
 	"syscall"
 	"time"
 
-	m "github.com/superradcompany/microsandbox/sdk/go"
-
 	"mono-jig/allowlist"
-	"mono-jig/broker"
 	"mono-jig/broker/providers"
-	"mono-jig/guest"
+	"mono-jig/sandbox"
 )
 
 // The supervisor (mono-jig run): one process per sandbox that serves
 // the broker and owns the VM (docs/microsandbox.md, "Tying the broker's
 // lifecycle to the sandbox's").
 //
-// It serves the broker on <state>/broker.sock and holds the sandbox
-// through the microsandbox SDK, attached: if the process dies, the VM
-// stops with it. The guest reaches the broker through a vsock route to
+// It serves the broker on <state>/broker.sock (brokerhost.go) and holds
+// the sandbox through the backend (theBackend; sandbox.Microsandbox, the
+// SDK, attached: if the process dies, the VM stops with it), from the
+// spec in spec.go, then provisions it (provision.go). The guest reaches the broker through a vsock route to
 // that socket. Its other egress is microsandbox's policy, compiled from
 // the allowlist. In proxy mode (brokermode.go) the broker is also
 // microsandbox's outbound proxy, on a loopback port: every connection
@@ -84,7 +79,7 @@ type config struct {
 	cpus        uint8
 	diskGiB     uint32 // the root disk
 	dockerGiB   uint32 // 0: no Docker
-	rules       []m.PolicyRule
+	egress      []allowlist.Entry
 	mounts      []Mount  // host folders (mounts.go)
 	proxy       bool     // the broker's mode is proxy (brokermode.go)
 	cas         []string // extra CA certificates, PEM (ca.go)
@@ -120,7 +115,7 @@ func loadConfig(name, state string) config {
 	if err != nil {
 		fail("%v", err)
 	}
-	c.rules = egressRules(entries)
+	c.egress = entries
 	if c.mounts, err = loadMounts(state); err != nil {
 		fail("%v", err)
 	}
@@ -162,24 +157,6 @@ func allowed(b providers.Config) ([]allowlist.Entry, error) {
 	return es, nil
 }
 
-// egressRules turns the allowlist into microsandbox rules. A
-// "*.suffix" entry becomes a domain-suffix rule. No DNS rule: without one,
-// microsandbox's resolver answers only allowed names (NXDOMAIN for the
-// rest), so DNS can't carry data out; an AllowDNS rule would resolve any
-// name.
-func egressRules(entries []allowlist.Entry) []m.PolicyRule {
-	var rules []m.PolicyRule
-	for _, e := range entries {
-		dest := e.Pattern
-		if s, ok := strings.CutPrefix(dest, "*."); ok {
-			dest = "." + s
-		}
-		rules = append(rules, m.PolicyRule{Action: m.PolicyActionAllow, Direction: m.PolicyDirectionEgress,
-			Destination: dest, Protocol: m.PolicyProtocolTCP, Port: strconv.Itoa(e.Port)})
-	}
-	return rules
-}
-
 func run(name, state string) {
 	log := slog.New(slog.NewJSONHandler(os.Stderr, nil))
 	c := loadConfig(name, state)
@@ -203,49 +180,18 @@ func run(name, state string) {
 	defer os.Remove(filepath.Join(state, "ready"))
 
 	// The broker first: the guest's route needs the socket to exist.
-	providers, err := providers.Build(ctx, c.broker, state, log)
+	sock, closeBroker, err := startBroker(ctx, &c, log)
 	if err != nil {
 		fail("%v", err)
 	}
-	sock := filepath.Join(state, "broker.sock")
-	l, err := broker.ListenUnix(sock)
-	if err != nil {
-		fail("broker socket: %v", err)
-	}
-	defer os.Remove(sock)
-	if len(providers) == 0 {
-		log.Warn("no broker provider configured (mono-jig login): the broker answers 404")
-	}
-	if c.proxy {
-		// The CA first, constrained to the real hosts too: the vsock
-		// server below loads the same one.
-		ca, err := broker.LoadOrCreateCA(filepath.Join(state, "broker-ca"), name, c.broker.Hosts()...)
-		if err != nil {
-			fail("ca: %v", err)
-		}
-		pl, err := listenProxy(state)
-		if err != nil {
-			fail("proxy: %v", err)
-		}
-		px := broker.NewProxy(&broker.Server{Providers: providers}, ca, c.broker.Hosts(), newProxyPassword(), log)
-		go func() { _ = px.Serve(pl) }()
-		defer px.Close()
-		defer pl.Close()
-		c.proxyAddr = pl.Addr().String()
-		log.Info("broker proxy ready", "addr", c.proxyAddr, "hosts", c.broker.Hosts())
-	}
-	srv, err := broker.ServeTLS(l, providers, state, name, log)
-	if err != nil {
-		fail("%v", err)
-	}
-	defer srv.Close()
+	defer closeBroker()
 
 	// Denials from this run start here (denials.go).
 	var logStart int64
 	if fi, err := os.Stat(runtimeLog(name)); err == nil {
 		logStart = fi.Size()
 	}
-	sb, created, err := openSandbox(ctx, c)
+	sb, created, err := openSandbox(ctx, theBackend, c)
 	if err != nil {
 		fail("sandbox: %v", err)
 	}
@@ -253,12 +199,12 @@ func run(name, state string) {
 	log.Info("sandbox running", "name", name, "created", created)
 
 	if err := provision(ctx, sb, c, log); err != nil {
-		_ = sb.StopWithTimeout(context.Background(), 30*time.Second)
+		_ = sb.Stop(context.Background(), 30*time.Second)
 		fail("provision: %v", err)
 	}
 	stopped := make(chan struct{})
 	go func() {
-		res, err := sb.WaitUntilStopped(context.Background())
+		res, err := sb.Wait(context.Background())
 		log.Info("sandbox stopped", "result", res, "err", err)
 		close(stopped)
 	}()
@@ -287,7 +233,7 @@ func run(name, state string) {
 	case <-ctx.Done():
 		log.Info("stopping the sandbox")
 		sctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
-		if err := sb.StopWithTimeout(sctx, 30*time.Second); err != nil {
+		if err := sb.Stop(sctx, 30*time.Second); err != nil {
 			log.Warn("stop failed; killing", "err", err)
 			_ = sb.Kill(context.Background())
 		}
@@ -298,172 +244,12 @@ func run(name, state string) {
 	log.Info("down")
 }
 
-// openSandbox starts the named sandbox, creating it the first time. Either
-// way this process owns it: attached, not detached.
-func openSandbox(ctx context.Context, c config) (*m.Sandbox, bool, error) {
-	h, err := m.GetSandbox(ctx, c.name)
-	switch {
-	case err == nil:
-		if s := h.Status(); s == m.SandboxStatusRunning || s == m.SandboxStatusStarting {
-			// Left running by a supervisor that was killed before the parent
-			// watch fired, or started by hand: stop it, so we own it.
-			if err := exec.Command("msb", "stop", "-t", "30", c.name).Run(); err != nil {
-				return nil, false, fmt.Errorf("%s is %s and couldn't be stopped: %w", c.name, s, err)
-			}
-		}
-		// The env can change after create (unlike the egress rules), but
-		// only while stopped: apply the current one, so a sandbox from an
-		// older supervisor, or whose Claude setting changed, matches it.
-		env := guestConfig(c).Env
-		if _, err := h.Modify(ctx, m.ModifyOptions{Env: env, EnvRemove: staleEnv(c.state, env), Policy: m.ModificationPolicyNextStart}); err != nil {
-			return nil, false, fmt.Errorf("setting the environment: %w", err)
-		}
-		if err := recordEnv(c.state, env); err != nil {
-			return nil, false, err
-		}
-		sb, err := m.StartSandbox(ctx, c.name)
-		return sb, false, err
-	case m.IsKind(err, m.ErrSandboxNotFound):
-	default:
-		return nil, false, err
-	}
-	ca, err := os.ReadFile(broker.CAFile(c.state))
-	if err != nil {
-		return nil, false, err
-	}
-	mode := uint32(0o644)
-	env := guestConfig(c).Env
-	if err := recordEnv(c.state, env); err != nil {
-		return nil, false, err
-	}
-	var proxy []m.SandboxOption
-	if c.proxy {
-		// Every connection the policy allows goes to the broker, with the
-		// password, which microsandbox reads from this process's
-		// environment (newProxyPassword) on every start.
-		proxy = append(proxy, m.WithProxy(m.HTTPConnectProxy(c.proxyAddr).Credentials(broker.ProxyUser, m.SecretSourceEnv(proxyPasswordEnv))))
-	}
-	sb, err := m.CreateSandbox(ctx, c.name, append(proxy,
-		m.WithImage(c.image),
-		m.WithMemory(c.memory),
-		m.WithCPUs(c.cpus),
-		m.WithRootDisk(m.RootDisk.Managed(c.diskGiB*1024)),
-		m.WithNetwork(&m.NetworkConfig{
-			DefaultEgress:  m.PolicyActionDeny,
-			DefaultIngress: m.PolicyActionDeny,
-			Rules:          c.rules,
-			// Strict mode denies HTTPS it can't inspect, i.e. every allowed
-			// host without TLS interception. Off, hostname rules match on
-			// SNI plus the sandbox's own DNS answers (docs/microsandbox.md).
-			DisableStrict: true,
-		}),
-		m.WithEnv(env),
-		// Debug: the only level that records denied names (denials.go).
-		m.WithLogLevel(m.LogLevelDebug),
-		m.WithMounts(mounts(c)),
-		m.WithVsock(m.VsockRoute{HostSocket: filepath.Join(c.state, "broker.sock"), Port: brokerPort}),
-		m.WithPatches(m.Patch.Text(guestCA, string(ca), m.PatchOptions{Mode: &mode, Replace: true})),
-	)...)
-	return sb, true, err
-}
-
-// provision runs provision.sh as root: all of it on the first start (a
-// marker in the guest records it), and on later starts only apply, which
-// writes guestConfig (the environment, git's and glab's settings, Claude
-// Code's, the agent's instructions, mcpcli), so the guest follows the
-// broker's providers. openSandbox sets the same environment on the
-// sandbox itself. The script and the settings are written from this
-// binary each time.
-func provision(ctx context.Context, sb *m.Sandbox, c config, log *slog.Logger) error {
-	done, err := sb.FS().Exists(ctx, provisioned)
-	if err != nil {
-		return err
-	}
-	settings, err := guestConfig(c).JSON()
-	if err != nil {
-		return err
-	}
-	// The binary's provision files, replacing the last start's.
-	if ok, err := sb.FS().Exists(ctx, provisionDir); err != nil {
-		return err
-	} else if ok {
-		if err := sb.FS().RemoveDir(ctx, provisionDir); err != nil {
-			return err
-		}
-	}
-	for name, body := range provisionFiles() {
-		p := provisionDir + "/" + name
-		if err := sb.FS().Mkdir(ctx, path.Dir(p)); err != nil {
-			return err
-		}
-		if err := sb.FS().WriteString(ctx, p, body); err != nil {
-			return err
-		}
-	}
-	if err := sb.FS().Write(ctx, guest.ConfigFile, settings); err != nil {
-		return err
-	}
-	if err := sb.FS().WriteString(ctx, guestCAFile, strings.Join(c.cas, "")); err != nil {
-		return err
-	}
-	first, comps := "", "ca apply"
-	if !done {
-		comps = "ca " + firstComponents(ctx, sb, c, log)
-		log.Info("provisioning the guest (first start)", "components", comps)
-		first = `export DEBIAN_FRONTEND=noninteractive
-if ! command -v socat >/dev/null; then
-  apt-get update -qq
-  apt-get install -y -qq --no-install-recommends socat >/dev/null
-fi
-` + hostsLine(c)
-	}
-	script := fmt.Sprintf(`set -euo pipefail
-%s
-export SANDBOX_USER=%s SANDBOX_UID=%d PROVISION_COMPONENTS=%q BROKER_CA_FILE=%s GUEST_CONFIG=%s GUEST_CA=%s
-rm -f /root/provision.sh  # the single script before provision/
-bash %[11]s/provision.sh
-home=$(getent passwd %[2]s | cut -d: -f6)
-if [ -d %[8]s ] && [ ! -e "$home/host" ]; then ln -s %[8]s "$home/host"; fi
-mkdir -p %[9]s && touch %[10]s
-`, first, guestUser, guestUID, comps, guestCA, guest.ConfigFile, guestCAFile, shareGuest, filepath.Dir(provisioned), provisioned, provisionDir)
-	h, err := sb.ShellStream(ctx, script, m.WithExecUser("root"))
-	if err != nil {
-		return err
-	}
-	defer h.Close()
-	out, err := h.Collect(ctx)
-	if err != nil {
-		return err
-	}
-	_, _ = io.WriteString(os.Stderr, out.Stdout()+out.Stderr())
-	if out.ExitCode() != 0 {
-		return fmt.Errorf("provision.sh exited %d", out.ExitCode())
-	}
-	return nil
-}
-
-// hostsLine points the broker's internal names (those of the providers
-// that are on, in this mode) at the bridge, replacing an older line, so
-// the names follow the providers. In proxy mode the others are reached by
-// their real names.
-func hostsLine(c config) string {
-	line := ""
-	if names := c.broker.Internal(); len(names) > 0 {
-		line = `\n127.0.0.1 ` + strings.Join(names, " ")
-	}
-	return fmt.Sprintf(`h=$(grep -v 'broker\.internal' /etc/hosts || true); printf '%%s%s\n' "$h" >/etc/hosts`, line)
-}
-
-// keep runs cmd as a root exec job, so the agent user can't replace it,
-// and restarts it until the sandbox stops or ctx ends.
-func keep(ctx context.Context, sb *m.Sandbox, log *slog.Logger, stopped <-chan struct{}, name, cmd string) {
+// keep runs cmd as a root job, so the agent user can't replace it, and
+// restarts it until the sandbox stops or ctx ends.
+func keep(ctx context.Context, sb sandbox.Guest, log *slog.Logger, stopped <-chan struct{}, name, cmd string) {
 	for {
-		h, err := sb.ShellStream(ctx, cmd, m.WithExecUser("root"))
-		if err == nil {
-			code, werr := h.Wait(ctx)
-			h.Close()
-			err = errors.Join(werr, fmt.Errorf("exit %d", code))
-		}
+		code, err := sb.Job(ctx, cmd)
+		err = errors.Join(err, fmt.Errorf("exit %d", code))
 		select {
 		case <-ctx.Done():
 			return
@@ -473,68 +259,4 @@ func keep(ctx context.Context, sb *m.Sandbox, log *slog.Logger, stopped <-chan s
 			log.Warn("job ended; restarting", "job", name, "err", err)
 		}
 	}
-}
-
-// mounts are the host folders (mounts.go) and the sandbox's own disks:
-// Docker's, if it has one.
-func mounts(c config) map[string]m.MountConfig {
-	ms := hostMounts(c.mounts)
-	if c.dockerGiB > 0 {
-		ms[dockerDir] = m.Mount.Owned(m.OwnedVolumeOptions{Kind: m.VolumeKindDisk, SizeMiB: c.dockerGiB * 1024})
-	}
-	return ms
-}
-
-// components are provision.sh's, for this sandbox.
-func components(c config) string {
-	comps := "base git broker"
-	if c.dockerGiB > 0 {
-		comps += " docker"
-	}
-	return comps + " " + agentComponents()
-}
-
-// imageComponents are the parts of provision.sh mono-jig image build
-// puts in the base image: those that depend only on the image.
-func imageComponents() string { return "base git docker " + agentComponents() }
-
-// imageFile is where the base image records its parts and provision.sh.
-const imageFile = "/etc/mono-jig/image"
-
-// firstComponents are the parts of provision.sh a sandbox's first start
-// runs: those its image doesn't have (all, from a plain image), and the
-// settings every start writes.
-func firstComponents(ctx context.Context, sb *m.Sandbox, c config, log *slog.Logger) string {
-	baked, hash := map[string]bool{}, ""
-	if s, err := sb.FS().ReadString(ctx, imageFile); err == nil {
-		baked, hash = parseImageFile(s)
-	}
-	if want := guest.ProvisionHash(provisionFiles()); hash != "" && hash != want {
-		log.Warn("the image was built from other provision files; to bring it up to date: mono-jig image build, then rm and open",
-			"image", hash, "binary", want)
-	}
-	var comps []string
-	for _, p := range strings.Fields(components(c)) {
-		if !baked[p] {
-			comps = append(comps, p)
-		}
-	}
-	return strings.Join(append(comps, "apply"), " ")
-}
-
-// parseImageFile reads imageFile: components=<parts> and provision=<hash>.
-func parseImageFile(s string) (map[string]bool, string) {
-	baked, hash := map[string]bool{}, ""
-	for _, line := range strings.Split(s, "\n") {
-		k, v, _ := strings.Cut(line, "=")
-		switch k {
-		case "components":
-			for _, p := range strings.Fields(v) {
-				baked[p] = true
-			}
-		case "provision":
-			hash = strings.TrimSpace(v)
-		}
-	}
-	return baked, hash
 }

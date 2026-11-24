@@ -11,8 +11,6 @@ import (
 	"strings"
 	"syscall"
 	"time"
-
-	m "github.com/superradcompany/microsandbox/sdk/go"
 )
 
 var (
@@ -65,7 +63,7 @@ func sandboxCmd(cmd, name string, args []string) {
 		denied(state)
 	case "rm":
 		down(state)
-		if err := m.RemoveSandbox(context.Background(), name); err != nil && !m.IsKind(err, m.ErrSandboxNotFound) {
+		if err := theBackend.Remove(context.Background(), name); err != nil {
 			fail("remove: %v", err)
 		}
 		// The next sandbox of this name has a new host key, and gets a new

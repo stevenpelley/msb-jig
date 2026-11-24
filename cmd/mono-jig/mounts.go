@@ -11,8 +11,6 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
-
-	m "github.com/superradcompany/microsandbox/sdk/go"
 )
 
 // Host folders in the sandbox. Every sandbox has an exchange folder,
@@ -130,10 +128,10 @@ func saveMounts(name, state string, specs []string) {
 		}
 		ms = append(ms, mt)
 	}
-	if _, err := m.GetSandbox(context.Background(), name); err == nil {
-		fail("%s exists, and its mounts were fixed when it was made: mono-jig rm %s, then again with --mount", name, name)
-	} else if !m.IsKind(err, m.ErrSandboxNotFound) {
+	if ok, err := theBackend.Exists(context.Background(), name); err != nil {
 		fail("%v", err)
+	} else if ok {
+		fail("%s exists, and its mounts were fixed when it was made: mono-jig rm %s, then again with --mount", name, name)
 	}
 	if err := os.MkdirAll(state, 0o700); err != nil {
 		fail("%v", err)
@@ -162,18 +160,6 @@ func loadMounts(state string) ([]Mount, error) {
 		return nil, fmt.Errorf("%s: %w", mountsFile(state), err)
 	}
 	return append(ms, more...), nil
-}
-
-// hostMounts are the bind mounts for the SDK, owned by the agent.
-func hostMounts(ms []Mount) map[string]m.MountConfig {
-	out := map[string]m.MountConfig{}
-	for _, mt := range ms {
-		out[mt.Guest] = m.Mount.Bind(mt.Host, m.MountOptions{
-			Readonly: mt.ReadOnly,
-			Owner:    &m.MountOwner{UID: guestUID, GID: guestUID},
-		})
-	}
-	return out
 }
 
 // cp copies between the Mac and a sandbox with msb copy. A sandbox path

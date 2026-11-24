@@ -11,8 +11,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-
-	m "github.com/superradcompany/microsandbox/sdk/go"
 )
 
 // The broker's mode, chosen when a sandbox is created
@@ -66,13 +64,13 @@ func saveBrokerMode(name, state, mode string) {
 	if mode != modeServer && mode != modeProxy {
 		fail("--broker %s: want server or proxy", mode)
 	}
-	if _, err := m.GetSandbox(context.Background(), name); err == nil {
+	if ok, err := theBackend.Exists(context.Background(), name); err != nil {
+		fail("%v", err)
+	} else if ok {
 		if have := loadBrokerMode(state); have != mode {
 			fail("%s exists with the broker in %s mode, fixed when it was made: mono-jig rm %s, then again with --broker %s", name, have, name, mode)
 		}
 		return
-	} else if !m.IsKind(err, m.ErrSandboxNotFound) {
-		fail("%v", err)
 	}
 	if err := os.MkdirAll(state, 0o700); err != nil {
 		fail("%v", err)

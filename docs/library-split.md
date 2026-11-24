@@ -142,9 +142,9 @@ to the providers; the agent says only where the file goes.
 ### Other things likely to change
 
 - **The VM runtime.** Work may not allow microsandbox
-  (`microsandbox.md`). `supervisor.go` mixes the SDK, the broker's start
+  (`microsandbox.md`). `supervisor.go` mixed the SDK, the broker's start
   and provisioning; the [backend interface](design.md#the-sandbox-backend-interface)
-  was never built.
+  was never built. *Since step 6, `sandbox.Backend` (below).*
 - **The agent's namespace.** `broker/policy.go` fixes `agent/<user>/`.
   (The title tag is gone; see [the PR marker](#the-pr-marker).)
 - **The name.** `mono-jig` is in `~/.mono-jig`, the Keychain items, the
@@ -242,6 +242,7 @@ Each step stands alone and is checked by the existing end-to-end runs.
 5. **Agent and Editor**, with Claude Code and VS Code as the first.
    *Done 2026-11-24, see [Step 5 as built](#step-5-as-built).*
 6. **The supervisor split**: broker host, `Backend`, provisioning.
+   *Done 2026-11-24, see [Step 6 as built](#step-6-as-built).*
 7. **The module renamed and moved** to its own repo; the personal track
    is one `Track`.
 
@@ -401,6 +402,33 @@ code is* unverified.
   `base.yaml`, not the agent's; the SSH config writers are still two
   (`editor/ssh.go` for sbx, `remote.go` `sshConfig`).
 
+## Step 6 as built
+
+*2026-11-24. Unit tests; creating, restarting and removing a sandbox
+through the new code is* unverified.
+
+- `sandbox.Backend` (`sandbox/sandbox.go`): `Open(Spec)` (create the
+  first time, else start, applying only the environment), `Exists`,
+  `Remove`. `sandbox.Guest`: `Exists`, `ReadFile`, `WriteFile`,
+  `RemoveAll`, `Run` (a root script, its output and exit code), `Job` (a
+  root script until it ends), `Stop`, `Kill`, `Wait`, `Close`. `Spec`
+  has the image and sizes, environment, egress (allowlist entries),
+  mounts, disks, the vsock route, files patched in at create, and the
+  outbound proxy.
+- `sandbox.Microsandbox` holds all the SDK code that was in
+  `supervisor.go`, `brokermode.go`, `mounts.go`, `lifecycle.go` and
+  `login.go`, with `EgressRules`. `cmd/mono-jig` no longer imports the
+  SDK.
+- The supervisor is three files: `brokerhost.go` (`startBroker`: the
+  providers, the socket, the proxy in proxy mode), `spec.go` (the
+  `Spec` from the config), `provision.go` (provisioning through
+  `Guest`); `supervisor.go` keeps the config, the allowlist and `run`.
+- Still microsandbox-specific outside `sandbox/`: the denial log
+  (`denials.go` reads microsandbox's runtime log), `cp` (`msb copy`),
+  SSH (`remote.go` `sshConfig`, `msb ssh`), `setup`'s `msb doctor` and
+  `msb pull`, and loading images (`msb load`). Another runtime needs
+  those behind `Backend` too.
+
 ## The PR marker
 
 The broker decides whether the agent may change a pull or merge request
@@ -456,3 +484,5 @@ labels today).
   `guest/image.Dockerfile`, `cmd/mono-jig/{image,supervisor}.go`.
 - Step 5: this repo after d0cd229: `agent/`, `editor/{editor,vscode}.go`,
   `cmd/mono-jig/{track,remote,login,supervisor,image}.go`.
+- Step 6: this repo after a65c128: `sandbox/`,
+  `cmd/mono-jig/{brokerhost,spec,provision,supervisor}.go`.

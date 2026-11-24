@@ -8,13 +8,16 @@ import (
 	"mono-jig/agent"
 	"mono-jig/editor"
 	"mono-jig/guest"
+	"mono-jig/sandbox"
 )
 
-// The personal track's agent and editor. Step 7 of docs/library-split.md
-// makes these, the providers (registry.go) and the base image a Track.
+// The personal track's agent, editor and VM runtime. Step 7 of
+// docs/library-split.md makes these, the providers (registry.go) and the
+// base image a Track.
 var (
-	theAgent  agent.Agent   = agent.ClaudeCode{}
-	theEditor editor.Editor = editor.VSCode{}
+	theAgent   agent.Agent     = agent.ClaudeCode{}
+	theEditor  editor.Editor   = editor.VSCode{}
+	theBackend sandbox.Backend = sandbox.Microsandbox{}
 )
 
 // editorProfile is what the editor's settings need: every sandbox under

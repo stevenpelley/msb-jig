@@ -14,8 +14,6 @@ import (
 	"regexp"
 	"slices"
 	"strings"
-
-	m "github.com/superradcompany/microsandbox/sdk/go"
 )
 
 // --- setup ---
@@ -212,7 +210,7 @@ func uninstall(args []string) {
 	}
 	for _, n := range names {
 		down(filepath.Join(root, n))
-		if err := m.RemoveSandbox(context.Background(), n); err != nil && !m.IsKind(err, m.ErrSandboxNotFound) {
+		if err := theBackend.Remove(context.Background(), n); err != nil {
 			fail("removing %s: %v", n, err)
 		}
 		fmt.Println("removed", n)
