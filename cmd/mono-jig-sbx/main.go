@@ -64,22 +64,22 @@ func main() {
 			fail("gitlab-url %q: want https://", *glURL)
 		}
 		pub := public(*glListen)
-		p := build(providers.Config{GitLabUser: *glUser, GitLabURL: *glURL, GitLabMCPTokenCmd: *glMCPTokenCmd,
-			GitLabTokenCmd: tokenCmd(*glTokenCmd, "JIG_GITLAB_TOKEN")}, pub, log)[providers.GitLabHost]
+		p := build(providers.GitLab{User: *glUser, URL: *glURL, MCPTokenCmd: *glMCPTokenCmd,
+			TokenCmd: tokenCmd(*glTokenCmd, "JIG_GITLAB_TOKEN")}, pub, log)[providers.GitLabHost]
 		go func() { errs <- listen(*glListen, pub, p, session, log) }()
 	}
 	if *ghUser != "" {
 		pub := public(*ghListen)
-		p := build(providers.Config{GitHubUser: *ghUser,
-			GitHubTokenCmd: tokenCmd(*ghTokenCmd, "JIG_GITHUB_TOKEN")}, pub, log)[providers.GitHubHost]
+		p := build(providers.GitHub{User: *ghUser,
+			TokenCmd: tokenCmd(*ghTokenCmd, "JIG_GITHUB_TOKEN")}, pub, log)[providers.GitHubHost]
 		go func() { errs <- listen(*ghListen, pub, p, session, log) }()
 	}
 	fail("%v", <-errs)
 }
 
 // build builds one provider, reached by the sandbox at pub.
-func build(c providers.Config, pub *url.URL, log *slog.Logger) map[string]http.Handler {
-	c.Public = func(string) *url.URL { return pub }
+func build(p providers.Provider, pub *url.URL, log *slog.Logger) map[string]http.Handler {
+	c := providers.Config{Providers: []providers.Provider{p}, Public: func(string) *url.URL { return pub }}
 	ps, err := providers.Build(context.Background(), c, "", log)
 	if err != nil {
 		fail("%v", err)

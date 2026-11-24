@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"net/url"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -41,7 +40,8 @@ import (
 // set when the sandbox is created; rm and open again to change them.
 //
 // The providers come from mono-jig login (settings.json and the
-// Keychain, login.go); the JIG_* variables below override them.
+// Keychain; registry.go and login_<provider>.go); the JIG_* variables
+// below override them.
 //
 // Environment:
 //
@@ -55,7 +55,8 @@ import (
 //	JIG_GITLAB_USER           the GitLab user the agent acts for; empty: no GitLab provider
 //	JIG_GITLAB_URL            default https://gitlab.com
 //	JIG_GITLAB_TOKEN_COMMAND  default: glab's own login, or the Keychain item mono-jig-gitlab
-//	JIG_GITHUB_USER           the GitHub user the agent acts for (github.com); empty: no GitHub provider
+//	JIG_GITHUB_USER           the GitHub user the agent acts for; empty: no GitHub provider
+//	JIG_GITHUB_HOST           default github.com; the API is at api.<host>
 //	JIG_GITHUB_TOKEN_COMMAND  default: gh's own login, or the Keychain item mono-jig-github
 //	JIG_CLAUDE_TOKEN_COMMAND  default: the Keychain item mono-jig-claude, if it exists
 //	JIG_AWS_PROFILES          AWS profiles for the AWS MCP proxy, the first the default, space-separated; empty: no AWS
@@ -69,9 +70,6 @@ const (
 	// dockerDir is on its own ext4 disk: the root is overlayfs, and Docker's
 	// overlay snapshots can't sit on overlayfs ("invalid argument").
 	dockerDir = "/var/lib/docker"
-	// brokerNames are pointed at the guest's bridge (in proxy mode, only
-	// AWSHost).
-	brokerNames = providers.GitLabHost + " " + providers.GitHubHost + " " + providers.AnthropicHost + " " + providers.AWSHost
 )
 
 type config struct {
@@ -123,53 +121,6 @@ func loadConfig(name, state string) config {
 	return c
 }
 
-// brokerConfig is the providers mono-jig login recorded, under the
-// JIG_* variables.
-func brokerConfig() providers.Config {
-	var b providers.Config
-	s := loadSettings()
-	gl := gitlabSettings{URL: "https://gitlab.com", Token: "glab"}
-	if s.GitLab != nil {
-		gl = *s.GitLab
-	}
-	user := env("JIG_GITLAB_USER", gl.User)
-	if user != "" && !gitlabUserRE.MatchString(user) {
-		fail("the GitLab user %q isn't a GitLab username", user)
-	}
-	b.GitLabUser = user
-	b.GitLabURL = env("JIG_GITLAB_URL", gl.URL)
-	if user != "" {
-		u, err := url.Parse(b.GitLabURL)
-		if err != nil || u.Scheme != "https" || u.Host == "" {
-			fail("the GitLab URL %q: want https://host", b.GitLabURL)
-		}
-		b.GitLabTokenCmd = env("JIG_GITLAB_TOKEN_COMMAND", gitlabTokenCommand(gl, u.Host))
-	}
-	gh := githubSettings{Token: "gh"}
-	if s.GitHub != nil {
-		gh = *s.GitHub
-	}
-	b.GitHubUser = env("JIG_GITHUB_USER", gh.User)
-	if b.GitHubUser != "" {
-		if !githubUserRE.MatchString(b.GitHubUser) {
-			fail("the GitHub user %q isn't a GitHub username", b.GitHubUser)
-		}
-		b.GitHubTokenCmd = env("JIG_GITHUB_TOKEN_COMMAND", githubTokenCommand(gh))
-	}
-	claude, set := os.LookupEnv("JIG_CLAUDE_TOKEN_COMMAND")
-	if !set && keychainHas(keychainClaude) {
-		claude = "security find-generic-password -s " + keychainClaude + " -w"
-	}
-	b.AnthropicTokenCmd = claude
-	var profiles []string
-	if s.AWS != nil {
-		profiles = s.AWS.Profiles
-	}
-	b.AWSProfiles = strings.Fields(env("JIG_AWS_PROFILES", strings.Join(profiles, " ")))
-	b.AWSMCPCommand = env("JIG_AWS_MCP_COMMAND", "")
-	return b
-}
-
 // userAllowlist is the user's own allowlist layer: hosts to add to the
 // base (allowlist/lists/base.yaml), in the layer format.
 func userAllowlist() string { return filepath.Join(stateRoot(), "allowlist.yaml") }
@@ -192,11 +143,7 @@ func allowed(b providers.Config) ([]allowlist.Entry, error) {
 	if !b.Proxy {
 		return allowlist.Compile(layers, b.Brokered()...)
 	}
-	var drop []string
-	if b.AWSOn() {
-		drop = append(drop, "aws")
-	}
-	es, err := allowlist.Compile(layers, drop...)
+	es, err := allowlist.Compile(layers, b.InternalOnly()...)
 	if err != nil {
 		return nil, err
 	}
@@ -362,14 +309,11 @@ func openSandbox(ctx context.Context, c config) (*m.Sandbox, bool, error) {
 		// only while stopped: apply the current one, so a sandbox from an
 		// older supervisor, or whose Claude setting changed, matches it.
 		env := guestConfig(c).Env
-		var gone []string
-		for _, k := range optionalEnv(c) {
-			if _, ok := env[k]; !ok {
-				gone = append(gone, k)
-			}
-		}
-		if _, err := h.Modify(ctx, m.ModifyOptions{Env: env, EnvRemove: gone, Policy: m.ModificationPolicyNextStart}); err != nil {
+		if _, err := h.Modify(ctx, m.ModifyOptions{Env: env, EnvRemove: staleEnv(c.state, env), Policy: m.ModificationPolicyNextStart}); err != nil {
 			return nil, false, fmt.Errorf("setting the environment: %w", err)
+		}
+		if err := recordEnv(c.state, env); err != nil {
+			return nil, false, err
 		}
 		sb, err := m.StartSandbox(ctx, c.name)
 		return sb, false, err
@@ -382,6 +326,10 @@ func openSandbox(ctx context.Context, c config) (*m.Sandbox, bool, error) {
 		return nil, false, err
 	}
 	mode := uint32(0o644)
+	env := guestConfig(c).Env
+	if err := recordEnv(c.state, env); err != nil {
+		return nil, false, err
+	}
 	var proxy []m.SandboxOption
 	if c.proxy {
 		// Every connection the policy allows goes to the broker, with the
@@ -403,7 +351,7 @@ func openSandbox(ctx context.Context, c config) (*m.Sandbox, bool, error) {
 			// SNI plus the sandbox's own DNS answers (docs/microsandbox.md).
 			DisableStrict: true,
 		}),
-		m.WithEnv(guestConfig(c).Env),
+		m.WithEnv(env),
 		// Debug: the only level that records denied names (denials.go).
 		m.WithLogLevel(m.LogLevelDebug),
 		m.WithMounts(mounts(c)),
@@ -470,15 +418,16 @@ mkdir -p %[8]s && touch %[9]s
 	return nil
 }
 
-// hostsLine points the broker's names at the bridge, replacing an older
-// line, so names added since the sandbox was made are there too. In proxy
-// mode only AWSHost: the others are reached by their real names.
+// hostsLine points the broker's internal names (those of the providers
+// that are on, in this mode) at the bridge, replacing an older line, so
+// the names follow the providers. In proxy mode the others are reached by
+// their real names.
 func hostsLine(c config) string {
-	names := brokerNames
-	if c.proxy {
-		names = providers.AWSHost
+	line := ""
+	if names := c.broker.Internal(); len(names) > 0 {
+		line = `\n127.0.0.1 ` + strings.Join(names, " ")
 	}
-	return fmt.Sprintf(`h=$(grep -v 'broker\.internal' /etc/hosts || true); printf '%%s\n127.0.0.1 %s\n' "$h" >/etc/hosts`, names)
+	return fmt.Sprintf(`h=$(grep -v 'broker\.internal' /etc/hosts || true); printf '%%s%s\n' "$h" >/etc/hosts`, line)
 }
 
 // keep runs cmd as a root exec job, so the agent user can't replace it,

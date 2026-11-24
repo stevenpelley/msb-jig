@@ -25,7 +25,7 @@ func anthropicBroker(t *testing.T, upstream http.Handler, tokenCmd string) (*htt
 		upstream.ServeHTTP(w, r)
 	}))
 	t.Cleanup(up.Close)
-	ps, err := providers.Build(context.Background(), providers.Config{AnthropicTokenCmd: tokenCmd, AnthropicURL: up.URL}, "", nil)
+	ps, err := providers.Build(context.Background(), providers.Config{Providers: []providers.Provider{providers.Anthropic{TokenCmd: tokenCmd, APIURL: up.URL}}}, "", nil)
 	if err != nil {
 		t.Fatal(err)
 	}

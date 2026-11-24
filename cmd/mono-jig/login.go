@@ -7,17 +7,13 @@ package main
 import (
 	"bufio"
 	"context"
-	"encoding/json"
 	"fmt"
-	"net/http"
-	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
 	"slices"
 	"strings"
-	"time"
 
 	m "github.com/superradcompany/microsandbox/sdk/go"
 
@@ -101,45 +97,6 @@ func setup() {
 
 // --- login, logout ---
 
-func login(args []string) {
-	if len(args) == 0 {
-		loginStatus()
-		return
-	}
-	switch args[0] {
-	case "all", "--all":
-		if len(args) != 1 {
-			usage()
-		}
-		loginAll()
-	case "gitlab":
-		loginGitLab(args[1:])
-	case "github":
-		loginGitHub(args[1:])
-	case "claude":
-		loginClaude(args[1:])
-	case "aws":
-		loginAWS(args[1:])
-	default:
-		usage()
-	}
-	fmt.Println("sandboxes pick this up when they next start (mono-jig stop, then open)")
-}
-
-// loginAll asks about each provider in turn and logs in to those you
-// choose, with each login's defaults: the user from your glab or gh login,
-// and the AWS profiles chosen from a list.
-func loginAll() {
-	for _, p := range []struct {
-		name  string
-		login func([]string)
-	}{{"gitlab", loginGitLab}, {"github", loginGitHub}, {"claude", loginClaude}, {"aws", loginAWS}} {
-		if strings.EqualFold(ask("log in to "+p.name+"? [y/N] "), "y") {
-			p.login(nil)
-		}
-	}
-}
-
 // ask prints a prompt and reads one line from stdin. It reads a byte at
 // a time, so nothing typed after the line is taken from the commands
 // that run next (glab, gh, aws sso login).
@@ -157,320 +114,6 @@ func ask(prompt string) string {
 			return strings.TrimSpace(string(b))
 		}
 	}
-}
-
-func loginStatus() {
-	s := loadSettings()
-	if s.GitLab != nil {
-		fmt.Printf("gitlab  %s on %s, token from %s\n", s.GitLab.User, s.GitLab.URL, tokenSource(*s.GitLab))
-	} else {
-		fmt.Println("gitlab  not logged in (mono-jig login gitlab)")
-	}
-	if s.GitHub != nil {
-		fmt.Printf("github  %s on github.com, token from %s\n", s.GitHub.User, githubTokenSource(*s.GitHub))
-	} else {
-		fmt.Println("github  not logged in (mono-jig login github)")
-	}
-	if keychainHas(keychainClaude) {
-		fmt.Printf("claude  token in the Keychain (%s)\n", keychainClaude)
-	} else {
-		fmt.Println("claude  not logged in (mono-jig login claude): the agent signs in inside the sandbox")
-	}
-	if s.AWS != nil && len(s.AWS.Profiles) > 0 {
-		fmt.Printf("aws     profiles %s (the first is the default)\n", strings.Join(s.AWS.Profiles, " "))
-	} else {
-		fmt.Println("aws     not logged in (mono-jig login aws)")
-	}
-}
-
-func tokenSource(g gitlabSettings) string {
-	if g.Token == "keychain" {
-		return "the Keychain (" + keychainGitLab + ")"
-	}
-	return "your glab login"
-}
-
-// loginGitLab records the user the agent acts for, and where the broker
-// gets their token: glab's login on the Mac (logging in if needed), or a
-// token pasted into the Keychain. With no user given, the user is the
-// token's; given one, it checks the token belongs to them.
-func loginGitLab(args []string) {
-	var g gitlabSettings
-	g.URL, g.Token = "https://gitlab.com", "glab"
-	var rest []string
-	for i := 0; i < len(args); i++ {
-		switch a := args[i]; {
-		case a == "--keychain":
-			g.Token = "keychain"
-		case a == "--url" && i+1 < len(args):
-			i++
-			g.URL = strings.TrimRight(args[i], "/")
-		case strings.HasPrefix(a, "-"):
-			usage()
-		default:
-			rest = append(rest, a)
-		}
-	}
-	if len(rest) > 1 || (len(rest) == 1 && !gitlabUserRE.MatchString(rest[0])) {
-		usage()
-	}
-	if len(rest) == 1 {
-		g.User = rest[0]
-	}
-	u, err := url.Parse(g.URL)
-	if err != nil || u.Scheme != "https" || u.Host == "" || u.Path != "" {
-		fail("--url: want https://host")
-	}
-	if g.Token == "keychain" {
-		tok := readSecret(fmt.Sprintf("a GitLab token on %s (api scope; input hidden): ", u.Host))
-		keychainStore(keychainGitLab, u.Host, tok)
-	} else {
-		if _, err := exec.LookPath("glab"); err != nil {
-			fail("glab isn't installed: brew install glab, or use --keychain")
-		}
-		if exec.Command("glab", "auth", "status", "--hostname", u.Host).Run() != nil {
-			fmt.Println("glab isn't logged in to", u.Host+": glab auth login")
-			c := exec.Command("glab", "auth", "login", "--hostname", u.Host)
-			c.Stdin, c.Stdout, c.Stderr = os.Stdin, os.Stdout, os.Stderr
-			if err := c.Run(); err != nil {
-				fail("glab auth login: %v", err)
-			}
-		}
-	}
-	out, err := exec.Command("sh", "-c", gitlabTokenCommand(g, u.Host)).Output()
-	if err != nil {
-		fail("reading the token back: %v", err)
-	}
-	who, err := gitlabUser(g.URL, strings.TrimSpace(string(out)))
-	if err != nil {
-		fail("checking the token: %v", err)
-	}
-	if g.User == "" {
-		g.User = who
-	} else if !strings.EqualFold(who, g.User) {
-		fail("the token belongs to %s, not %s", who, g.User)
-	}
-	s := loadSettings()
-	s.GitLab = &g
-	saveSettings(s)
-	fmt.Printf("gitlab: the agent acts for %s on %s, with the token from %s\n", g.User, u.Host, tokenSource(g))
-}
-
-// gitlabUser is the username a token belongs to.
-func gitlabUser(base, token string) (string, error) {
-	req, err := http.NewRequest("GET", base+"/api/v4/user", nil)
-	if err != nil {
-		return "", err
-	}
-	// Bearer, as the broker sends it: glab's login is OAuth, which PRIVATE-TOKEN refuses.
-	req.Header.Set("Authorization", "Bearer "+token)
-	c := &http.Client{Timeout: 20 * time.Second}
-	resp, err := c.Do(req)
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("%s/api/v4/user: %s", base, resp.Status)
-	}
-	var u struct{ Username string }
-	if err := json.NewDecoder(resp.Body).Decode(&u); err != nil {
-		return "", err
-	}
-	return u.Username, nil
-}
-
-func githubTokenSource(g githubSettings) string {
-	if g.Token == "keychain" {
-		return "the Keychain (" + keychainGitHub + ")"
-	}
-	return "your gh login"
-}
-
-// loginGitHub records the github.com user the agent acts for, and where
-// the broker gets their token: gh's login on the Mac (logging in if
-// needed), or a token pasted into the Keychain. With no user given, the
-// user is the token's; given one, it checks the token belongs to them.
-func loginGitHub(args []string) {
-	g := githubSettings{Token: "gh"}
-	var rest []string
-	for _, a := range args {
-		switch {
-		case a == "--keychain":
-			g.Token = "keychain"
-		case strings.HasPrefix(a, "-"):
-			usage()
-		default:
-			rest = append(rest, a)
-		}
-	}
-	if len(rest) > 1 || (len(rest) == 1 && !githubUserRE.MatchString(rest[0])) {
-		usage()
-	}
-	if len(rest) == 1 {
-		g.User = rest[0]
-	}
-	if g.Token == "keychain" {
-		tok := readSecret("a GitHub token (repo scope, or a fine-grained token with contents, pull requests and actions; input hidden): ")
-		keychainStore(keychainGitHub, "github.com", tok)
-	} else {
-		if _, err := exec.LookPath("gh"); err != nil {
-			fail("gh isn't installed: brew install gh, or use --keychain")
-		}
-		if exec.Command("gh", "auth", "token", "--hostname", "github.com").Run() != nil {
-			fmt.Println("gh isn't logged in to github.com: gh auth login")
-			c := exec.Command("gh", "auth", "login", "--hostname", "github.com", "--web")
-			c.Stdin, c.Stdout, c.Stderr = os.Stdin, os.Stdout, os.Stderr
-			if err := c.Run(); err != nil {
-				fail("gh auth login: %v", err)
-			}
-		}
-	}
-	out, err := exec.Command("sh", "-c", githubTokenCommand(g)).Output()
-	if err != nil {
-		fail("reading the token back: %v", err)
-	}
-	who, err := githubUser(strings.TrimSpace(string(out)))
-	if err != nil {
-		fail("checking the token: %v", err)
-	}
-	if g.User == "" {
-		g.User = who
-	} else if !strings.EqualFold(who, g.User) {
-		fail("the token belongs to %s, not %s", who, g.User)
-	}
-	s := loadSettings()
-	s.GitHub = &g
-	saveSettings(s)
-	fmt.Printf("github: the agent acts for %s on github.com, with the token from %s\n", g.User, githubTokenSource(g))
-}
-
-// githubUser is the login a token belongs to.
-func githubUser(token string) (string, error) {
-	req, err := http.NewRequest("GET", "https://api.github.com/user", nil)
-	if err != nil {
-		return "", err
-	}
-	req.Header.Set("Authorization", "Bearer "+token)
-	req.Header.Set("Accept", "application/vnd.github+json")
-	resp, err := (&http.Client{Timeout: 20 * time.Second}).Do(req)
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("api.github.com/user: %s", resp.Status)
-	}
-	var u struct{ Login string }
-	if err := json.NewDecoder(resp.Body).Decode(&u); err != nil {
-		return "", err
-	}
-	return u.Login, nil
-}
-
-// loginClaude stores a long-lived Claude token, from claude setup-token
-// run on the Mac, in the Keychain. The broker sends it for the sandbox.
-func loginClaude(args []string) {
-	if len(args) != 0 {
-		usage()
-	}
-	fmt.Println("Run `claude setup-token` in another terminal on this Mac and sign in; it prints a token.")
-	tok := readSecret("paste the token (input hidden): ")
-	if !strings.HasPrefix(tok, "sk-ant-") {
-		fail("that isn't a Claude token (sk-ant-…)")
-	}
-	keychainStore(keychainClaude, "mono-jig", tok)
-	fmt.Println("claude: token stored in the Keychain as", keychainClaude)
-}
-
-// loginAWS records the profiles for the AWS MCP proxy and runs aws sso
-// login for each that uses SSO. The profiles and the SSO cache are the
-// user's own, in ~/.aws (docs/prototype-plan.md step 7). With no profiles
-// given, it lists yours and asks.
-func loginAWS(args []string) {
-	if _, err := exec.LookPath("aws"); err != nil {
-		fail("the AWS CLI isn't installed: brew install awscli")
-	}
-	if _, err := exec.LookPath("uv"); err != nil {
-		fmt.Println("note: uv isn't installed, and runs AWS's MCP proxy: brew install uv")
-	}
-	out, err := exec.Command("aws", "configure", "list-profiles").Output()
-	if err != nil {
-		fail("aws configure list-profiles: %v", err)
-	}
-	profiles := strings.Fields(string(out))
-	if len(args) == 0 {
-		if len(profiles) == 0 {
-			fail("no AWS profiles in your AWS config (aws configure sso)")
-		}
-		fmt.Println("your AWS profiles:\n  " + strings.Join(profiles, "\n  "))
-		args = strings.Fields(ask("profiles for the agent, the default first (space-separated): "))
-		if len(args) == 0 {
-			fail("no profiles chosen")
-		}
-	}
-	for _, p := range args {
-		if strings.HasPrefix(p, "-") {
-			usage()
-		}
-		if !slices.Contains(profiles, p) {
-			fail("no AWS profile %s in your AWS config (aws configure list-profiles)", p)
-		}
-		if exec.Command("aws", "sts", "get-caller-identity", "--profile", p).Run() == nil {
-			fmt.Println("aws:", p, "is signed in")
-			continue
-		}
-		fmt.Println("aws: signing in", p)
-		c := exec.Command("aws", "sso", "login", "--profile", p)
-		c.Stdin, c.Stdout, c.Stderr = os.Stdin, os.Stdout, os.Stderr
-		if err := c.Run(); err != nil {
-			fail("aws sso login --profile %s: %v", p, err)
-		}
-	}
-	s := loadSettings()
-	s.AWS = &awsSettings{Profiles: args}
-	saveSettings(s)
-	fmt.Printf("aws: profiles %s (the first is the default)\n", strings.Join(args, " "))
-}
-
-// logout forgets a provider: the settings, and its Keychain item. It
-// leaves the user's own logins alone (glab's, AWS's SSO session).
-func logout(args []string) {
-	which := args
-	if len(which) == 0 {
-		which = []string{"gitlab", "github", "claude", "aws"}
-	}
-	s := loadSettings()
-	for _, p := range which {
-		switch p {
-		case "gitlab":
-			if s.GitLab != nil && s.GitLab.Token == "glab" {
-				fmt.Println("gitlab: forgotten; your own glab login stays (glab auth logout to end it)")
-			} else {
-				fmt.Println("gitlab: forgotten")
-			}
-			s.GitLab = nil
-			keychainDelete(keychainGitLab)
-		case "github":
-			if s.GitHub != nil && s.GitHub.Token == "gh" {
-				fmt.Println("github: forgotten; your own gh login stays (gh auth logout to end it)")
-			} else {
-				fmt.Println("github: forgotten")
-			}
-			s.GitHub = nil
-			keychainDelete(keychainGitHub)
-		case "claude":
-			keychainDelete(keychainClaude)
-			fmt.Println("claude: token removed from the Keychain; revoke it at claude.ai, Settings, Claude Code, if you're done with it")
-		case "aws":
-			s.AWS = nil
-			fmt.Println("aws: forgotten; your SSO session stays (aws sso logout ends it for every tool)")
-		default:
-			usage()
-		}
-	}
-	saveSettings(s)
-	fmt.Println("running sandboxes keep the old setting until they stop")
 }
 
 // readSecret reads a line from the terminal without echo.
@@ -559,8 +202,8 @@ func uninstall(args []string) {
 	setRuntimePaths()
 	root := stateRoot()
 	names := sandboxNames(root)
-	fmt.Printf("This removes:\n  the sandboxes %s, with their disks and everything in them\n  %s\n  the Keychain items %s, %s and %s\n  their SSH keys from microsandbox\n",
-		strings.Join(names, " "), root, keychainGitLab, keychainGitHub, keychainClaude)
+	fmt.Printf("This removes:\n  the sandboxes %s, with their disks and everything in them\n  %s\n  the Keychain items %s\n  their SSH keys from microsandbox\n",
+		strings.Join(names, " "), root, strings.Join(keychainItems(), " "))
 	if !yes {
 		fmt.Print("type yes to go on: ")
 		line, _ := bufio.NewReader(os.Stdin).ReadString('\n')
@@ -578,9 +221,9 @@ func uninstall(args []string) {
 	if err := pruneAuthorizedKeys(func(c string) bool { return strings.HasPrefix(c, "mono-jig-") }); err != nil {
 		fail("%v", err)
 	}
-	keychainDelete(keychainGitLab)
-	keychainDelete(keychainGitHub)
-	keychainDelete(keychainClaude)
+	for _, k := range keychainItems() {
+		keychainDelete(k)
+	}
 	if err := os.RemoveAll(root); err != nil {
 		fail("%v", err)
 	}

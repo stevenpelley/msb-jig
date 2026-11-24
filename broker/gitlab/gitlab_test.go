@@ -21,8 +21,8 @@ import (
 const host = "gitlab.broker.internal"
 
 func serve(t *testing.T, upstream *url.URL) (addr, caFile string) {
-	ps, err := providers.Build(context.Background(), providers.Config{GitLabUser: brokertest.User,
-		GitLabURL: upstream.String(), GitLabTokenCmd: brokertest.TokenCmd}, "", nil)
+	ps, err := providers.Build(context.Background(), providers.Config{Providers: []providers.Provider{providers.GitLab{User: brokertest.User,
+		URL: upstream.String(), TokenCmd: brokertest.TokenCmd}}}, "", nil)
 	if err != nil {
 		t.Fatal(err)
 	}

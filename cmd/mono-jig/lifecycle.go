@@ -19,6 +19,8 @@ var (
 	nameRE       = regexp.MustCompile(`^[a-z][a-z0-9-]{0,30}$`)
 	gitlabUserRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,254}$`)
 	githubUserRE = regexp.MustCompile(`^[A-Za-z0-9](?:[A-Za-z0-9]|-[A-Za-z0-9]){0,38}$`)
+	// hostRE is a DNS name of two labels or more, lower case.
+	hostRE = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$`)
 )
 
 func fail(f string, a ...any) {

@@ -5,16 +5,19 @@ import (
 	"strings"
 	"testing"
 
+	"mono-jig/broker/providers"
 	"mono-jig/guest"
 )
 
 func allOn(proxy bool) config {
 	var c config
-	c.proxy = proxy
-	c.broker.GitLabUser, c.broker.GitHubUser = "gl-user", "gh-user"
-	c.broker.GitLabURL = "https://gitlab.example.org"
-	c.broker.AnthropicTokenCmd = "true"
-	c.broker.AWSProfiles = []string{"dev", "prod"}
+	c.proxy, c.broker.Proxy = proxy, proxy
+	c.broker.Providers = []providers.Provider{
+		providers.GitLab{User: "gl-user", URL: "https://gitlab.example.org"},
+		providers.GitHub{User: "gh-user"},
+		providers.Anthropic{TokenCmd: "true"},
+		providers.AWS{Profiles: []string{"dev", "prod"}},
+	}
 	return c
 }
 
@@ -34,7 +37,7 @@ func TestGuestConfigServerMode(t *testing.T) {
 	for k, v := range map[string]string{
 		"GITLAB_HOST": "gitlab.broker.internal", "GITLAB_TOKEN": "placeholder", "GH_HOST": "github.broker.internal",
 		"ANTHROPIC_BASE_URL": "https://anthropic.broker.internal", "CLAUDE_CODE_OAUTH_TOKEN": "placeholder",
-		"MCP_GATEWAY_URL": awsURL, "GIT_TERMINAL_PROMPT": "0",
+		"MCP_GATEWAY_URL": providers.AWSURL, "GIT_TERMINAL_PROMPT": "0",
 	} {
 		if g.Env[k] != v {
 			t.Errorf("%s = %q, want %q", k, g.Env[k], v)
@@ -50,7 +53,7 @@ func TestGuestConfigServerMode(t *testing.T) {
 	if gh := g.Git["url.https://github.broker.internal/.insteadOf"]; !slices.Contains(gh, "https://github.com/") {
 		t.Errorf("GitHub insteadOf: %v", gh)
 	}
-	if len(g.GitClear) != 0 {
+	if !slices.Equal(g.GitClear, legacyGitKeys) {
 		t.Errorf("GitClear: %v", g.GitClear)
 	}
 	md, ok := file(g, "~/.claude/CLAUDE.md")
@@ -84,23 +87,36 @@ func TestGuestConfigProxyMode(t *testing.T) {
 	if len(g.Git) != 0 {
 		t.Errorf("git in proxy mode: %v", g.Git)
 	}
-	want := []string{"url.https://github.broker.internal/.insteadOf", "url.https://gitlab.broker.internal/.insteadOf"}
-	if !slices.Equal(g.GitClear, want) {
-		t.Errorf("GitClear %v, want %v", g.GitClear, want)
+	if h := hostsLine(allOn(true)); !strings.Contains(h, `127.0.0.1 aws.broker.internal\n`) || strings.Contains(h, "gitlab.broker") {
+		t.Errorf("hostsLine: %s", h)
 	}
 }
 
-// With no provider: the base environment only, nothing for the agent, and
-// every provider's settings cleared.
+// With no provider: the base environment only, and nothing for the
+// agent. The hosts line only removes the broker's names.
 func TestGuestConfigNone(t *testing.T) {
 	var c config
 	g := guestConfig(c)
-	if len(g.Env) != 2 || len(g.Files) != 0 || len(g.Instructions) != 0 || len(g.GitClear) != 2 {
+	if len(g.Env) != 2 || len(g.Files) != 0 || len(g.Instructions) != 0 {
 		t.Errorf("%+v", g)
 	}
-	want := []string{"ANTHROPIC_BASE_URL", "CLAUDE_CODE_OAUTH_TOKEN", "GH_ENTERPRISE_TOKEN", "GH_HOST", "GH_TOKEN",
-		"GITLAB_API_PROTOCOL", "GITLAB_HOST", "GITLAB_TOKEN", "MCP_GATEWAY_URL"}
-	if got := optionalEnv(c); !slices.Equal(got, want) {
-		t.Errorf("optionalEnv %v, want %v", got, want)
+	if h := hostsLine(c); strings.Contains(h, "127.0.0.1") {
+		t.Errorf("hostsLine: %s", h)
+	}
+	if h := hostsLine(allOn(false)); !strings.Contains(h, `127.0.0.1 gitlab.broker.internal github.broker.internal anthropic.broker.internal aws.broker.internal\n`) {
+		t.Errorf("hostsLine: %s", h)
+	}
+}
+
+// The names the sandbox had (recorded at the last start, and the legacy
+// ones) that aren't set now are removed.
+func TestStaleEnv(t *testing.T) {
+	state := t.TempDir()
+	if err := recordEnv(state, map[string]string{"A": "1", "GH_HOST": "x", "KEEP": "y"}); err != nil {
+		t.Fatal(err)
+	}
+	gone := staleEnv(state, map[string]string{"KEEP": "y", "GITLAB_HOST": "z"})
+	if !slices.Contains(gone, "A") || !slices.Contains(gone, "GH_HOST") || slices.Contains(gone, "KEEP") || slices.Contains(gone, "GITLAB_HOST") {
+		t.Errorf("staleEnv: %v", gone)
 	}
 }

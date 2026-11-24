@@ -45,23 +45,33 @@ A provider is named in each of these:
 
 | Place | What's per provider |
 |---|---|
+*Since step 2 (done 2026-11-24, below) a provider is a file in
+`broker/providers` (`Provider`: hosts per mode, handlers, guest
+settings), a file in `cmd/mono-jig` (`login_<name>.go`: login, status,
+settings, the JIG_* overrides) listed in `registry.go`, an instructions
+section (`guest/instructions/<name>.md`) and an allowlist group. Before,
+it was named in each of these:*
+
+| Place | What was per provider |
+|---|---|
 | `providers.Config` | its fields |
 | `Hosts`, `Brokered`, `Build` | an `if` block each |
 | `cmd/mono-jig/settings.go` | `gitlabSettings`, `githubSettings`, the Keychain names |
 | `login.go` | `loginGitLab`, `loginGitHub`, … and the `switch` |
 | `supervisor.go` | `brokerConfig`, `brokerNames` and `hostsLine` |
-| `guestconfig.go` | a function each (`gitlabGuest`, …): environment, insteadOf, glab's config, mcpcli, and its section of the agent's instructions (`guest/instructions/<name>.md`) |
-| `allowlist/lists/base.yaml` | the provider groups |
-| `cmd/mono-jig-sbx` | a second wiring of the same providers |
+| `guestconfig.go` | a function each (`gitlabGuest`, …) |
+| `allowlist/lists/base.yaml` | the provider groups (still) |
+| `cmd/mono-jig-sbx` | a second wiring of the same providers (now builds `providers.GitLab` and `GitHub` values) |
 
 *Until step 1 (below, done 2026-11-24) the guest's environment was
 written twice, in Go (`clientEnv`) and in bash (`client_env`), and
 `provision.sh` had a block per provider.*
 
-GitHub is fixed to github.com: `GitHubWebHost` and `GitHubAPIHost` are
-constants, and login and the token command pass `--hostname github.com`.
-GitHub Enterprise Cloud with data residency (`*.ghe.com`) or a GitHub
-Enterprise Server needs the host configurable, as GitLab's URL is.
+GitHub was fixed to github.com. *Since step 2 its host is configurable
+(`login github --host`, `JIG_GITHUB_HOST`), with the API at
+`api.<host>`: GitHub Enterprise Cloud with data residency (`*.ghe.com`)
+has that shape (*unverified*). GitHub Enterprise Server, with the API on
+the web host under `/api/v3`, doesn't fit the route tables yet.*
 
 ### Base image
 
@@ -213,6 +223,7 @@ Each step stands alone and is checked by the existing end-to-end runs.
 2. **The provider registry.** GitLab, GitHub, Anthropic and AWS on it,
    replacing the wiring in `providers.go`, `settings.go`, `login.go` and
    `supervisor.go`. GitHub's host configurable.
+   *Done 2026-11-24, see [Step 2 as built](#step-2-as-built).*
 3. **Extra CAs**, at image build and every start, with `SSL_CERT_FILE`
    and `REQUESTS_CA_BUNDLE`. Small, and needed on the first day at work.
 4. **The base image configurable** (`BASE_IMAGE`, `Track.BaseImage`);
@@ -262,6 +273,34 @@ restarted, and restarted with a provider removed) are* unverified.
   at the same restart as the upgrade keeps that provider's glab config,
   instructions or mcpcli link, since there's no list of files yet.
 
+## Step 2 as built
+
+*2026-11-24. Unit tests only; logging in with the new code, and a
+sandbox started from it, are* unverified.
+
+- `providers.Provider` (`broker/providers/providers.go`): `Name` (the
+  allowlist group and login name), `Hosts(proxy)`, `Handlers` and
+  `Guest(proxy)`. `GitLab`, `GitHub`, `Anthropic` and `AWS` implement it,
+  one file each, holding their own settings. `Config.Providers` is those
+  that are on; `Hosts`, `Internal`, `Brokered`, `InternalOnly` and
+  `Guest` are computed from them. A work provider is a new type, in the
+  work repo once the library has moved (step 7).
+- The guest settings moved from `cmd/mono-jig/guestconfig.go` into each
+  provider's `Guest`; `guestconfig.go` keeps the base environment and the
+  agent (`claudeCode`, which looks for the `anthropic` provider).
+- Cleanup no longer enumerates every provider: the supervisor records the
+  sandbox environment's names (`<state>/guest-env`) and removes those no
+  longer set; `apply` records git's keys (`/var/lib/mono-jig/guest-git`).
+  The names older sandboxes may have are listed once (`legacyEnv`,
+  `legacyGitKeys`).
+- `/etc/hosts` maps only the internal names of the providers that are on
+  (before: all four in server mode, whether on or not).
+- The CLI side is a registry too (`cliProvider` in `registry.go`):
+  `login`, `login all`, the status, `logout`, `uninstall`'s Keychain
+  items and `brokerConfig` iterate it. `settings.json` keeps its shape
+  (each provider under its name, and `image`), but is read generically.
+- GitHub's host: see above.
+
 ## The PR marker
 
 The broker decides whether the agent may change a pull or merge request
@@ -308,3 +347,5 @@ labels today).
 - Step 1: this repo after 4478cbb: `guest/config.go`,
   `guest/instructions/`, `cmd/mono-jig/guestconfig.go`,
   `guest/provision.sh` (`apply`); jq 1.8.2 on the Mac for its expressions.
+- Step 2: this repo after fb4d052: `broker/providers/`,
+  `cmd/mono-jig/{registry,login_*,settings,guestconfig}.go`.

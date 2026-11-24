@@ -44,8 +44,9 @@ func usage() {
   login gitlab [<user>] [--url https://host] [--keychain]
                           act for the user of your glab login's token, or one you paste
                           (given <user>, check that it's theirs)
-  login github [<user>] [--keychain]
-                          the same on github.com, with your gh login's token
+  login github [<user>] [--host <host>] [--keychain]
+                          the same on github.com (or <host>, with its API at
+                          api.<host>), with your gh login's token
   login claude            store a token from claude setup-token
   login aws [<profile>...]
                           use these AWS profiles (signing in with SSO if needed); none: choose from a list

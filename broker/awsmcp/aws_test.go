@@ -92,7 +92,7 @@ func awsBroker(t *testing.T) *httptest.Server {
 		t.Fatal(err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	ps, err := providers.Build(ctx, providers.Config{AWSMCPCommand: "env FAKE_AWS_MCP=1 " + exe}, t.TempDir(), slog.New(slog.DiscardHandler))
+	ps, err := providers.Build(ctx, providers.Config{Providers: []providers.Provider{providers.AWS{Command: "env FAKE_AWS_MCP=1 " + exe}}}, t.TempDir(), slog.New(slog.DiscardHandler))
 	if err != nil {
 		t.Fatal(err)
 	}

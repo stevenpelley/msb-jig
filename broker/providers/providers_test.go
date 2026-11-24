@@ -49,12 +49,11 @@ func (u *upstream) last() string {
 
 func TestProxyMode(t *testing.T) {
 	gh, gl, an := newUpstream(t), newUpstream(t), newUpstream(t)
-	c := Config{
-		Proxy:      true,
-		GitHubUser: "alice", GitHubTokenCmd: "echo ghtok", GitHubURL: gh.URL, GitHubAPIURL: gh.URL,
-		GitLabUser: "alice", GitLabTokenCmd: "echo gltok", GitLabURL: gl.URL,
-		AnthropicTokenCmd: "echo sk-ant-api-key", AnthropicURL: an.URL,
-	}
+	c := Config{Proxy: true, Providers: []Provider{
+		GitLab{User: "alice", TokenCmd: "echo gltok", URL: gl.URL},
+		GitHub{User: "alice", TokenCmd: "echo ghtok", GitURL: gh.URL, APIURL: gh.URL},
+		Anthropic{TokenCmd: "echo sk-ant-api-key", APIURL: an.URL},
+	}}
 	glHost := strings.TrimPrefix(strings.Split(gl.URL, ":")[1], "//")
 	if got, want := c.Hosts(), []string{glHost, "github.com", "api.github.com", "api.anthropic.com"}; !reflect.DeepEqual(got, want) {
 		t.Errorf("Hosts = %q, want %q", got, want)
@@ -125,7 +124,7 @@ func TestProxyMode(t *testing.T) {
 
 func TestServerModeDeniesUnlistedReads(t *testing.T) {
 	gh := newUpstream(t)
-	c := Config{GitHubUser: "alice", GitHubTokenCmd: "echo ghtok", GitHubURL: gh.URL, GitHubAPIURL: gh.URL}
+	c := Config{Providers: []Provider{GitHub{User: "alice", TokenCmd: "echo ghtok", GitURL: gh.URL, APIURL: gh.URL}}}
 	ps, err := Build(context.Background(), c, t.TempDir(), slog.New(slog.DiscardHandler))
 	if err != nil {
 		t.Fatal(err)

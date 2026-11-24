@@ -171,13 +171,17 @@ if want apply; then
   client_env 80-mono-jig "${env[@]}"
   echo 'unset GIT_ASKPASS SSH_ASKPASS' >>/etc/profile.d/80-mono-jig.sh
 
-  # git: each key's values replace the guest's; gitClear's go.
+  # git: each key's values replace the guest's. The keys the last apply
+  # set (recorded) and gitClear's go first, so a provider no longer served
+  # leaves nothing.
+  gitkeys=$state/guest-git
   while read -r k; do
     [[ -n $k ]] && { git config --system --unset-all "$k" 2>/dev/null || true; }
-  done < <(jq -r '(.gitClear // []) + (.git // {} | keys) | .[]' "$cfg")
+  done < <(jq -r '(.gitClear // []) + (.git // {} | keys) | .[]' "$cfg"; cat "$gitkeys" 2>/dev/null || true)
   while IFS=$'\t' read -r k v; do
     [[ -n $k ]] && git config --system --add "$k" "$v"
   done < <(jq -r '.git // {} | to_entries[] | .key as $k | .value[] | [$k, .] | @tsv' "$cfg")
+  jq -r '.git // {} | keys | .[]' "$cfg" >"$gitkeys"
 
   # Files: written when absent or ours (a marker, if set, is the first
   # line). Those the last apply wrote and this one doesn't are removed, if

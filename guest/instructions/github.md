@@ -1,7 +1,7 @@
 
 ## GitHub
 
-- Use `git` and `gh` as usual: the broker handles github.com, and `gh`
+- Use `git` and `gh` as usual: the broker handles {{.Host}}, and `gh`
   is already configured.
 - Push only to branches under `agent/{{.User}}/`, e.g. `agent/{{.User}}/fix-timeout`.
   Pushes to any other branch, and push options, are refused. Then open a

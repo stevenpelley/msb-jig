@@ -23,8 +23,8 @@ type Config struct {
 	Env map[string]string `json:"env"`
 	// Git is system git settings: each key's values replace the guest's.
 	Git map[string][]string `json:"git,omitempty"`
-	// GitClear are keys removed first: those a provider no longer served
-	// would have set.
+	// GitClear are keys removed first, besides those the last apply
+	// recorded: what provisioning set before it kept a record.
 	GitClear []string `json:"gitClear,omitempty"`
 	// Files are written when absent or still ours (File.Marker); those the
 	// last apply wrote and this one doesn't are removed, if still ours.

@@ -23,8 +23,8 @@ func serve(t *testing.T, git, api *url.URL, client *http.Client) (addr, caFile s
 	if client == nil {
 		client = broker.NewUpstreamClient()
 	}
-	ps, err := providers.Build(context.Background(), providers.Config{GitHubUser: brokertest.User,
-		GitHubTokenCmd: brokertest.TokenCmd, GitHubURL: git.String(), GitHubAPIURL: api.String(), Client: client}, "", nil)
+	ps, err := providers.Build(context.Background(), providers.Config{Providers: []providers.Provider{providers.GitHub{User: brokertest.User,
+		TokenCmd: brokertest.TokenCmd, GitURL: git.String(), APIURL: api.String()}}, Client: client}, "", nil)
 	if err != nil {
 		t.Fatal(err)
 	}

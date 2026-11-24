@@ -1,47 +1,81 @@
 package main
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
+
+	"mono-jig/broker/providers"
 )
 
 // login's settings configure the broker; the JIG_* variables override them.
 func TestLoadConfigSettings(t *testing.T) {
 	t.Setenv("JIG_STATE", t.TempDir())
 	t.Setenv("JIG_CLAUDE_TOKEN_COMMAND", "")
-	for _, k := range []string{"JIG_GITLAB_USER", "JIG_GITLAB_URL", "JIG_GITLAB_TOKEN_COMMAND", "JIG_AWS_PROFILES"} {
+	for _, k := range []string{"JIG_GITLAB_USER", "JIG_GITLAB_URL", "JIG_GITLAB_TOKEN_COMMAND", "JIG_AWS_PROFILES",
+		"JIG_AWS_MCP_COMMAND", "JIG_GITHUB_USER", "JIG_GITHUB_HOST", "JIG_GITHUB_TOKEN_COMMAND"} {
 		os.Unsetenv(k)
 	}
+	gitlab := func(c config) providers.GitLab { p, _ := c.broker.Get("gitlab").(providers.GitLab); return p }
+	aws := func(c config) providers.AWS { p, _ := c.broker.Get("aws").(providers.AWS); return p }
 	c := loadConfig("t", "")
-	if c.broker.GitLabUser != "" || len(c.broker.AWSProfiles) != 0 {
+	if len(c.broker.Providers) != 0 {
 		t.Fatalf("no settings: %+v", c.broker)
 	}
 
-	saveSettings(settings{
-		GitLab: &gitlabSettings{User: "alice", URL: "https://gitlab.example.com", Token: "keychain"},
-		AWS:    &awsSettings{Profiles: []string{"a", "b"}},
-	})
+	var s settings
+	s.setProvider("gitlab", gitlabSettings{User: "alice", URL: "https://gitlab.example.com", Token: "keychain"})
+	s.setProvider("aws", awsSettings{Profiles: []string{"a", "b"}})
+	s.setProvider("github", githubSettings{User: "bob", Host: "octo.ghe.com", Token: "gh"})
+	s.Image = "img"
+	saveSettings(s)
 	c = loadConfig("t", "")
-	if c.broker.GitLabUser != "alice" || c.broker.GitLabURL != "https://gitlab.example.com" ||
-		!strings.Contains(c.broker.GitLabTokenCmd, keychainGitLab) || !slices.Equal(c.broker.AWSProfiles, []string{"a", "b"}) {
+	if g := gitlab(c); g.User != "alice" || g.URL != "https://gitlab.example.com" ||
+		!strings.Contains(g.TokenCmd, keychainGitLab) || !slices.Equal(aws(c).Profiles, []string{"a", "b"}) {
 		t.Fatalf("settings: %+v", c.broker)
 	}
+	if g, _ := c.broker.Get("github").(providers.GitHub); g.Web() != "octo.ghe.com" || g.API() != "api.octo.ghe.com" ||
+		g.TokenCmd != "gh auth token --hostname octo.ghe.com" {
+		t.Fatalf("github: %+v", g)
+	}
+	if got := loadSettings(); got.Image != "img" {
+		t.Fatalf("image: %q", got.Image)
+	}
 
-	saveSettings(settings{GitLab: &gitlabSettings{User: "alice", URL: "https://gitlab.com", Token: "glab"}})
-	if c = loadConfig("t", ""); !strings.Contains(c.broker.GitLabTokenCmd, "glab config get token --host gitlab.com") {
-		t.Fatalf("glab: %q", c.broker.GitLabTokenCmd)
+	s = settings{}
+	s.setProvider("gitlab", gitlabSettings{User: "alice", URL: "https://gitlab.com", Token: "glab"})
+	saveSettings(s)
+	if c = loadConfig("t", ""); !strings.Contains(gitlab(c).TokenCmd, "glab config get token --host gitlab.com") {
+		t.Fatalf("glab: %q", gitlab(c).TokenCmd)
 	}
 
 	t.Setenv("JIG_GITLAB_USER", "")
 	t.Setenv("JIG_AWS_PROFILES", "c")
-	if c = loadConfig("t", ""); c.broker.GitLabUser != "" || !slices.Equal(c.broker.AWSProfiles, []string{"c"}) {
+	if c = loadConfig("t", ""); c.broker.Get("gitlab") != nil || !slices.Equal(aws(c).Profiles, []string{"c"}) {
 		t.Fatalf("env over settings: %+v", c.broker)
 	}
 	if fi, err := os.Stat(settingsPath()); err != nil || fi.Mode().Perm() != 0o600 {
 		t.Fatalf("settings file: %v %v", fi, err)
+	}
+}
+
+// settings.json keeps its shape: each provider under its name, and image.
+func TestSettingsJSON(t *testing.T) {
+	in := `{"aws":{"profiles":["p"]},"gitlab":{"user":"u","url":"https://gitlab.com","token":"glab"},"image":"i"}`
+	var s settings
+	if err := json.Unmarshal([]byte(in), &s); err != nil {
+		t.Fatal(err)
+	}
+	if a := providerSettings[awsSettings](s, "aws"); s.Image != "i" || a == nil || a.Profiles[0] != "p" ||
+		providerSettings[githubSettings](s, "github") != nil {
+		t.Fatalf("%+v", s)
+	}
+	out, _ := json.Marshal(s)
+	if string(out) != in {
+		t.Fatalf("round trip: %s", out)
 	}
 }
 

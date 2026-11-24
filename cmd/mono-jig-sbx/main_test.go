@@ -24,7 +24,7 @@ func TestSbxMode(t *testing.T) {
 	}))
 	t.Cleanup(up.Close)
 	pub := &url.URL{Scheme: "http", Host: "host.docker.internal:18443"}
-	p := build(providers.Config{GitLabUser: "alice", GitLabURL: up.URL, GitLabTokenCmd: "echo " + tok}, pub, nil)[providers.GitLabHost]
+	p := build(providers.GitLab{User: "alice", URL: up.URL, TokenCmd: "echo " + tok}, pub, nil)[providers.GitLabHost]
 	srv := httptest.NewServer(sessionCheck("s3ssion", &broker.Server{Providers: map[string]http.Handler{pub.Hostname(): p}}))
 	t.Cleanup(srv.Close)
 	c := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}

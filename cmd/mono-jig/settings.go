@@ -4,50 +4,79 @@ import (
 	"encoding/json"
 	"errors"
 	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
 )
 
 // settings are what mono-jig login records, in <root>/settings.json:
-// which providers the broker serves, and as whom. No secrets: tokens stay
-// in the Keychain (keychainGitLab, keychainGitHub, keychainClaude) or in
-// glab's and gh's own logins.
-// The JIG_* variables override them (loadConfig), for the checks.
+// which providers the broker serves, and as whom, each under its login
+// name (cliProvider), and the image mono-jig image build made. No
+// secrets: tokens stay in the Keychain or in the tools' own logins on the
+// Mac. The JIG_* variables override them (cliProvider.broker), for the
+// checks.
 type settings struct {
-	GitLab *gitlabSettings `json:"gitlab,omitempty"`
-	GitHub *githubSettings `json:"github,omitempty"`
-	AWS    *awsSettings    `json:"aws,omitempty"`
 	// Image is the image mono-jig image build made (image.go).
-	Image string `json:"image,omitempty"`
+	Image string
+	// providers are each provider's own settings, by login name.
+	providers map[string]json.RawMessage
 }
 
-type gitlabSettings struct {
-	User string `json:"user"`
-	URL  string `json:"url"`
-	// Token is where the broker reads the user's token: "glab" (the
-	// user's own glab login on the Mac) or "keychain" (keychainGitLab).
-	Token string `json:"token"`
+func (s settings) MarshalJSON() ([]byte, error) {
+	m := map[string]any{}
+	for k, v := range s.providers {
+		m[k] = v
+	}
+	if s.Image != "" {
+		m["image"] = s.Image
+	}
+	return json.Marshal(m)
 }
 
-// githubSettings: github.com only, for now.
-type githubSettings struct {
-	User string `json:"user"`
-	// Token: "gh" (the user's own gh login on the Mac) or "keychain"
-	// (keychainGitHub).
-	Token string `json:"token"`
+func (s *settings) UnmarshalJSON(b []byte) error {
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(b, &m); err != nil {
+		return err
+	}
+	if v, ok := m["image"]; ok {
+		if err := json.Unmarshal(v, &s.Image); err != nil {
+			return err
+		}
+		delete(m, "image")
+	}
+	s.providers = m
+	return nil
 }
 
-type awsSettings struct {
-	// Profiles for the AWS MCP proxy, the first the default.
-	Profiles []string `json:"profiles"`
+// providerSettings are provider name's settings, or nil if it has none.
+func providerSettings[T any](s settings, name string) *T {
+	raw, ok := s.providers[name]
+	if !ok || string(raw) == "null" {
+		return nil
+	}
+	v := new(T)
+	if err := json.Unmarshal(raw, v); err != nil {
+		fail("%s: %s: %v", settingsPath(), name, err)
+	}
+	return v
 }
 
-// The Keychain items login writes and logout and uninstall delete.
-const (
-	keychainGitLab = "mono-jig-gitlab"
-	keychainGitHub = "mono-jig-github"
-	keychainClaude = "mono-jig-claude"
-)
+// setProvider records provider name's settings; nil forgets them.
+func (s *settings) setProvider(name string, v any) {
+	s.providers = maps.Clone(s.providers)
+	if s.providers == nil {
+		s.providers = map[string]json.RawMessage{}
+	}
+	if v == nil {
+		delete(s.providers, name)
+		return
+	}
+	b, err := json.Marshal(v)
+	if err != nil {
+		fail("%v", err)
+	}
+	s.providers[name] = b
+}
 
 func stateRoot() string {
 	home, _ := os.UserHomeDir()
@@ -82,20 +111,4 @@ func saveSettings(s settings) {
 	if err := os.WriteFile(settingsPath(), append(b, '\n'), 0o600); err != nil {
 		fail("%v", err)
 	}
-}
-
-// gitlabTokenCommand prints the GitLab token for the broker.
-func gitlabTokenCommand(g gitlabSettings, host string) string {
-	if g.Token == "keychain" {
-		return "security find-generic-password -s " + keychainGitLab + " -w"
-	}
-	return "glab api --hostname " + host + " user >/dev/null && glab config get token --host " + host
-}
-
-// githubTokenCommand prints the GitHub token for the broker.
-func githubTokenCommand(g githubSettings) string {
-	if g.Token == "keychain" {
-		return "security find-generic-password -s " + keychainGitHub + " -w"
-	}
-	return "gh auth token --hostname github.com"
 }
