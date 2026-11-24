@@ -136,6 +136,7 @@ The agent runs on the Mac itself and asks before running commands.
 
 | File | What it is |
 |---|---|
+| `README.md`, `LICENSE`, `NOTICE` | The public overview; Apache 2.0 (2026-11-24), copyright Steven Pelley; NOTICE credits the host names taken from sbx's balanced policy |
 | `docs/design.md` | The harness design (2026-11-21; editor over SSH added 2026-11-22): the two tracks, VS Code then Kiro over SSH into the sandbox, egress filtering, packaging as one process per sandbox, leaving sbx (for Lima, since removed, then libraries that boot VMs), dev containers, the broker, the sandbox backend interface, whether OpenShell is easier behind an IDE, packaging, open questions |
 | `docs/prototype-plan.md` | The personal track, step by step, ending on microsandbox (6b): who tests what (this sandbox vs the user's Mac) |
 | `docs/microsandbox.md` | microsandbox as the VM layer (2026-11-22, msb 0.7.16): checks on the Mac, the broker over vsock, the supervisor, Docker, the environment |

@@ -1,0 +1,10 @@
+msb-jig
+Copyright 2026 Steven Pelley
+
+This product is licensed under the Apache License, Version 2.0 (LICENSE).
+
+allowlist/lists/sbx-balanced.yaml lists host names taken from the
+default "balanced" network policy of Docker Sandboxes (sbx), by Docker,
+Inc., as printed by `sbx policy ls --json` (sbx v0.54.0), regrouped and
+rewritten in this project's format. Docker Sandboxes is not part of
+this product.

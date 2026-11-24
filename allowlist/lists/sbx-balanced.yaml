@@ -1,5 +1,7 @@
 # Docker Sandboxes' "balanced" defaults, copied from `sbx policy ls --json`
-# (sbx v0.54.0, 2026-11-23): its rules default-ai-services,
+# (sbx v0.54.0, 2026-11-23). Source: Docker Sandboxes (sbx), by Docker,
+# Inc.; only the host names and ports are taken, regrouped and rewritten
+# in this project's format (see NOTICE). Its rules default-ai-services,
 # default-package-managers, default-code-and-containers,
 # default-cloud-infrastructure, default-os-packages and
 # default-cert-validation, one group each.
