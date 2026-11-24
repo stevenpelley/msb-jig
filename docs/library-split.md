@@ -109,6 +109,10 @@ Mac's two are still the user's to set up.* It matters in four places:
 
 ### Editor
 
+*Since step 5 (done 2026-11-24, below) `editor.Editor` is the seam and
+`editor.VSCode` the one behind it; the list below is where VS Code was
+named before.*
+
 - `editor/vscode.go`: Microsoft Remote-SSH's settings and extension
   IDs. Kiro's remote support is its own; its setting names are
   *unverified*.
@@ -236,6 +240,7 @@ Each step stands alone and is checked by the existing end-to-end runs.
    `provision.sh` split into components.
    *Done 2026-11-24, see [Step 4 as built](#step-4-as-built).*
 5. **Agent and Editor**, with Claude Code and VS Code as the first.
+   *Done 2026-11-24, see [Step 5 as built](#step-5-as-built).*
 6. **The supervisor split**: broker host, `Backend`, provisioning.
 7. **The module renamed and moved** to its own repo; the personal track
    is one `Track`.
@@ -367,6 +372,35 @@ unverified.
   (`update-ca-certificates`), `git` (gh and glab from apt), `apply`'s
   package install (apt, `dpkg -s`).
 
+## Step 5 as built
+
+*2026-11-24. Unit tests; opening VS Code on a sandbox through the new
+code is* unverified.
+
+- `agent.Agent` (`agent/agent.go`): `Components` (provision files it
+  adds) and `ComponentNames`, `Guest` (its settings, and the
+  instructions in its own file), `EditorExtensions`. `agent.ClaudeCode`
+  owns `70-claude.sh` (moved from `guest/provision/components/`), the
+  Anthropic environment, onboarding, `~/.claude/CLAUDE.md`, and
+  `anthropic.claude-code`. A kiro-cli agent is another type with its own
+  component and steering file.
+- `editor.Editor` (`editor/editor.go`): `Find`, `Configure`, `Install`,
+  `Open`, taking a `Profile` (the SSH config, the hosts, the agent's
+  extensions). `editor.VSCode` holds what `remote.go` `code` and `setup`
+  did: the `code` binary, `_vscode` and `_vscode-ext`, Remote-SSH.
+  `VSCodeSettings` takes the agent's extensions instead of naming Claude
+  Code's.
+- `cmd/mono-jig/track.go` picks them (`theAgent`, `theEditor`) until
+  step 7's `Track`. The provision set is `guest.Provision()` plus the
+  agent's files (`provisionFiles`); the components run at the image build
+  and a first start include the agent's.
+- The sbx stand-in image (`guest/Dockerfile`) no longer installs Claude
+  Code: its component isn't in `guest/` any more, and step 1's check
+  doesn't need it.
+- Left: the allowlist's `claude-code` and `anthropic` groups are still in
+  `base.yaml`, not the agent's; the SSH config writers are still two
+  (`editor/ssh.go` for sbx, `remote.go` `sshConfig`).
+
 ## The PR marker
 
 The broker decides whether the agent may change a pull or merge request
@@ -420,3 +454,5 @@ labels today).
   awk on the Mac for the split.
 - Step 4: this repo after 2cba953: `guest/provision/`, `guest/provision.go`,
   `guest/image.Dockerfile`, `cmd/mono-jig/{image,supervisor}.go`.
+- Step 5: this repo after d0cd229: `agent/`, `editor/{editor,vscode}.go`,
+  `cmd/mono-jig/{track,remote,login,supervisor,image}.go`.

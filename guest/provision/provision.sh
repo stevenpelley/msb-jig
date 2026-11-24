@@ -15,8 +15,9 @@
 #   SANDBOX_UID          its UID, when it's created (default: useradd's choice);
 #                        the supervisor fixes it so host folders mount as its
 #   PROVISION_COMPONENTS space-separated subset of: ca base sshd git broker
-#                        docker claude apply (default: base sshd git broker
-#                        docker claude). apply writes the
+#                        docker apply, and the agent's (claude, from the agent
+#                        package) (default: base sshd git broker docker).
+#                        apply writes the
 #                        settings the supervisor built (guest.Config, from the
 #                        providers and the agent): the environment, git's
 #                        settings, files such as glab's config, mcpcli and the

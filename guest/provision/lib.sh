@@ -2,7 +2,7 @@
 
 SANDBOX_USER="${SANDBOX_USER:-agent}"
 SANDBOX_UID="${SANDBOX_UID:-}"
-PROVISION_COMPONENTS="${PROVISION_COMPONENTS:-base sshd git broker docker claude}"
+PROVISION_COMPONENTS="${PROVISION_COMPONENTS:-base sshd git broker docker}"
 GUEST_CONFIG="${GUEST_CONFIG:-/root/guest.json}"
 GUEST_CA="${GUEST_CA:-/root/guest-ca.pem}"
 BROKER_CA_FILE="${BROKER_CA_FILE:-}"

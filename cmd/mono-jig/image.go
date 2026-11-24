@@ -185,8 +185,8 @@ func baseArgs() []string {
 	return []string{
 		"SANDBOX_USER=" + guestUser,
 		"SANDBOX_UID=" + strconv.Itoa(guestUID),
-		"PROVISION_COMPONENTS=" + imageComponents,
-		"PROVISION_HASH=" + guest.ProvisionHash(guest.Provision()),
+		"PROVISION_COMPONENTS=" + imageComponents(),
+		"PROVISION_HASH=" + guest.ProvisionHash(provisionFiles()),
 		"BASE_IMAGE=" + baseImage(),
 	}
 }
@@ -210,7 +210,7 @@ func buildBase(engine string) string {
 	}
 	defer os.RemoveAll(dir)
 	files := map[string]string{"Dockerfile": guest.ImageDockerfile, "ca/README": "Extra CAs (mono-jig ca), one .crt each.\n"}
-	for name, body := range guest.Provision() {
+	for name, body := range provisionFiles() {
 		files["provision/"+name] = body
 	}
 	for i, ca := range extraCAs() {

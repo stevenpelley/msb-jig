@@ -17,7 +17,7 @@ func main() {
 	mode, cfg, host := os.Args[1], os.Args[2], os.Args[3]
 	s := map[string]any{"remote.SSH.configFile": cfg, "remote.SSH.remotePlatform": map[string]string{host: "linux"}}
 	if mode == "ours" {
-		s = editor.VSCodeSettings(cfg, []string{host})
+		s = editor.VSCodeSettings(cfg, []string{host}, []string{"anthropic.claude-code"})
 	}
 	s["workbench.startupEditor"] = "none"
 	s["security.workspace.trust.enabled"] = false

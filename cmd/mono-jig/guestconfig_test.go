@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"mono-jig/agent"
 	"mono-jig/broker/providers"
 	"mono-jig/guest"
 )
@@ -60,7 +61,7 @@ func TestGuestConfigServerMode(t *testing.T) {
 	if !ok {
 		t.Fatal("no CLAUDE.md")
 	}
-	for _, s := range []string{claudeMarker + "\n# Working in the mono-jig sandbox", "## GitLab", "agent/gl-user/",
+	for _, s := range []string{agent.ClaudeMarker + "\n# Working in the mono-jig sandbox", "## GitLab", "agent/gl-user/",
 		"the broker handles gitlab.example.org", "## GitHub", "agent/gh-user/", "## AWS", "profile\n`dev`", "Other profiles: prod."} {
 		if !strings.Contains(md.Content, s) {
 			t.Errorf("CLAUDE.md lacks %q:\n%s", s, md.Content)

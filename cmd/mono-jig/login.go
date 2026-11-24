@@ -16,8 +16,6 @@ import (
 	"strings"
 
 	m "github.com/superradcompany/microsandbox/sdk/go"
-
-	"mono-jig/editor"
 )
 
 // --- setup ---
@@ -46,8 +44,13 @@ func setup() {
 	} else {
 		ok = false
 	}
-	hasCode := need("code", "VS Code's command line", "in VS Code, Shell Command: Install 'code' command in PATH")
-	ok = ok && hasCode
+	_, edErr := theEditor.Find()
+	if edErr != nil {
+		fmt.Printf("  missing  %-6s %v\n", theEditor.Name(), edErr)
+	} else {
+		fmt.Printf("  ok       %-6s the editor\n", theEditor.Name())
+	}
+	ok = ok && edErr == nil
 	fmt.Println("optional, for login:")
 	need("glab", "GitLab with your own glab login", "brew install glab, or login gitlab --keychain")
 	need("gh", "GitHub with your own gh login", "brew install gh, or login github --keychain")
@@ -56,21 +59,17 @@ func setup() {
 	need("uv", "runs AWS's MCP proxy", "brew install uv")
 
 	root := stateRoot()
-	data, ext := filepath.Join(root, "_vscode"), filepath.Join(root, "_vscode-ext")
 	if err := os.MkdirAll(root, 0o700); err != nil {
 		fail("%v", err)
 	}
-	if _, err := editor.WriteVSCodeSettings(data, filepath.Join(root, "ssh_config"), sshHosts(root)); err != nil {
+	if err := theEditor.Configure(root, editorProfile(root)); err != nil {
 		fail("%v", err)
 	}
-	if hasCode {
-		// The harness's instance has its own extensions: Remote-SSH only
-		// (Claude Code's goes on the remote, remote.SSH.defaultExtensions).
-		c := exec.Command("code", "--user-data-dir", data, "--extensions-dir", ext,
-			"--install-extension", "ms-vscode-remote.remote-ssh")
-		c.Stdout, c.Stderr = os.Stdout, os.Stderr
-		if err := c.Run(); err != nil {
-			fmt.Println("  installing Remote-SSH failed:", err)
+	if edErr == nil {
+		// The harness's instance has its own extensions (for VS Code,
+		// Remote-SSH only: the agent's go on the remote).
+		if err := theEditor.Install(root); err != nil {
+			fmt.Printf("  installing %s's extensions failed: %v\n", theEditor.Name(), err)
 			ok = false
 		}
 	}

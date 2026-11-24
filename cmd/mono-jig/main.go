@@ -174,7 +174,7 @@ func sshSetup(args []string) {
 		fmt.Fprintln(os.Stderr, "ssh-setup:", err)
 		os.Exit(1)
 	}
-	vs, err := editor.WriteVSCodeSettings(filepath.Join(*state, "vscode"), p.Config, []string{e.Alias})
+	vs, err := editor.WriteVSCodeSettings(filepath.Join(*state, "vscode"), p.Config, []string{e.Alias}, theAgent.EditorExtensions())
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "ssh-setup:", err)
 		os.Exit(1)

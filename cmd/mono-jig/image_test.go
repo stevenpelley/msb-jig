@@ -23,7 +23,7 @@ func TestParseImageFile(t *testing.T) {
 // the first start, and its Dockerfile records them for it.
 func TestImageComponents(t *testing.T) {
 	all := strings.Fields(components(config{dockerGiB: 1}))
-	for _, p := range strings.Fields(imageComponents) {
+	for _, p := range strings.Fields(imageComponents()) {
 		if !strings.Contains(" "+strings.Join(all, " ")+" ", " "+p+" ") {
 			t.Errorf("%s is baked but not a first-start component", p)
 		}

@@ -2,7 +2,9 @@
 # Used as the sbx template image, and here as a stand-in sandbox for tests.
 FROM ubuntu:26.04
 ARG SANDBOX_USER=agent
-ARG PROVISION_COMPONENTS="base sshd git docker claude"
+# No agent: its component is the agent package's (mono-jig/agent), not
+# in this directory.
+ARG PROVISION_COMPONENTS="base sshd git docker"
 COPY provision/ /opt/mono-jig/provision/
 COPY install-keys.sh /opt/mono-jig/
 RUN SANDBOX_USER=$SANDBOX_USER PROVISION_COMPONENTS="$PROVISION_COMPONENTS" \

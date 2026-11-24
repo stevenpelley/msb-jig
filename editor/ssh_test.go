@@ -69,3 +69,16 @@ func TestWriteConfig(t *testing.T) {
 		t.Error("multi-line ProxyCommand accepted")
 	}
 }
+
+// The agent's extensions are installed on the remote and allowed; the
+// editor's own stay allowed.
+func TestVSCodeSettingsAgentExtensions(t *testing.T) {
+	s := VSCodeSettings("/cfg", []string{"h"}, []string{"pub.agent"})
+	if d := s["remote.SSH.defaultExtensions"].([]string); len(d) != 1 || d[0] != "pub.agent" {
+		t.Errorf("defaultExtensions %v", d)
+	}
+	a := s["extensions.allowed"].(map[string]any)
+	if a["pub.agent"] != true || a["ms-vscode-remote.remote-ssh"] != true || a["anthropic.claude-code"] != nil {
+		t.Errorf("allowed %v", a)
+	}
+}

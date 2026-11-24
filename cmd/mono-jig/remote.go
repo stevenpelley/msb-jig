@@ -2,13 +2,10 @@ package main
 
 import (
 	"fmt"
-	"mono-jig/editor"
 	"os"
 	"os/exec"
 	"path"
 	"path/filepath"
-	"strings"
-	"syscall"
 )
 
 // sshConfig writes the sandbox's Host block to <state>/ssh_config, and the
@@ -65,28 +62,17 @@ func sshHosts(root string) []string {
 	return hs
 }
 
-// code opens the harness's own VS Code instance (its own user data and
-// extensions, under <root>/_vscode) on the sandbox, with the settings
-// that close the credential bridges (editor.VSCodeSettings), on dir (relative
-// to the guest user's home) or the home itself.
+// code opens the harness's own editor instance (its own settings and
+// extensions, under <root>; for VS Code, the settings that close the
+// credential bridges, editor.VSCodeSettings) on the sandbox, on dir
+// (relative to the guest user's home) or the home itself.
 func code(name, state string, args []string) {
 	if pidOf(state) == 0 {
 		fail("%s isn't up: mono-jig up %s", name, name)
 	}
 	sshConfig(name, state)
 	root := filepath.Dir(state)
-	data, ext := filepath.Join(root, "_vscode"), filepath.Join(root, "_vscode-ext")
-	if _, err := editor.WriteVSCodeSettings(data, filepath.Join(root, "ssh_config"), sshHosts(root)); err != nil {
-		fail("%v", err)
-	}
-	bin, err := exec.LookPath("code")
-	if err != nil {
-		fail("VS Code's code command isn't on PATH (VS Code: Shell Command: Install 'code' command in PATH)")
-	}
-	argv := []string{"code", "--user-data-dir", data, "--extensions-dir", ext,
-		"--remote", "ssh-remote+" + sshHost(name), guestDir(args)}
-	fmt.Println(strings.Join(argv, " "))
-	fail("%v", syscall.Exec(bin, argv, os.Environ()))
+	fail("%v", theEditor.Open(root, editorProfile(root), sshHost(name), guestDir(args)))
 }
 
 // guestDir is the folder mono-jig code opens: an absolute guest path

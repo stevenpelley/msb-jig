@@ -391,7 +391,7 @@ func provision(ctx context.Context, sb *m.Sandbox, c config, log *slog.Logger) e
 			return err
 		}
 	}
-	for name, body := range guest.Provision() {
+	for name, body := range provisionFiles() {
 		p := provisionDir + "/" + name
 		if err := sb.FS().Mkdir(ctx, path.Dir(p)); err != nil {
 			return err
@@ -487,15 +487,16 @@ func mounts(c config) map[string]m.MountConfig {
 
 // components are provision.sh's, for this sandbox.
 func components(c config) string {
+	comps := "base git broker"
 	if c.dockerGiB > 0 {
-		return "base git broker docker claude"
+		comps += " docker"
 	}
-	return "base git broker claude"
+	return comps + " " + agentComponents()
 }
 
 // imageComponents are the parts of provision.sh mono-jig image build
 // puts in the base image: those that depend only on the image.
-const imageComponents = "base git docker claude"
+func imageComponents() string { return "base git docker " + agentComponents() }
 
 // imageFile is where the base image records its parts and provision.sh.
 const imageFile = "/etc/mono-jig/image"
@@ -508,7 +509,7 @@ func firstComponents(ctx context.Context, sb *m.Sandbox, c config, log *slog.Log
 	if s, err := sb.FS().ReadString(ctx, imageFile); err == nil {
 		baked, hash = parseImageFile(s)
 	}
-	if want := guest.ProvisionHash(guest.Provision()); hash != "" && hash != want {
+	if want := guest.ProvisionHash(provisionFiles()); hash != "" && hash != want {
 		log.Warn("the image was built from other provision files; to bring it up to date: mono-jig image build, then rm and open",
 			"image", hash, "binary", want)
 	}
