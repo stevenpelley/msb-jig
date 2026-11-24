@@ -514,6 +514,8 @@ For headless agents in CI or Kubernetes, the broker package runs as a plain side
 
 ## The sandbox backend interface
 
+*Not built as of 2026-11-24: the supervisor uses microsandbox directly. [library-split.md](library-split.md) proposes it as one of the seams between a common library and the personal and work tracks.*
+
 *Added 2026-11-22.* The CLI treats the sandbox tool as a backend. sbx comes first, for the personal prototype; **Lima is the backend that doesn't need a Docker account** ([Leaving sbx](#leaving-sbx-lima)); OpenShell is an adapter we can try later. A backend must:
 - create a sandbox from our image,
 - give SSH access to it, through a `ProxyCommand` or a port on `127.0.0.1`,
