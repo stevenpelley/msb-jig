@@ -57,6 +57,10 @@ func usage() {
                           when creating it, also mount these Mac folders (guest path under
                           /mnt; default /mnt/<folder name>). Every sandbox has
                           ~/.mono-jig/<name>/share at /mnt/host (and ~/host)
+  open <name> [dir] --broker server|proxy
+                          when creating it, how the guest reaches the broker: server (the
+                          default; broker.internal names) or proxy (microsandbox's outbound
+                          proxy; gitlab.com, github.com, api.anthropic.com by their own names)
   cp <src> <dst>          copy between the Mac and a sandbox; a sandbox path is
                           <name>:<path>, relative to the agent's home unless absolute
   stop <name>             stop it
@@ -69,7 +73,8 @@ func usage() {
   uninstall [--yes]       remove every sandbox, its state and the Keychain items
 
 sandboxes, beneath open and stop:
-  up <name>          start the sandbox and its broker in the background (creates it the first time)
+  up <name>          start the sandbox and its broker in the background (creates it the first time;
+                     --mount and --broker as for open)
   run <name>         the same, in the foreground
   down <name>        stop it
   shell <name>       a login shell as the agent user
@@ -110,12 +115,17 @@ func main() {
 	case "up", "run", "down", "shell", "code", "open", "stop", "ssh-config", "denied", "rm":
 		cmd := os.Args[1]
 		args, specs := splitMounts(os.Args[2:])
+		args, mode := splitBrokerMode(args)
 		dir := cmd == "code" || cmd == "open"
 		if len(args) != 1 && (!dir || len(args) != 2) {
 			usage()
 		}
-		if len(specs) > 0 && cmd != "up" && cmd != "open" {
+		if (len(specs) > 0 || mode != "") && cmd != "up" && cmd != "open" {
 			usage()
+		}
+		if mode != "" {
+			setRuntimePaths()
+			saveBrokerMode(args[0], filepath.Join(stateRoot(), args[0]), mode)
 		}
 		if len(specs) > 0 {
 			setRuntimePaths()

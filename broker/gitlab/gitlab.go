@@ -155,7 +155,8 @@ func opt(p map[string]string, k string) *string {
 
 // RewriteLFSBatch points every LFS action on the upstream host back
 // through the broker and removes the actions' headers, which carry
-// GitLab's short-lived LFS token.
+// GitLab's short-lived LFS token. In proxy mode (no Public) the links
+// already name the host the sandbox reaches.
 func (g *Checks) RewriteLFSBatch(resp *http.Response) (io.Reader, error) {
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, 16<<20))
 	if err != nil {
@@ -176,7 +177,7 @@ func (g *Checks) RewriteLFSBatch(resp *http.Response) (io.Reader, error) {
 			}
 			delete(am, "header")
 			if href, _ := am["href"].(string); href != "" {
-				if u, err := url.Parse(href); err == nil && strings.EqualFold(u.Host, g.API.URL.Host) {
+				if u, err := url.Parse(href); err == nil && g.API.Public != nil && strings.EqualFold(u.Host, g.API.URL.Host) {
 					u.Scheme, u.Host = g.API.Public.Scheme, g.API.Public.Host
 					am["href"] = u.String()
 				}

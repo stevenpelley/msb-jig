@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -34,8 +35,11 @@ import (
 // through the microsandbox SDK, attached: if the process dies, the VM
 // stops with it. The guest reaches the broker through a vsock route to
 // that socket. Its other egress is microsandbox's policy, compiled from
-// the allowlist. Network rules, mounts and the vsock route are set when
-// the sandbox is created; rm and open again to change them.
+// the allowlist. In proxy mode (brokermode.go) the broker is also
+// microsandbox's outbound proxy, on a loopback port: every connection
+// the policy allows goes through it, and it terminates the providers'
+// real hosts. Network rules, mounts, the vsock route and the proxy are
+// set when the sandbox is created; rm and open again to change them.
 //
 // The providers come from mono-jig login (settings.json and the
 // Keychain, login.go); the JIG_* variables below override them.
@@ -66,7 +70,8 @@ const (
 	// dockerDir is on its own ext4 disk: the root is overlayfs, and Docker's
 	// overlay snapshots can't sit on overlayfs ("invalid argument").
 	dockerDir = "/var/lib/docker"
-	// brokerNames are pointed at the guest's bridge.
+	// brokerNames are pointed at the guest's bridge (in proxy mode, only
+	// AWSHost).
 	brokerNames = providers.GitLabHost + " " + providers.GitHubHost + " " + providers.AnthropicHost + " " + providers.AWSHost
 	// mcpcliDir is where the supervisor writes mcpcli, on every start.
 	mcpcliDir = "/usr/local/lib/mono-jig/mcpcli"
@@ -82,6 +87,8 @@ type config struct {
 	dockerGiB   uint32 // 0: no Docker
 	rules       []m.PolicyRule
 	mounts      []Mount // host folders (mounts.go)
+	proxy       bool    // the broker's mode is proxy (brokermode.go)
+	proxyAddr   string  // in proxy mode, where the broker's proxy listens
 }
 
 func loadConfig(name, state string) config {
@@ -106,6 +113,8 @@ func loadConfig(name, state string) config {
 	}
 	c.diskGiB, c.dockerGiB = uint32(disk), uint32(docker)
 	c.broker = brokerConfig()
+	c.proxy = loadBrokerMode(state) == modeProxy
+	c.broker.Proxy = c.proxy
 	entries, err := allowed(c.broker)
 	if err != nil {
 		fail("%v", err)
@@ -170,7 +179,10 @@ func userAllowlist() string { return filepath.Join(stateRoot(), "allowlist.yaml"
 
 // allowed compiles the allowlist: the base, the JIG_LAYERS files, then the
 // user's own layer if there is one. The hosts of the providers the broker
-// serves are left out.
+// serves are left out. In proxy mode they stay, and the providers' real
+// hosts are added on 443: microsandbox must allow them for their
+// connections to reach the broker, which decides. Only AWS's go, since
+// the agent reaches AWS through the broker's own endpoint.
 func allowed(b providers.Config) ([]allowlist.Entry, error) {
 	files := strings.Fields(env("JIG_LAYERS", ""))
 	if _, err := os.Stat(userAllowlist()); err == nil {
@@ -180,7 +192,24 @@ func allowed(b providers.Config) ([]allowlist.Entry, error) {
 	if err != nil {
 		return nil, err
 	}
-	return allowlist.Compile(layers, b.Brokered()...)
+	if !b.Proxy {
+		return allowlist.Compile(layers, b.Brokered()...)
+	}
+	var drop []string
+	if b.AWSOn() {
+		drop = append(drop, "aws")
+	}
+	es, err := allowlist.Compile(layers, drop...)
+	if err != nil {
+		return nil, err
+	}
+	for _, h := range b.Hosts() {
+		e := allowlist.Entry{Pattern: h, Port: 443, Layer: "broker", Group: "proxy"}
+		if !slices.ContainsFunc(es, func(o allowlist.Entry) bool { return o.String() == e.String() }) {
+			es = append(es, e)
+		}
+	}
+	return es, nil
 }
 
 // egressRules turns the allowlist into microsandbox rules. A
@@ -237,6 +266,24 @@ func run(name, state string) {
 	if len(providers) == 0 {
 		log.Warn("no broker provider configured (mono-jig login): the broker answers 404")
 	}
+	if c.proxy {
+		// The CA first, constrained to the real hosts too: the vsock
+		// server below loads the same one.
+		ca, err := broker.LoadOrCreateCA(filepath.Join(state, "broker-ca"), name, c.broker.Hosts()...)
+		if err != nil {
+			fail("ca: %v", err)
+		}
+		pl, err := listenProxy(state)
+		if err != nil {
+			fail("proxy: %v", err)
+		}
+		px := broker.NewProxy(&broker.Server{Providers: providers}, ca, c.broker.Hosts(), newProxyPassword(), log)
+		go func() { _ = px.Serve(pl) }()
+		defer px.Close()
+		defer pl.Close()
+		c.proxyAddr = pl.Addr().String()
+		log.Info("broker proxy ready", "addr", c.proxyAddr, "hosts", c.broker.Hosts())
+	}
 	srv, err := broker.ServeTLS(l, providers, state, name, log)
 	if err != nil {
 		fail("%v", err)
@@ -267,7 +314,7 @@ func run(name, state string) {
 	}()
 	// The bridge to the broker, and dockerd: root exec jobs, restarted if
 	// they end (there's no systemd; the guest's init is microsandbox's).
-	jobs := map[string]string{"bridge": hostsLine() + fmt.Sprintf(
+	jobs := map[string]string{"bridge": hostsLine(c) + fmt.Sprintf(
 		"\nexec socat TCP-LISTEN:%d,bind=127.0.0.1,fork,reuseaddr VSOCK-CONNECT:2:%d", brokerPort, brokerPort)}
 	if c.dockerGiB > 0 {
 		// A sandbox provisioned before Docker was added has no dockerd.
@@ -338,7 +385,14 @@ func openSandbox(ctx context.Context, c config) (*m.Sandbox, bool, error) {
 		return nil, false, err
 	}
 	mode := uint32(0o644)
-	sb, err := m.CreateSandbox(ctx, c.name,
+	var proxy []m.SandboxOption
+	if c.proxy {
+		// Every connection the policy allows goes to the broker, with the
+		// password, which microsandbox reads from this process's
+		// environment (newProxyPassword) on every start.
+		proxy = append(proxy, m.WithProxy(m.HTTPConnectProxy(c.proxyAddr).Credentials(broker.ProxyUser, m.SecretSourceEnv(proxyPasswordEnv))))
+	}
+	sb, err := m.CreateSandbox(ctx, c.name, append(proxy,
 		m.WithImage(c.image),
 		m.WithMemory(c.memory),
 		m.WithCPUs(c.cpus),
@@ -358,7 +412,7 @@ func openSandbox(ctx context.Context, c config) (*m.Sandbox, bool, error) {
 		m.WithMounts(mounts(c)),
 		m.WithVsock(m.VsockRoute{HostSocket: filepath.Join(c.state, "broker.sock"), Port: brokerPort}),
 		m.WithPatches(m.Patch.Text(guestCA, string(ca), m.PatchOptions{Mode: &mode, Replace: true})),
-	)
+	)...)
 	return sb, true, err
 }
 
@@ -373,14 +427,21 @@ func clientEnv(c config) map[string]string {
 		"GIT_TERMINAL_PROMPT": "0",
 		"NODE_EXTRA_CA_CERTS": "/etc/ssl/certs/ca-certificates.crt",
 	}
+	// The tokens are placeholders, for the tools that won't start without
+	// one; the broker drops them and sends the user's.
 	if c.broker.GitLabUser != "" {
-		env["GITLAB_HOST"], env["GITLAB_TOKEN"], env["GITLAB_API_PROTOCOL"] = providers.GitLabHost, "placeholder", "https"
+		env["GITLAB_HOST"], env["GITLAB_TOKEN"], env["GITLAB_API_PROTOCOL"] = gitlabHost(c), "placeholder", "https"
 	}
-	if c.broker.GitHubUser != "" {
+	switch {
+	case c.broker.GitHubUser != "" && c.proxy:
+		env["GH_TOKEN"] = "placeholder"
+	case c.broker.GitHubUser != "":
 		env["GH_HOST"], env["GH_ENTERPRISE_TOKEN"] = providers.GitHubHost, "placeholder"
 	}
 	if c.broker.AnthropicTokenCmd != "" {
-		env["ANTHROPIC_BASE_URL"] = "https://" + providers.AnthropicHost
+		if !c.proxy {
+			env["ANTHROPIC_BASE_URL"] = "https://" + providers.AnthropicHost
+		}
 		env["CLAUDE_CODE_OAUTH_TOKEN"] = "placeholder"
 	}
 	if c.broker.AWSOn() {
@@ -391,8 +452,40 @@ func clientEnv(c config) map[string]string {
 
 // optionalEnv are the clientEnv variables a provider adds: removed from a
 // sandbox whose provider has gone.
-var optionalEnv = []string{"GITLAB_HOST", "GITLAB_TOKEN", "GITLAB_API_PROTOCOL", "GH_HOST", "GH_ENTERPRISE_TOKEN",
+var optionalEnv = []string{"GITLAB_HOST", "GITLAB_TOKEN", "GITLAB_API_PROTOCOL", "GH_HOST", "GH_ENTERPRISE_TOKEN", "GH_TOKEN",
 	"ANTHROPIC_BASE_URL", "CLAUDE_CODE_OAUTH_TOKEN", "MCP_GATEWAY_URL"}
+
+// gitlabHost is the GitLab host the guest calls: the broker's name, or in
+// proxy mode GitLab's own.
+func gitlabHost(c config) string {
+	if !c.proxy {
+		return providers.GitLabHost
+	}
+	u, _ := url.Parse(c.broker.GitLabURL)
+	return u.Hostname()
+}
+
+// brokerURLs are the URLs the guest's tools use for each configured
+// provider (empty: not configured): the broker's names, or in proxy mode
+// the real ones.
+func brokerURLs(c config) (gitlab, github, anthropic string) {
+	if c.broker.GitLabUser != "" {
+		gitlab = "https://" + gitlabHost(c)
+	}
+	if c.broker.GitHubUser != "" {
+		github = "https://" + providers.GitHubHost
+		if c.proxy {
+			github = "https://" + providers.GitHubWebHost
+		}
+	}
+	if c.broker.AnthropicTokenCmd != "" {
+		anthropic = "https://" + providers.AnthropicHost
+		if c.proxy {
+			anthropic = "https://" + providers.AnthropicAPIHost
+		}
+	}
+	return gitlab, github, anthropic
+}
 
 // awsURL is the broker's AWS MCP endpoint, for mcpcli and curl.
 const awsURL = "https://" + providers.AWSHost + awsmcp.Path
@@ -422,16 +515,10 @@ func provision(ctx context.Context, sb *m.Sandbox, c config, log *slog.Logger) e
 	if c.broker.AWSOn() {
 		aws = awsURL
 	}
-	gitlab, github := "", ""
-	if c.broker.GitLabUser != "" {
-		gitlab = "https://" + providers.GitLabHost
-	}
-	if c.broker.GitHubUser != "" {
-		github = "https://" + providers.GitHubHost
-	}
-	anthropic := ""
-	if c.broker.AnthropicTokenCmd != "" {
-		anthropic = "https://" + providers.AnthropicHost
+	gitlab, github, anthropic := brokerURLs(c)
+	mode := modeServer
+	if c.proxy {
+		mode = modeProxy
 	}
 	first, comps := "", "broker-env claude-env aws-env"
 	if !done {
@@ -442,19 +529,19 @@ if ! command -v socat >/dev/null; then
   apt-get update -qq
   apt-get install -y -qq --no-install-recommends socat >/dev/null
 fi
-` + hostsLine()
+` + hostsLine(c)
 	}
 	script := fmt.Sprintf(`set -euo pipefail
 %s
-export SANDBOX_USER=%s SANDBOX_UID=%d PROVISION_COMPONENTS=%q
+export SANDBOX_USER=%s SANDBOX_UID=%d PROVISION_COMPONENTS=%q BROKER_MODE=%s
 export BROKER_GITLAB_URL=%q BROKER_GITHUB_URL=%q
 export BROKER_GITLAB_USER=%q BROKER_GITHUB_USER=%q BROKER_GITLAB_MCP= BROKER_ANTHROPIC_URL=%q BROKER_CA_FILE=%s
 export BROKER_AWS_URL=%q BROKER_AWS_PROFILES=%q MCPCLI_DIR=%s
 bash /root/provision.sh
 home=$(getent passwd %[2]s | cut -d: -f6)
-if [ -d %[14]s ] && [ ! -e "$home/host" ]; then ln -s %[14]s "$home/host"; fi
-mkdir -p %[15]s && touch %[16]s
-`, first, guestUser, guestUID, comps, gitlab, github, c.broker.GitLabUser, c.broker.GitHubUser, anthropic, guestCA,
+if [ -d %[15]s ] && [ ! -e "$home/host" ]; then ln -s %[15]s "$home/host"; fi
+mkdir -p %[16]s && touch %[17]s
+`, first, guestUser, guestUID, comps, mode, gitlab, github, c.broker.GitLabUser, c.broker.GitHubUser, anthropic, guestCA,
 		aws, strings.Join(c.broker.AWSProfiles, " "), mcpcliDir, shareGuest, filepath.Dir(provisioned), provisioned)
 	h, err := sb.ShellStream(ctx, script, m.WithExecUser("root"))
 	if err != nil {
@@ -473,9 +560,14 @@ mkdir -p %[15]s && touch %[16]s
 }
 
 // hostsLine points the broker's names at the bridge, replacing an older
-// line, so names added since the sandbox was made are there too.
-func hostsLine() string {
-	return fmt.Sprintf(`h=$(grep -v 'broker\.internal' /etc/hosts || true); printf '%%s\n127.0.0.1 %s\n' "$h" >/etc/hosts`, brokerNames)
+// line, so names added since the sandbox was made are there too. In proxy
+// mode only AWSHost: the others are reached by their real names.
+func hostsLine(c config) string {
+	names := brokerNames
+	if c.proxy {
+		names = providers.AWSHost
+	}
+	return fmt.Sprintf(`h=$(grep -v 'broker\.internal' /etc/hosts || true); printf '%%s\n127.0.0.1 %s\n' "$h" >/etc/hosts`, names)
 }
 
 // keep runs cmd as a root exec job, so the agent user can't replace it,

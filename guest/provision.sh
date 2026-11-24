@@ -23,6 +23,11 @@
 #                        serves no GitLab, so gitlab.com stays gitlab.com
 #                        (anonymous, through the domain filter)
 #   BROKER_GITHUB_URL    the same for GitHub (https://github.broker.internal).
+#   BROKER_MODE          server (the default) or proxy: the broker is
+#                        microsandbox's outbound proxy, and the BROKER_*_URL are
+#                        the providers' real ones (https://gitlab.com,
+#                        https://github.com, https://api.anthropic.com). Then
+#                        nothing is rewritten: the tools get placeholder tokens.
 #                        Default empty: github.com stays github.com
 #   BROKER_CA_FILE       the broker's CA certificate, installed as trusted if given
 #   BROKER_SESSION_TOKEN sbx mode only: the token mono-jig-sbx requires,
@@ -46,6 +51,7 @@ set -euo pipefail
 SANDBOX_USER="${SANDBOX_USER:-agent}"
 SANDBOX_UID="${SANDBOX_UID:-}"
 PROVISION_COMPONENTS="${PROVISION_COMPONENTS:-base sshd git broker docker claude}"
+BROKER_MODE="${BROKER_MODE:-server}"
 BROKER_GITLAB_URL="${BROKER_GITLAB_URL-https://gitlab.broker.internal}"
 BROKER_GITHUB_URL="${BROKER_GITHUB_URL:-}"
 BROKER_CA_FILE="${BROKER_CA_FILE:-}"
@@ -152,14 +158,16 @@ fi
 # providers the broker serves: a URL rewritten to a name the broker has no
 # certificate for fails its TLS handshake, public clones included.
 if want broker || want broker-env; then
-  log "broker client settings (${BROKER_GITLAB_URL:-no GitLab}, ${BROKER_GITHUB_URL:-no GitHub})"
+  log "broker client settings, $BROKER_MODE mode (${BROKER_GITLAB_URL:-no GitLab}, ${BROKER_GITHUB_URL:-no GitHub})"
   # Older provisioning mapped GitHub unconditionally: clear both first.
   for b in "$BROKER_GITLAB_URL" "$BROKER_GITHUB_URL" https://gitlab.broker.internal https://github.broker.internal; do
     [[ -n $b ]] && { git config --system --unset-all "url.$b/.insteadOf" 2>/dev/null || true; }
   done
+  # In proxy mode the tools call the real hosts, which the broker
+  # terminates: no rewrite.
   for spec in "gitlab.com=$BROKER_GITLAB_URL" "github.com=$BROKER_GITHUB_URL"; do
     host=${spec%%=*}; b=${spec#*=}
-    [[ -n $b ]] || continue
+    [[ -n $b && $BROKER_MODE != proxy ]] || continue
     for from in "https://$host/" "git@$host:" "ssh://git@$host/" "http://$host/"; do
       git config --system --add "url.$b/.insteadOf" "$from"
     done
@@ -175,11 +183,13 @@ if want broker || want broker-env; then
     git config --system "http.$BROKER_GITLAB_URL/.extraHeader" "X-Jig-Session: $BROKER_SESSION_TOKEN"
   fi
   # The tools treat the broker as a self-hosted GitLab and GitHub Enterprise
-  # Server. The broker injects the real tokens.
+  # Server; in proxy mode, as gitlab.com and github.com. The broker injects
+  # the real tokens.
   gl=()
   gh=()
   [[ -n $BROKER_GITLAB_URL ]] && gl=("GITLAB_HOST=$gl_host" "GITLAB_TOKEN=$tok" "GITLAB_API_PROTOCOL=$gl_proto")
-  [[ -n $BROKER_GITHUB_URL ]] && gh=("GH_HOST=$gh_host" "GH_ENTERPRISE_TOKEN=$tok")
+  [[ -n $BROKER_GITHUB_URL && $BROKER_MODE != proxy ]] && gh=("GH_HOST=$gh_host" "GH_ENTERPRISE_TOKEN=$tok")
+  [[ -n $BROKER_GITHUB_URL && $BROKER_MODE == proxy ]] && gh=("GH_TOKEN=$tok")
   client_env 81-mono-jig-broker "${gl[@]}" "${gh[@]}"
   # glab's own config too: auth status and clone read it, not GITLAB_HOST.
   # Only the broker's host: glab checks every host listed (its default
@@ -229,9 +239,14 @@ fi
 # The credential stays on the Mac: Claude Code sends a placeholder to the
 # broker, which swaps in the user's token.
 if want claude || want claude-env; then
-  if [[ -n "$BROKER_ANTHROPIC_URL" ]]; then
+  if [[ -n "$BROKER_ANTHROPIC_URL" && $BROKER_MODE == proxy ]]; then
+    # Claude Code calls api.anthropic.com, which the broker terminates.
+    client_env 83-mono-jig-claude CLAUDE_CODE_OAUTH_TOKEN=placeholder
+  elif [[ -n "$BROKER_ANTHROPIC_URL" ]]; then
     client_env 83-mono-jig-claude \
       "ANTHROPIC_BASE_URL=$BROKER_ANTHROPIC_URL" CLAUDE_CODE_OAUTH_TOKEN=placeholder
+  fi
+  if [[ -n "$BROKER_ANTHROPIC_URL" ]]; then
     # Until onboarding is done, interactive claude checks api.anthropic.com
     # directly, ignoring ANTHROPIC_BASE_URL, and the sandbox can't resolve
     # it ("Unable to connect to Anthropic services"; -p skips the check).
@@ -314,8 +329,8 @@ EOF
 
 ## GitLab
 
-- Use \`git\` and \`glab\` as usual: gitlab.com URLs are routed to the broker,
-  and \`glab\` is already configured (\`GITLAB_HOST\`).
+- Use \`git\` and \`glab\` as usual: the broker handles gitlab.com, and
+  \`glab\` is already configured.
 - Push only to branches under \`agent/$u/\`, e.g. \`agent/$u/fix-timeout\`.
   Pushes to any other branch, and push options (\`git push -o\`), are refused.
 - Merge request titles must start with \`[agent/$u]\`, after an optional
@@ -335,8 +350,8 @@ EOF
 
 ## GitHub
 
-- Use \`git\` and \`gh\` as usual: github.com URLs are routed to the broker,
-  and \`gh\` is already configured (\`GH_HOST\`).
+- Use \`git\` and \`gh\` as usual: the broker handles github.com, and \`gh\`
+  is already configured.
 - Push only to branches under \`agent/$u/\`, e.g. \`agent/$u/fix-timeout\`.
   Pushes to any other branch, and push options, are refused. Then open a
   pull request: \`gh pr create --head agent/$u/<branch> --base <target>\`.

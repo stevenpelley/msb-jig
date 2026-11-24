@@ -55,3 +55,27 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	p.ServeHTTP(w, r)
 }
+
+// Alias serves a real hostname, in proxy mode, with a provider whose
+// routes were written for its broker.internal name: Path maps the
+// request's path to the one those routes expect, so the provider sees
+// exactly the requests it sees in server mode. api.github.com's
+// /repos/... becomes /api/v3/repos/..., as gh sends it to a GitHub
+// Enterprise Server. Server's checks run before, and the path checks
+// again after.
+type Alias struct {
+	To   http.Handler
+	Path func(path string) string
+}
+
+func (a Alias) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	r.URL.Path = a.Path(r.URL.Path)
+	if r.URL.RawPath != "" {
+		r.URL.RawPath = a.Path(r.URL.RawPath)
+	}
+	if why := badPath(r.URL.EscapedPath()); why != "" {
+		HTTPError(w, http.StatusBadRequest, why)
+		return
+	}
+	a.To.ServeHTTP(w, r)
+}

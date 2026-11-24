@@ -58,3 +58,18 @@ func TestLoadMounts(t *testing.T) {
 		t.Errorf("loadMounts = %+v, %v; want %+v", ms, err, want)
 	}
 }
+
+func TestSplitBrokerMode(t *testing.T) {
+	for _, args := range [][]string{{"box", "--broker", "proxy", "src"}, {"--broker=proxy", "box", "src"}} {
+		rest, mode := splitBrokerMode(args)
+		if !reflect.DeepEqual(rest, []string{"box", "src"}) || mode != "proxy" {
+			t.Errorf("%q: got %q %q", args, rest, mode)
+		}
+	}
+	if _, mode := splitBrokerMode([]string{"box"}); mode != "" {
+		t.Errorf("no flag: %q", mode)
+	}
+	if got := loadBrokerMode(t.TempDir()); got != modeServer {
+		t.Errorf("default mode %q", got)
+	}
+}

@@ -16,6 +16,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"strings"
 
 	"mono-jig/broker"
 	"mono-jig/broker/anthropic"
@@ -24,12 +25,22 @@ import (
 	"mono-jig/broker/gitlab"
 )
 
-// Hostnames the sandbox uses for each provider.
+// Hostnames the sandbox uses for each provider in server mode. In proxy
+// mode it uses the real ones (Config.Hosts), except AWSHost: the AWS MCP
+// endpoint is the broker's own, with no real host behind it.
 const (
 	GitLabHost    = "gitlab.broker.internal"
 	GitHubHost    = "github.broker.internal"
 	AnthropicHost = "anthropic.broker.internal"
 	AWSHost       = "aws.broker.internal"
+)
+
+// The real hosts proxy mode brokers for GitHub and Anthropic (GitLab's is
+// its URL's).
+const (
+	GitHubWebHost    = "github.com"
+	GitHubAPIHost    = "api.github.com"
+	AnthropicAPIHost = "api.anthropic.com"
 )
 
 // Config says which providers to serve: an empty user, command or list
@@ -47,6 +58,31 @@ type Config struct {
 	GitHubURL, GitHubAPIURL, AnthropicURL string                     // https://github.com, https://api.github.com, https://api.anthropic.com
 	Public                                func(host string) *url.URL // how the sandbox reaches host: https://<host>
 	Client                                *http.Client               // the upstreams': broker.NewUpstreamClient()
+
+	// Proxy: proxy mode (docs/transparent-broker.md). The providers are
+	// served under their real hostnames (Hosts), Location headers aren't
+	// rewritten, and GitHub and GitLab forward unmatched reads without the
+	// credential.
+	Proxy bool
+}
+
+// Hosts are the real hostnames proxy mode terminates, for the configured
+// providers: the CONNECT front end's and the CA's names. AWS isn't among
+// them (AWSHost).
+func (c Config) Hosts() []string {
+	var out []string
+	if c.GitLabUser != "" {
+		if u, err := url.Parse(c.GitLabURL); err == nil && u.Hostname() != "" {
+			out = append(out, strings.ToLower(u.Hostname()))
+		}
+	}
+	if c.GitHubUser != "" {
+		out = append(out, GitHubWebHost, GitHubAPIHost)
+	}
+	if c.AnthropicTokenCmd != "" {
+		out = append(out, AnthropicAPIHost)
+	}
+	return out
 }
 
 // Brokered names the configured providers, as the allowlist's groups name
@@ -71,8 +107,10 @@ func (c Config) Brokered() []string {
 // AWSOn reports whether the AWS provider is configured.
 func (c Config) AWSOn() bool { return len(c.AWSProfiles) > 0 || c.AWSMCPCommand != "" }
 
-// Build returns the configured providers by hostname. Processes they run
-// (the AWS MCP proxy) stop when ctx ends; their files go in state.
+// Build returns the configured providers by hostname: under
+// broker.internal, or in proxy mode under their real names (Hosts) and
+// AWSHost. Processes they run (the AWS MCP proxy) stop when ctx ends;
+// their files go in state.
 func Build(ctx context.Context, c Config, state string, log *slog.Logger) (map[string]http.Handler, error) {
 	if u, err := url.Parse(c.GitLabURL); c.GitLabUser != "" && (err != nil || u.Host == "") {
 		return nil, fmt.Errorf("the GitLab URL %q: want https://host", c.GitLabURL)
@@ -82,24 +120,43 @@ func Build(ctx context.Context, c Config, state string, log *slog.Logger) (map[s
 	// gitlab.broker.internal: git, LFS, REST, GraphQL, GitLab's MCP server.
 	// On once mono-jig login gitlab recorded a user.
 	if c.GitLabUser != "" {
-		b.serve(GitLabHost, gitlab.Routes(b.upstreams(GitLabHost, "gitlab"), gitlab.Config{
-			User: c.GitLabUser, URL: c.GitLabURL,
+		p := b.provider("gitlab", gitlab.Routes(b.upstreams(GitLabHost, "gitlab"), gitlab.Config{
+			User: c.GitLabUser, URL: c.GitLabURL, Anonymous: c.Proxy,
 			Token: token(c.GitLabTokenCmd), MCPToken: optToken(c.GitLabMCPTokenCmd)}))
+		if c.Proxy {
+			u, _ := url.Parse(c.GitLabURL)
+			b.out[strings.ToLower(u.Hostname())] = p
+		} else {
+			b.out[GitLabHost] = p
+		}
 	}
 
 	// github.broker.internal: git, REST, GraphQL, as gh calls a GitHub
 	// Enterprise Server. On once mono-jig login github recorded a user.
 	if c.GitHubUser != "" {
-		b.serve(GitHubHost, github.Routes(b.upstreams(GitHubHost, "github"), github.Config{
-			User: c.GitHubUser, Token: token(c.GitHubTokenCmd),
+		p := b.provider("github", github.Routes(b.upstreams(GitHubHost, "github"), github.Config{
+			User: c.GitHubUser, Token: token(c.GitHubTokenCmd), Anonymous: c.Proxy,
 			GitURL: c.GitHubURL, APIURL: c.GitHubAPIURL}))
+		if c.Proxy {
+			// One provider, two hosts: api.github.com's paths are mapped
+			// to the routes' /api/v3/... and /api/graphql.
+			b.out[GitHubWebHost] = p
+			b.out[GitHubAPIHost] = broker.Alias{To: p, Path: githubAPIPath}
+		} else {
+			b.out[GitHubHost] = p
+		}
 	}
 
 	// anthropic.broker.internal: the Claude API, for Claude Code. On once
 	// mono-jig login claude stored a token.
 	if c.AnthropicTokenCmd != "" {
-		b.serve(AnthropicHost, anthropic.Routes(b.upstreams(AnthropicHost, "claude"), anthropic.Config{
+		p := b.provider("anthropic", anthropic.Routes(b.upstreams(AnthropicHost, "claude"), anthropic.Config{
 			Token: token(c.AnthropicTokenCmd), APIURL: c.AnthropicURL}))
+		if c.Proxy {
+			b.out[AnthropicAPIHost] = p
+		} else {
+			b.out[AnthropicHost] = p
+		}
 	}
 
 	// aws.broker.internal: the AWS MCP Server, through AWS's stdio proxy on
@@ -109,13 +166,24 @@ func Build(ctx context.Context, c Config, state string, log *slog.Logger) (map[s
 		if err != nil {
 			return nil, err
 		}
-		b.serve(AWSHost, awsmcp.Routes(proxy))
+		b.out[AWSHost] = b.provider("aws", awsmcp.Routes(proxy))
 	}
 	return b.out, nil
 }
 
+// githubAPIPath maps an api.github.com path to the GitHub routes' form,
+// that of a GitHub Enterprise Server: /graphql is /api/graphql, the rest
+// is under /api/v3.
+func githubAPIPath(p string) string {
+	if p == "/graphql" {
+		return "/api/graphql"
+	}
+	return "/api/v3" + p
+}
+
 // builder collects the providers, and makes their upstreams.
 type builder struct {
+	proxy  bool
 	public func(host string) *url.URL
 	client *http.Client
 	log    *slog.Logger
@@ -123,7 +191,7 @@ type builder struct {
 }
 
 func newBuilder(c Config, log *slog.Logger) *builder {
-	b := &builder{public: c.Public, client: c.Client, log: log, out: map[string]http.Handler{}}
+	b := &builder{proxy: c.Proxy, public: c.Public, client: c.Client, log: log, out: map[string]http.Handler{}}
 	if b.client == nil {
 		b.client = broker.NewUpstreamClient()
 	}
@@ -133,17 +201,21 @@ func newBuilder(c Config, log *slog.Logger) *builder {
 	return b
 }
 
-// upstreams are a provider's: reached by the sandbox at host, with a
-// missing credential sending the user to mono-jig login <login>.
+// upstreams are a provider's: reached by the sandbox at host (in server
+// mode), with a missing credential sending the user to mono-jig login
+// <login>. In proxy mode the sandbox reaches each upstream at its own URL:
+// no Public, so no Location rewrite.
 func (b *builder) upstreams(host, login string) broker.Upstreams {
-	return broker.Upstreams{Public: b.public(host), Client: b.client,
-		NoCredential: "no credential: run mono-jig login " + login}
+	u := broker.Upstreams{Client: b.client, NoCredential: "no credential: run mono-jig login " + login}
+	if !b.proxy {
+		u.Public = b.public(host)
+	}
+	return u
 }
 
-// serve serves host from its route table.
-func (b *builder) serve(host string, routes []broker.Route) {
-	name := host[:len(host)-len(".broker.internal")]
-	b.out[host] = &broker.Provider{Name: name, Routes: routes, Log: b.log}
+// provider serves a route table.
+func (b *builder) provider(name string, routes []broker.Route) http.Handler {
+	return &broker.Provider{Name: name, Routes: routes, Log: b.log}
 }
 
 // token runs the token command (at most once a minute).

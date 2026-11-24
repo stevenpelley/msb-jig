@@ -24,7 +24,8 @@ type Upstream struct {
 	// Public is the provider as the sandbox reaches it
 	// (https://github.broker.internal). Location and Link headers that
 	// point at the upstream are rewritten to it, so clients follow them
-	// back through the broker.
+	// back through the broker. nil in proxy mode, where the sandbox
+	// reaches the upstream at its own URL.
 	Public *url.URL
 	Client *http.Client // NewUpstreamClient()
 	// NoCredential is the message when Auth fails (no login).
@@ -53,6 +54,10 @@ func (u Upstreams) To(rawURL string, auth func(http.Header) error) *Upstream {
 // Token returns the user's credential for a provider (a token command's
 // output, TokenSource).
 type Token func() (string, error)
+
+// NoAuth is an Upstream's Auth for requests forwarded without the user's
+// credential: proxy mode's anonymous reads.
+func NoAuth(http.Header) error { return nil }
 
 // Basic is an Upstream's Auth: HTTP Basic, user and token, as git sends it.
 func Basic(user string, tok Token) func(http.Header) error {

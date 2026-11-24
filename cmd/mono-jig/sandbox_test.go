@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -33,7 +34,7 @@ func TestEgressRules(t *testing.T) {
 
 // The variables provision.sh writes for the components the supervisor
 // provisions (client_env 80-84: git, broker, node CA, claude, aws) are the ones
-// clientEnv sets on the sandbox.
+// clientEnv sets on the sandbox, in either broker mode.
 func TestClientEnvMatchesProvision(t *testing.T) {
 	var want []string
 	// The client_env calls, and the provider arrays they take: gl=(...) and gh=(...).
@@ -48,11 +49,19 @@ func TestClientEnvMatchesProvision(t *testing.T) {
 	c.broker.GitLabUser, c.broker.GitHubUser = "u", "u"
 	c.broker.AnthropicTokenCmd = "true"
 	c.broker.AWSProfiles = []string{"p"}
+	c.broker.GitLabURL = "https://gitlab.com"
+	seen := map[string]bool{}
 	var got []string
-	for k := range clientEnv(c) {
-		got = append(got, k)
+	for _, proxy := range []bool{false, true} {
+		c.proxy = proxy
+		for k := range clientEnv(c) {
+			if !seen[k] {
+				seen[k] = true
+				got = append(got, k)
+			}
+		}
 	}
-	sort.Strings(want)
+	want = slices.Compact(slices.Sorted(slices.Values(want)))
 	sort.Strings(got)
 	if len(want) == 0 || strings.Join(got, " ") != strings.Join(want, " ") {
 		t.Errorf("clientEnv sets %v; provision.sh writes %v", got, want)

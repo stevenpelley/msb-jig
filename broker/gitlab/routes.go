@@ -11,12 +11,18 @@ type Config struct {
 	URL      string       // https://gitlab.com
 	Token    broker.Token // the user's token (glab's login, or the Keychain)
 	MCPToken broker.Token // a fine-grained PAT for GitLab's MCP server; nil: Token
+	// Anonymous (proxy mode, where every request to the GitLab host
+	// reaches the broker): reads that match no route go to GitLab without
+	// the credential, for public archives and raw files.
+	Anonymous bool
 }
 
 // Routes is every request the GitLab provider serves: its upstreams, each
 // with its credential, then its routes. The first route that matches
-// serves a request; anything else is denied. The checks are in checks.go
-// and mcp.go.
+// serves a request. Anything else is denied, except in proxy mode
+// (Config.Anonymous), where reads (GET, HEAD) that match no route go to
+// GitLab without the credential: the last route. The checks are in
+// checks.go and mcp.go.
 func Routes(up broker.Upstreams, c Config) []broker.Route {
 	git := up.To(c.URL, broker.Basic(c.User, c.Token)) // git and LFS: HTTP Basic, as git sends it
 	api := up.To(c.URL, broker.Bearer(c.Token))        // REST and GraphQL (Bearer takes PATs and OAuth tokens)
@@ -25,7 +31,7 @@ func Routes(up broker.Upstreams, c Config) []broker.Route {
 
 	const p = "/api/v4/projects/{project}"
 	const mr = p + "/merge_requests/{iid}"
-	return []broker.Route{
+	routes := []broker.Route{
 		// GitLab's MCP server: each tool call is checked against the tool
 		// lists readTools and writeTools (mcp.go).
 		{Method: "POST", Path: "/api/v4/mcp", Op: "mcp", Check: gl.MCPCall, To: mcp},
@@ -66,6 +72,10 @@ func Routes(up broker.Upstreams, c Config) []broker.Route {
 		{Method: "POST", Path: "/{repo...}/info/lfs/locks/verify", Op: "lfs.locks", Check: gl.GitRepo, To: git},
 		{Method: "POST", Path: "/{repo...}/info/lfs/locks/{id}/unlock", Op: "lfs.locks", Check: gl.GitRepo, To: git},
 	}
+	if c.Anonymous {
+		routes = append(routes, broker.Route{Method: "GET HEAD", Path: "/{path...}", Op: "anonymous.read", Check: broker.Read, To: up.To(c.URL, broker.NoAuth)})
+	}
+	return routes
 }
 
 func (c Config) mcpToken() broker.Token {

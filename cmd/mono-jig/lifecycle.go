@@ -76,6 +76,12 @@ func sandboxCmd(cmd, name string, args []string) {
 		_ = os.Remove(filepath.Join(state, "ssh_key.pub"))
 		// The next sandbox of this name mounts only what its --mount says.
 		_ = os.Remove(mountsFile(state))
+		// And its broker's mode, by --broker or the default.
+		_ = os.Remove(brokerModeFile(state))
+		_ = os.Remove(proxyPortFile(state))
+		// And the broker's CA, which only that sandbox trusted: the next
+		// one gets its own, constrained to the names its mode needs.
+		_ = os.RemoveAll(filepath.Join(state, "broker-ca"))
 		fmt.Println("removed", name, "(state kept in", state+")")
 	}
 }

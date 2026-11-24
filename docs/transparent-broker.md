@@ -3,7 +3,9 @@
 Status (2026-11-24): a design, from reading microsandbox 0.7.16's source
 and docs (the version `mono-jig` uses) and sbx v0.54.0's help text. The
 microsandbox hook was tested on the user's Mac with a toy proxy on
-2026-11-24 (see "What we checked"). The broker itself isn't built.
+2026-11-24 (see "What we checked"). Proxy mode is built, beside server
+mode, as `mono-jig up|open <name> --broker proxy` (2026-11-24; see
+"Proxy mode as built").
 "Verify" marks what's open, and *unverified* marks claims not confirmed
 in a source.
 
@@ -159,12 +161,22 @@ The sandbox and the proxy were removed afterwards.
 | Proxy down | Every connection reset. Fails closed |
 | Wrong password (proxy restarted with another) | The proxy answered 407; the guest saw a reset. Fails closed |
 
+Then through the Go SDK (2026-11-24, SDK v0.7.16), a few lines that
+create an `alpine:3.20` sandbox with
+`WithProxy(HTTPConnectProxy(addr).Credentials("jig", SecretSourceEnv("JIG_PROXY_PASSWORD")))`
+and run `wget https://api.github.com/zen` in it:
+
+| Check | Result |
+|---|---|
+| The password set in the creating process's environment | `msb machine` read it: the toy proxy saw the CONNECT, spliced it, and `wget` printed GitHub's zen |
+| The wrong password in that environment | The proxy answered 407; `wget` failed (`Connection reset by peer`) |
+
+So the supervisor sets the password in its own environment before it
+creates or starts the sandbox.
+
 Still open:
-- whether the `msb machine` that the Go SDK starts reads the password from
-  the supervisor's environment (the CLI read it from its own);
 - UDP other than DNS. HTTP CONNECT blocks it, per the docs; we didn't test
-  what breaks;
-- `gh` and `glab` against the terminating proxy.
+  what breaks.
 
 ### The variant with strict mode on (not recommended)
 
@@ -419,30 +431,81 @@ broker.
    (checked). If the SDK doesn't, proxy mode needs another way to hand
    over the password. Check this first.
 
+## Proxy mode as built (2026-11-24)
+
+`mono-jig up|open <name> --broker proxy` makes a proxy-mode sandbox;
+without the flag it's server mode, as before. The mode is saved in
+`<state>/broker-mode` and fixed at create: `up --broker server` on a
+proxy-mode sandbox fails and says to `rm` first. `rm` also deletes the
+broker's CA, so the next sandbox of that name gets one constrained to
+what its mode needs.
+
+| Piece | Where | What it does |
+|---|---|---|
+| Front end | `broker/connect.go` (`Proxy`) | Basic auth (user `jig`). Peeks the first bytes: TLS with a brokered SNI is terminated and handed to one `http.Server` (h2 and HTTP/1.1) through a channel listener; other SNI is spliced to the CONNECT's `ip:port`; TLS with no SNI, or a ClientHello longer than one record, is refused; plain HTTP whose first request has a brokered `Host` gets 403, or is refused if its headers can't be read; anything else, including server-first protocols after 3 s, is spliced. One log line per connection (`"msg":"connect"`) |
+| Host names | `broker/providers` (`Config.Proxy`, `Hosts`) | The providers are keyed by their real names: the GitLab URL's host, `github.com`, `api.github.com`, `api.anthropic.com`. `aws.broker.internal` stays. `api.github.com` goes through `broker.Alias`, which maps `/graphql` to `/api/graphql` and everything else to `/api/v3/...`, then checks the path again |
+| Location | `broker/upstream.go` | `Upstreams.Public` is nil in proxy mode, so `Location` and `Link` aren't rewritten. GitLab's LFS `href` rewrite is skipped too; the `header` is still removed |
+| Anonymous reads | `github/routes.go`, `gitlab/routes.go` | In proxy mode only, the last route forwards a GET or HEAD that no earlier route matched to the provider without the credential (`anonymous.read`). Unmatched writes are still denied |
+| CA | `broker/ca.go` | `NewCA`/`LoadOrCreateCA` take extra permitted domains. A kept CA must cover them, or the supervisor stops and says to `rm` |
+| Supervisor | `cmd/mono-jig/supervisor.go`, `brokermode.go` | Listens on `127.0.0.1` on a port chosen at create and saved in `<state>/proxy-port`, since microsandbox keeps the proxy address with the sandbox. Makes a new password on every start and sets it in its own environment (`JIG_PROXY_PASSWORD`). The allowlist keeps the forge groups and adds the brokered hosts on 443; only AWS's group is dropped. `/etc/hosts` maps only `aws.broker.internal` |
+| Guest | `guest/provision.sh` (`BROKER_MODE=proxy`) | No `insteadOf`, `GH_HOST` or `ANTHROPIC_BASE_URL`. `GH_TOKEN`, `GITLAB_TOKEN` and `CLAUDE_CODE_OAUTH_TOKEN` are placeholders. `GITLAB_HOST` is the real host. glab's config names it |
+
+The vsock route and `broker.sock` stay in proxy mode, for AWS. They serve
+the same providers.
+
+### End to end (2026-11-24)
+
+On the user's Mac, with microsandbox 0.7.16:
+- a proxy-mode sandbox from `ubuntu:26.04`, provisioned from scratch;
+- the user's `gh` and `glab` logins;
+- a dummy Anthropic key, since no Claude token was in the Keychain;
+- no AWS.
+
+Only reads and refused writes were sent to the forges. The sandbox was
+removed afterwards.
+
+| Check | Result |
+|---|---|
+| Provisioning (apt over HTTP, the Claude Code installer over HTTPS) | Worked, all spliced through the broker |
+| Guest environment | `GH_TOKEN`, `GITLAB_TOKEN`, `CLAUDE_CODE_OAUTH_TOKEN` placeholders, `GITLAB_HOST=gitlab.com`; no `insteadOf`; `/etc/hosts` has only `aws.broker.internal` |
+| `gh api user`, `gh repo view`, `gh pr list` (REST and GraphQL on `api.github.com`) | The user's login, through the alias |
+| `git ls-remote`, `git clone` from `github.com`; `git ls-remote` from `gitlab.com` | Worked, with the credential injected |
+| `curl` a GitHub archive URL | 302 to `codeload.github.com` (`anonymous.read`) |
+| `curl -X POST https://github.com/login/oauth/access_token` | 403, "isn't a request the github provider serves" |
+| `gh api -X PUT .../pulls/1/merge` | 403, "merging is never allowed through the broker" |
+| `curl https://api.github.com/user` with a pasted `Authorization: token ...` | Answered as the user: the pasted token was dropped |
+| `glab api user`, `glab repo view`; a GitLab raw file | The user's login; the raw file 200 (anonymous) |
+| `curl https://api.anthropic.com/v1/messages` | Anthropic's `invalid x-api-key`: terminated, and the dummy key was injected |
+| `claude -p hi` | Its calls (`/api/claude_cli/bootstrap`, `/v1/messages`) reached the broker and were forwarded through Node with the broker's CA trusted. "Not logged in", from the dummy key. *Unverified* with a real token |
+| `https://proxy.golang.org/` | 200, spliced |
+| `openssl s_client -noservername` to the IP `github.com` resolved to | Refused by the broker ("no server name") |
+| `http://github.com/` | 403 from microsandbox's policy (`network_policy_denied`): port 80 isn't allowed, so it never reached the broker |
+| Certificate the guest sees for `github.com` | Issued by `mono-jig broker CA (<name>)`; curl, git, OpenSSL, Go (`gh`, `glab`) and Node accepted it under the name constraint |
+| `down`, then `up` without the flag | Same port, new password, `gh` and `glab` work again |
+| `up --broker server` on the proxy-mode sandbox | Refused, with the `rm` hint |
+
+A server-mode sandbox, made the same day with the same binary, still had
+`GH_HOST`, `GITLAB_HOST` and `ANTHROPIC_BASE_URL` pointing at
+`broker.internal`. `gh` and `glab` worked there too, and an unlisted read
+was still denied (403).
+
+Not covered: AWS in proxy mode, Claude Code with a real token, pushes
+and merge-request writes (the routes are the same as server mode's and are
+unit-tested), LFS, and UDP.
+
 ## Order of work
 
 1. **Check the hook on the Mac.** Done 2026-11-24; see "What we checked".
-   It found the no-SNI case. Left over: the password through the Go SDK,
-   and UDP.
-2. **Check the password through the Go SDK**: a few lines of Go that
-   create a sandbox with `WithProxy(...Credentials(..., SecretSourceEnv))`
-   against the toy proxy.
-3. **Front end and alias map**, with tests. This touches nothing in
-   server mode.
-4. **The flag, the supervisor, the CA and `provision.sh`**, behind
-   `--broker=proxy`.
-5. **Anonymous forwarding.**
-6. **End to end**, adapted from the toy test: git, `gh`, `glab`, Claude
-   Code and a public clone in a proxy-mode sandbox.
+2. **Check the password through the Go SDK.** Done 2026-11-24.
+3. **Front end and alias map**, with tests. Done.
+4. **The flag, the supervisor, the CA and `provision.sh`.** Done.
+5. **Anonymous forwarding.** Done.
+6. **End to end.** Done 2026-11-24, except for AWS and a real Claude
+   token; see "End to end".
 7. Later:
    - extract the library and the YAML loader;
    - **sbx, optional:** one experiment with `proxy.sandbox` set to a PAC
      file, to see whose TLS arrives.
-
-The toy proxy used on 2026-11-24 isn't in the repository. Its useful
-parts are the SNI peek (run `tls.Server` on a copy of the first record,
-and stop in `GetConfigForClient`) and the log line per CONNECT. Rebuild
-them in `broker/connect.go`.
 
 ## Open questions
 

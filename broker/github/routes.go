@@ -11,12 +11,22 @@ type Config struct {
 	Token broker.Token // the user's token (gh's login, or the Keychain)
 	// Tests: the upstreams, if not https://github.com and https://api.github.com.
 	GitURL, APIURL string
+	// Anonymous (proxy mode, where every github.com request reaches the
+	// broker): reads that match no route go to github.com without the
+	// credential, for public archives, release downloads and go get.
+	Anonymous bool
 }
 
 // Routes is every request the GitHub provider serves: its upstreams, each
 // with its credential, then its routes. The first route that matches
-// serves a request; anything else is denied. The checks are in checks.go
-// and graphql.go.
+// serves a request. Anything else is denied, except in proxy mode
+// (Config.Anonymous), where reads (GET, HEAD) that match no route go to
+// github.com without the credential: the last route. The checks are in
+// checks.go and graphql.go.
+//
+// In proxy mode the sandbox calls github.com and api.github.com by their
+// own names; providers.Build maps api.github.com's paths to /api/v3/...
+// and /api/graphql (broker.Alias), so these routes serve both modes.
 func Routes(up broker.Upstreams, c Config) []broker.Route {
 	git := up.To(c.git(), broker.Basic(c.User, c.Token)) // git: HTTP Basic, as git sends it
 	api := up.To(c.api(), broker.Bearer(c.Token))        // REST: /api/v3/<path> is api.github.com/<path>
@@ -28,7 +38,7 @@ func Routes(up broker.Upstreams, c Config) []broker.Route {
 
 	const repo = "/api/v3/repos/{owner}/{repo}"
 	const pr = repo + "/pulls/{number}"
-	return []broker.Route{
+	routes := []broker.Route{
 		// Never merge. Listed so the denial says why; approving is refused
 		// in ReviewPR.
 		{Method: "PUT", Path: pr + "/merge", Op: "pr.merge", Check: broker.Never(broker.NeverMerge)},
@@ -62,6 +72,10 @@ func Routes(up broker.Upstreams, c Config) []broker.Route {
 		{Method: "POST", Path: "/{owner}/{repo}/git-upload-pack", Op: "git.fetch", Check: gh.GitRepo, To: git},
 		{Method: "POST", Path: "/{owner}/{repo}/git-receive-pack", Op: "git.push", Check: gh.Push, To: git},
 	}
+	if c.Anonymous {
+		routes = append(routes, broker.Route{Method: "GET HEAD", Path: "/{path...}", Op: "anonymous.read", Check: broker.Read, To: up.To(c.git(), broker.NoAuth)})
+	}
+	return routes
 }
 
 func (c Config) git() string { return or(c.GitURL, "https://github.com") }
