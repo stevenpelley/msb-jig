@@ -199,29 +199,17 @@ mode) and mcpcli, with instructions to call it as
 GET and DELETE are served, without URL parameters; OAuth discovery
 isn't.
 
-`providers.MCPServer` serves a vendor's hosted MCP server (streamable
-HTTP, a Bearer token) with the agent limited to a list of tools, which
-`tools/list` is filtered to (`broker/hostedmcp`). The tools are decided
-by name alone, so list only those that read. A track makes one per
-server, with its own `ProviderCLI`, whose token command is the vendor's
-CLI (an OAuth access token it refreshes) or a Keychain item:
-
-```go
-providers.MCPServer{
-    ID:       "example",                         // login example; no allowlist group needed
-    Title:    "Example",                         // in the agent's instructions
-    URL:      "https://mcp.example.org/v1/mcp",
-    Tools:    []string{"search_items", "get_item"},
-    TokenCmd: "example-cli auth token",
-}
-```
-
-The guest gets the URL as the sandbox reaches it in `$EXAMPLE_MCP_URL`
-(`example.mcp.broker.internal` in server mode, the real host in proxy
-mode) and mcpcli, with instructions to call it as
-`MCP_GATEWAY_URL=$EXAMPLE_MCP_URL mcpcli …`. Only the endpoint's POST,
-GET and DELETE are served, without URL parameters; OAuth discovery
-isn't.
+`providers.Jira` serves one Jira Cloud site's REST API read-only
+(`broker/jira`): GETs under `/rest/api/2|3/` and `/rest/agile/1.0/`, and
+the POSTs that only read (searches, bulk fetches, JQL and expression
+checks). The sandbox calls it as the site (`$JIRA_URL`:
+`jira.broker.internal`, or the site's host in proxy mode); the broker
+sends each call to Atlassian's gateway (`api.atlassian.com/ex/jira/<cloudId>`),
+where scoped API tokens work, with Basic `email:token`. `jig.Jira` is
+its login: the site, its cloud ID (from the site's public
+`/_edge/tenant_info`), the account's email, and a scoped read-only token
+in the Keychain (`mono-jig-jira`), checked with `GET /rest/api/3/myself`
+before it's stored.
 
 ### The login half: `jig.ProviderCLI`
 

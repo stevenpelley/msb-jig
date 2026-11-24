@@ -109,3 +109,21 @@ func TestSandboxNames(t *testing.T) {
 		t.Fatalf("%v", got)
 	}
 }
+
+// Jira is on with its settings and a token command.
+func TestJiraBroker(t *testing.T) {
+	var s Settings
+	t.Setenv("JIG_JIRA_TOKEN_COMMAND", "echo tok")
+	if p := jiraBroker(s); p != nil {
+		t.Fatalf("no settings: %+v", p)
+	}
+	s.SetProvider("jira", jiraSettings{Site: "example.atlassian.net", CloudID: "01234567-89ab-cdef-0123-456789abcdef", Email: "a@example.org"})
+	j, ok := jiraBroker(s).(providers.Jira)
+	if !ok || j.Site != "example.atlassian.net" || j.Email != "a@example.org" || j.TokenCmd != "echo tok" {
+		t.Fatalf("jira: %+v", j)
+	}
+	t.Setenv("JIG_JIRA_TOKEN_COMMAND", "")
+	if p := jiraBroker(s); p != nil {
+		t.Fatalf("no token: %+v", p)
+	}
+}
