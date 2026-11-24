@@ -1,4 +1,4 @@
-package main
+package jig
 
 import (
 	"encoding/json"
@@ -11,11 +11,11 @@ import (
 
 // settings are what mono-jig login records, in <root>/settings.json:
 // which providers the broker serves, and as whom, each under its login
-// name (cliProvider), the image mono-jig image build made, and the extra
+// name (ProviderCLI), the image mono-jig image build made, and the extra
 // CAs' files. No secrets: tokens stay in the Keychain or in the tools' own
 // logins on the Mac. The JIG_* variables override them
-// (cliProvider.broker, extraCAFiles), for the checks.
-type settings struct {
+// (ProviderCLI.broker, extraCAFiles), for the checks.
+type Settings struct {
 	// Image is the image mono-jig image build made (image.go).
 	Image string
 	// CAs are the extra CA certificates' files (ca.go).
@@ -24,7 +24,7 @@ type settings struct {
 	providers map[string]json.RawMessage
 }
 
-func (s settings) MarshalJSON() ([]byte, error) {
+func (s Settings) MarshalJSON() ([]byte, error) {
 	m := map[string]any{}
 	for k, v := range s.providers {
 		m[k] = v
@@ -38,7 +38,7 @@ func (s settings) MarshalJSON() ([]byte, error) {
 	return json.Marshal(m)
 }
 
-func (s *settings) UnmarshalJSON(b []byte) error {
+func (s *Settings) UnmarshalJSON(b []byte) error {
 	var m map[string]json.RawMessage
 	if err := json.Unmarshal(b, &m); err != nil {
 		return err
@@ -59,8 +59,8 @@ func (s *settings) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
-// providerSettings are provider name's settings, or nil if it has none.
-func providerSettings[T any](s settings, name string) *T {
+// ProviderSettings are provider name's Settings, or nil if it has none.
+func ProviderSettings[T any](s Settings, name string) *T {
 	raw, ok := s.providers[name]
 	if !ok || string(raw) == "null" {
 		return nil
@@ -72,8 +72,8 @@ func providerSettings[T any](s settings, name string) *T {
 	return v
 }
 
-// setProvider records provider name's settings; nil forgets them.
-func (s *settings) setProvider(name string, v any) {
+// SetProvider records provider name's Settings; nil forgets them.
+func (s *Settings) SetProvider(name string, v any) {
 	s.providers = maps.Clone(s.providers)
 	if s.providers == nil {
 		s.providers = map[string]json.RawMessage{}
@@ -96,8 +96,8 @@ func stateRoot() string {
 
 func settingsPath() string { return filepath.Join(stateRoot(), "settings.json") }
 
-func loadSettings() settings {
-	var s settings
+func LoadSettings() Settings {
+	var s Settings
 	b, err := os.ReadFile(settingsPath())
 	if errors.Is(err, fs.ErrNotExist) {
 		return s
@@ -111,7 +111,7 @@ func loadSettings() settings {
 	return s
 }
 
-func saveSettings(s settings) {
+func SaveSettings(s Settings) {
 	if err := os.MkdirAll(stateRoot(), 0o700); err != nil {
 		fail("%v", err)
 	}

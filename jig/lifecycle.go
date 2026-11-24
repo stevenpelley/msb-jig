@@ -1,4 +1,4 @@
-package main
+package jig
 
 import (
 	"context"
@@ -63,7 +63,7 @@ func sandboxCmd(cmd, name string, args []string) {
 		denied(state)
 	case "rm":
 		down(state)
-		if err := theBackend.Remove(context.Background(), name); err != nil {
+		if err := track.Backend.Remove(context.Background(), name); err != nil {
 			fail("remove: %v", err)
 		}
 		// The next sandbox of this name has a new host key, and gets a new

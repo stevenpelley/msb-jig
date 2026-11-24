@@ -1,4 +1,4 @@
-package main
+package jig
 
 import (
 	"context"
@@ -64,7 +64,7 @@ func saveBrokerMode(name, state, mode string) {
 	if mode != modeServer && mode != modeProxy {
 		fail("--broker %s: want server or proxy", mode)
 	}
-	if ok, err := theBackend.Exists(context.Background(), name); err != nil {
+	if ok, err := track.Backend.Exists(context.Background(), name); err != nil {
 		fail("%v", err)
 	} else if ok {
 		if have := loadBrokerMode(state); have != mode {

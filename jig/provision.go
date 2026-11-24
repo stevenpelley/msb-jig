@@ -1,4 +1,4 @@
-package main
+package jig
 
 import (
 	"context"
@@ -15,7 +15,7 @@ import (
 
 // provision runs provision.sh as root: all of it on the first start (a
 // marker in the guest records it), and on later starts only apply, which
-// writes guestConfig (the environment, git's and glab's settings, Claude
+// writes guestConfig (the environment, git's and glab's Settings, Claude
 // Code's, the agent's instructions, mcpcli), so the guest follows the
 // broker's providers. openSandbox sets the same environment on the
 // sandbox itself. The script and the settings are written from this

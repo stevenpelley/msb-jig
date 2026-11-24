@@ -244,7 +244,8 @@ Each step stands alone and is checked by the existing end-to-end runs.
 6. **The supervisor split**: broker host, `Backend`, provisioning.
    *Done 2026-11-24, see [Step 6 as built](#step-6-as-built).*
 7. **The module renamed and moved** to its own repo; the personal track
-   is one `Track`.
+   is one `Track`. *The `Track` half done 2026-11-24, see [Step 7 so
+   far](#step-7-so-far); the move needs decisions.*
 
 Steps 1 to 3 carry most of the value; 5 and 6 make Kiro, kiro-cli and
 another VM runtime replacements rather than forks.
@@ -429,6 +430,37 @@ through the new code is* unverified.
   `msb pull`, and loading images (`msb load`). Another runtime needs
   those behind `Backend` too.
 
+## Step 7 so far
+
+*2026-11-24. Unit tests.*
+
+- The CLI is package `jig` (`jig/`, moved from `cmd/mono-jig/`), with
+  `Track` (`Providers`, `Agent`, `Editor`, `Backend`, `BaseImage`),
+  `Main(Track)` and `Personal()`. `cmd/mono-jig/main.go` is one line:
+  `jig.Main(jig.Personal())`. A work track is a command like it with its
+  own `Track`.
+- `ProviderCLI` (was `cliProvider`) has exported fields, and `Settings`,
+  `LoadSettings`, `SaveSettings`, `ProviderSettings` and `SetProvider`
+  are exported, so a track's own provider can keep its settings in
+  `settings.json`. The personal track's are the variables `GitLab`,
+  `GitHub`, `Claude` and `AWS`.
+- Not in `Track` yet: the name (`~/.mono-jig`, the Keychain items, the
+  SSH host prefix, the CA's subject, image tags, `/etc/mono-jig`, the
+  refusal text), the agent's namespace (`broker/policy.go`'s
+  `agent/<user>/`), and the base allowlist layer.
+
+Not done, because each needs a decision:
+
+- the new repository's name and host, and the module path (`mono-jig`
+  today, which only resolves inside this monorepo);
+- how the history moves (`git filter-repo` of `mono-jig/`, or a fresh
+  start);
+- whether the personal track stays here, importing the new module, or
+  moves too; and if it stays, how it pins the module (a tag, or a
+  `replace`/`go.work` while both change);
+- whether to rename `Track`'s package from `jig` and the commands from
+  `mono-jig`.
+
 ## The PR marker
 
 The broker decides whether the agent may change a pull or merge request
@@ -486,3 +518,4 @@ labels today).
   `cmd/mono-jig/{track,remote,login,supervisor,image}.go`.
 - Step 6: this repo after a65c128: `sandbox/`,
   `cmd/mono-jig/{brokerhost,spec,provision,supervisor}.go`.
+- Step 7 so far: this repo after 106e927: `jig/`, `cmd/mono-jig/main.go`.

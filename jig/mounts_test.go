@@ -1,4 +1,4 @@
-package main
+package jig
 
 import (
 	"path/filepath"

@@ -1,4 +1,4 @@
-package main
+package jig
 
 import (
 	"context"
@@ -25,7 +25,7 @@ import (
 // lifecycle to the sandbox's").
 //
 // It serves the broker on <state>/broker.sock (brokerhost.go) and holds
-// the sandbox through the backend (theBackend; sandbox.Microsandbox, the
+// the sandbox through the backend (Track.Backend; sandbox.Microsandbox, the
 // SDK, attached: if the process dies, the VM stops with it), from the
 // spec in spec.go, then provisions it (provision.go). The guest reaches the broker through a vsock route to
 // that socket. Its other egress is microsandbox's policy, compiled from
@@ -191,7 +191,7 @@ func run(name, state string) {
 	if fi, err := os.Stat(runtimeLog(name)); err == nil {
 		logStart = fi.Size()
 	}
-	sb, created, err := openSandbox(ctx, theBackend, c)
+	sb, created, err := openSandbox(ctx, track.Backend, c)
 	if err != nil {
 		fail("sandbox: %v", err)
 	}

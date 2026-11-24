@@ -1,4 +1,4 @@
-package main
+package jig
 
 // The user-facing commands: setup, login, logout, open, stop, uninstall
 // (docs/design.md, "Install and uninstall"). They sit on the
@@ -42,11 +42,11 @@ func setup() {
 	} else {
 		ok = false
 	}
-	_, edErr := theEditor.Find()
+	_, edErr := track.Editor.Find()
 	if edErr != nil {
-		fmt.Printf("  missing  %-6s %v\n", theEditor.Name(), edErr)
+		fmt.Printf("  missing  %-6s %v\n", track.Editor.Name(), edErr)
 	} else {
-		fmt.Printf("  ok       %-6s the editor\n", theEditor.Name())
+		fmt.Printf("  ok       %-6s the editor\n", track.Editor.Name())
 	}
 	ok = ok && edErr == nil
 	fmt.Println("optional, for login:")
@@ -60,14 +60,14 @@ func setup() {
 	if err := os.MkdirAll(root, 0o700); err != nil {
 		fail("%v", err)
 	}
-	if err := theEditor.Configure(root, editorProfile(root)); err != nil {
+	if err := track.Editor.Configure(root, editorProfile(root)); err != nil {
 		fail("%v", err)
 	}
 	if edErr == nil {
 		// The harness's instance has its own extensions (for VS Code,
 		// Remote-SSH only: the agent's go on the remote).
-		if err := theEditor.Install(root); err != nil {
-			fmt.Printf("  installing %s's extensions failed: %v\n", theEditor.Name(), err)
+		if err := track.Editor.Install(root); err != nil {
+			fmt.Printf("  installing %s's extensions failed: %v\n", track.Editor.Name(), err)
 			ok = false
 		}
 	}
@@ -210,7 +210,7 @@ func uninstall(args []string) {
 	}
 	for _, n := range names {
 		down(filepath.Join(root, n))
-		if err := theBackend.Remove(context.Background(), n); err != nil {
+		if err := track.Backend.Remove(context.Background(), n); err != nil {
 			fail("removing %s: %v", n, err)
 		}
 		fmt.Println("removed", n)

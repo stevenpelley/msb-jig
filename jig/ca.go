@@ -1,4 +1,4 @@
-package main
+package jig
 
 import (
 	"crypto/x509"
@@ -30,7 +30,7 @@ func extraCAFiles() []string {
 	if v, ok := os.LookupEnv("JIG_EXTRA_CAS"); ok {
 		return strings.Fields(v)
 	}
-	return loadSettings().CAs
+	return LoadSettings().CAs
 }
 
 // loadCAs reads files: each CA certificate in them, PEM-encoded.
@@ -81,7 +81,7 @@ func extraCAs() []string {
 // caCmd: mono-jig ca shows the extra CAs; ca <file>... records them;
 // ca --clear forgets them.
 func caCmd(args []string) {
-	s := loadSettings()
+	s := LoadSettings()
 	switch {
 	case len(args) == 0:
 		if len(s.CAs) == 0 {
@@ -122,6 +122,6 @@ func caCmd(args []string) {
 		s.CAs = files
 		fmt.Printf("%d CA certificates from %s\n", len(cas), strings.Join(files, " "))
 	}
-	saveSettings(s)
+	SaveSettings(s)
 	fmt.Println("sandboxes pick this up when they next start; rebuild the base image too (mono-jig image build)")
 }

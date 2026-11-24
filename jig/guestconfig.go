@@ -1,4 +1,4 @@
-package main
+package jig
 
 import (
 	"os"
@@ -9,13 +9,13 @@ import (
 	"mono-jig/guest"
 )
 
-// The guest's settings for this sandbox's providers, broker mode and
+// The guest's Settings for this sandbox's providers, broker mode and
 // agent (guest.Config): the sandbox's environment at create and every
 // start (openSandbox), and what provision.sh's apply component writes at
 // every start. The providers' parts are theirs (providers.Provider.Guest),
 // the agent's its own (agent.Agent.Guest).
 
-// guestConfig is the guest's settings for c.
+// guestConfig is the guest's Settings for c.
 func guestConfig(c config) guest.Config {
 	g := guest.Config{
 		Env: map[string]string{
@@ -34,12 +34,12 @@ func guestConfig(c config) guest.Config {
 	if len(g.Instructions) > 0 {
 		g.Instructions = slices.Insert(g.Instructions, 0, guest.Instructions("header", nil))
 	}
-	g.Add(theAgent.Guest(c.broker, g.Instructions))
+	g.Add(track.Agent.Guest(c.broker, g.Instructions))
 	return g
 }
 
 // legacyGitKeys and legacyEnv are what sandboxes provisioned before the
-// guest's settings were recorded may have: cleared when not set.
+// guest's Settings were recorded may have: cleared when not set.
 var (
 	legacyGitKeys = []string{"url.https://github.broker.internal/.insteadOf", "url.https://gitlab.broker.internal/.insteadOf"}
 	legacyEnv     = []string{"ANTHROPIC_BASE_URL", "CLAUDE_CODE_OAUTH_TOKEN", "GH_ENTERPRISE_TOKEN", "GH_HOST", "GH_TOKEN",

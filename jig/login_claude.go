@@ -1,4 +1,4 @@
-package main
+package jig
 
 import (
 	"fmt"
@@ -8,28 +8,28 @@ import (
 	"mono-jig/broker/providers"
 )
 
-// Claude's command-line side (cliProvider): the Anthropic provider, for
+// Claude's command-line side (ProviderCLI): the Anthropic provider, for
 // Claude Code. Its token is in the Keychain only.
 
 const keychainClaude = "mono-jig-claude"
 
-var claudeCLI = cliProvider{
-	name: "claude", keychain: keychainClaude, login: loginClaude,
-	status: func(settings) string {
+var Claude = ProviderCLI{
+	Name: "claude", Keychain: keychainClaude, Login: loginClaude,
+	Status: func(Settings) string {
 		if keychainHas(keychainClaude) {
 			return "token in the Keychain (" + keychainClaude + ")"
 		}
 		return "not logged in (mono-jig login claude): the agent signs in inside the sandbox"
 	},
-	forgotten: func(settings) string {
+	Forgotten: func(Settings) string {
 		return "token removed from the Keychain; revoke it at claude.ai, Settings, Claude Code, if you're done with it"
 	},
-	broker: claudeBroker,
+	Broker: claudeBroker,
 }
 
 // claudeBroker: on while the Keychain item exists.
 // JIG_CLAUDE_TOKEN_COMMAND overrides (empty: off).
-func claudeBroker(settings) providers.Provider {
+func claudeBroker(Settings) providers.Provider {
 	cmd, set := os.LookupEnv("JIG_CLAUDE_TOKEN_COMMAND")
 	if !set && keychainHas(keychainClaude) {
 		cmd = "security find-generic-password -s " + keychainClaude + " -w"

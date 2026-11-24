@@ -1,4 +1,4 @@
-package main
+package jig
 
 import (
 	"crypto/ecdsa"
@@ -57,7 +57,7 @@ func TestLoadCAs(t *testing.T) {
 	// Recorded in settings, under JIG_EXTRA_CAS.
 	t.Setenv("JIG_STATE", t.TempDir())
 	os.Unsetenv("JIG_EXTRA_CAS")
-	saveSettings(settings{CAs: []string{one}})
+	SaveSettings(Settings{CAs: []string{one}})
 	if got := extraCAs(); len(got) != 1 || !strings.Contains(got[0], "BEGIN CERTIFICATE") {
 		t.Errorf("from settings: %v", got)
 	}

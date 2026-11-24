@@ -1,4 +1,4 @@
-package main
+package jig
 
 import (
 	"encoding/json"
@@ -11,7 +11,7 @@ import (
 	"mono-jig/broker/providers"
 )
 
-// login's settings configure the broker; the JIG_* variables override them.
+// login's Settings configure the broker; the JIG_* variables override them.
 func TestLoadConfigSettings(t *testing.T) {
 	t.Setenv("JIG_STATE", t.TempDir())
 	t.Setenv("JIG_CLAUDE_TOKEN_COMMAND", "")
@@ -26,12 +26,12 @@ func TestLoadConfigSettings(t *testing.T) {
 		t.Fatalf("no settings: %+v", c.broker)
 	}
 
-	var s settings
-	s.setProvider("gitlab", gitlabSettings{User: "alice", URL: "https://gitlab.example.com", Token: "keychain"})
-	s.setProvider("aws", awsSettings{Profiles: []string{"a", "b"}})
-	s.setProvider("github", githubSettings{User: "bob", Host: "octo.ghe.com", Token: "gh"})
+	var s Settings
+	s.SetProvider("gitlab", gitlabSettings{User: "alice", URL: "https://gitlab.example.com", Token: "keychain"})
+	s.SetProvider("aws", awsSettings{Profiles: []string{"a", "b"}})
+	s.SetProvider("github", githubSettings{User: "bob", Host: "octo.ghe.com", Token: "gh"})
 	s.Image = "img"
-	saveSettings(s)
+	SaveSettings(s)
 	c = loadConfig("t", "")
 	if g := gitlab(c); g.User != "alice" || g.URL != "https://gitlab.example.com" ||
 		!strings.Contains(g.TokenCmd, keychainGitLab) || !slices.Equal(aws(c).Profiles, []string{"a", "b"}) {
@@ -41,13 +41,13 @@ func TestLoadConfigSettings(t *testing.T) {
 		g.TokenCmd != "gh auth token --hostname octo.ghe.com" {
 		t.Fatalf("github: %+v", g)
 	}
-	if got := loadSettings(); got.Image != "img" {
+	if got := LoadSettings(); got.Image != "img" {
 		t.Fatalf("image: %q", got.Image)
 	}
 
-	s = settings{}
-	s.setProvider("gitlab", gitlabSettings{User: "alice", URL: "https://gitlab.com", Token: "glab"})
-	saveSettings(s)
+	s = Settings{}
+	s.SetProvider("gitlab", gitlabSettings{User: "alice", URL: "https://gitlab.com", Token: "glab"})
+	SaveSettings(s)
 	if c = loadConfig("t", ""); !strings.Contains(gitlab(c).TokenCmd, "glab config get token --host gitlab.com") {
 		t.Fatalf("glab: %q", gitlab(c).TokenCmd)
 	}
@@ -65,12 +65,12 @@ func TestLoadConfigSettings(t *testing.T) {
 // settings.json keeps its shape: each provider under its name, and image.
 func TestSettingsJSON(t *testing.T) {
 	in := `{"aws":{"profiles":["p"]},"gitlab":{"user":"u","url":"https://gitlab.com","token":"glab"},"image":"i"}`
-	var s settings
+	var s Settings
 	if err := json.Unmarshal([]byte(in), &s); err != nil {
 		t.Fatal(err)
 	}
-	if a := providerSettings[awsSettings](s, "aws"); s.Image != "i" || a == nil || a.Profiles[0] != "p" ||
-		providerSettings[githubSettings](s, "github") != nil {
+	if a := ProviderSettings[awsSettings](s, "aws"); s.Image != "i" || a == nil || a.Profiles[0] != "p" ||
+		ProviderSettings[githubSettings](s, "github") != nil {
 		t.Fatalf("%+v", s)
 	}
 	out, _ := json.Marshal(s)

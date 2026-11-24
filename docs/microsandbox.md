@@ -284,7 +284,7 @@ variable set at create (`-e`) reaches both SSH and exec sessions.
   `/etc/environment`, which pam_env reads for every sshd session, login
   or not (Lima). Unverified on Lima itself.
 - *Since 2026-11-24 both come from one Go value, `guestConfig`
-  (`cmd/mono-jig/guestconfig.go`), and `provision.sh`'s `apply` component
+  (`cmd/mono-jig/guestconfig.go`, since moved to `jig/`), and `provision.sh`'s `apply` component
   writes it; before, Go's `clientEnv` and bash's `client_env` calls were
   kept in step by a test, one profile.d file per component (80–84).*
 
@@ -304,7 +304,7 @@ block. Checked both ways on
   resolve. The runtime records denied names only at debug level, which is
   too noisy to keep as is (above).
   - The supervisor creates sandboxes at debug level and follows
-    `runtime.log` (`cmd/mono-jig/denials.go`).
+    `runtime.log` (`jig/denials.go`).
   - It appends each denial to `<state>/denials.jsonl`, in the filter's
     `Denial` format (method `dns` or `connect`), and logs it in `run.log`.
   - Once `runtime.log` passes 16 MB, the supervisor truncates it. The runtime

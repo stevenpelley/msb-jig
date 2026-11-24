@@ -1,4 +1,4 @@
-package main
+package jig
 
 import (
 	"fmt"
@@ -10,7 +10,7 @@ import (
 	"mono-jig/broker/providers"
 )
 
-// AWS's command-line side (cliProvider): the profiles for the AWS MCP
+// AWS's command-line side (ProviderCLI): the profiles for the AWS MCP
 // proxy. The credentials are the user's own, in ~/.aws.
 
 type awsSettings struct {
@@ -18,26 +18,26 @@ type awsSettings struct {
 	Profiles []string `json:"profiles"`
 }
 
-var awsCLI = cliProvider{
-	name: "aws", login: loginAWS,
-	status: func(s settings) string {
-		a := providerSettings[awsSettings](s, "aws")
+var AWS = ProviderCLI{
+	Name: "aws", Login: loginAWS,
+	Status: func(s Settings) string {
+		a := ProviderSettings[awsSettings](s, "aws")
 		if a == nil || len(a.Profiles) == 0 {
 			return ""
 		}
 		return "profiles " + strings.Join(a.Profiles, " ") + " (the first is the default)"
 	},
-	forgotten: func(settings) string {
+	Forgotten: func(Settings) string {
 		return "forgotten; your SSO session stays (aws sso logout ends it for every tool)"
 	},
-	broker: awsBroker,
+	Broker: awsBroker,
 }
 
 // awsBroker: on once login recorded profiles. JIG_AWS_PROFILES (empty:
 // off) and JIG_AWS_MCP_COMMAND override.
-func awsBroker(s settings) providers.Provider {
+func awsBroker(s Settings) providers.Provider {
 	var profiles []string
-	if a := providerSettings[awsSettings](s, "aws"); a != nil {
+	if a := ProviderSettings[awsSettings](s, "aws"); a != nil {
 		profiles = a.Profiles
 	}
 	p := providers.AWS{Profiles: strings.Fields(env("JIG_AWS_PROFILES", strings.Join(profiles, " "))),
@@ -92,8 +92,8 @@ func loginAWS(args []string) {
 			fail("aws sso login --profile %s: %v", p, err)
 		}
 	}
-	s := loadSettings()
-	s.setProvider("aws", awsSettings{Profiles: args})
-	saveSettings(s)
+	s := LoadSettings()
+	s.SetProvider("aws", awsSettings{Profiles: args})
+	SaveSettings(s)
 	fmt.Printf("aws: profiles %s (the first is the default)\n", strings.Join(args, " "))
 }

@@ -1,4 +1,4 @@
-package main
+package jig
 
 import (
 	"encoding/json"
@@ -12,7 +12,7 @@ import (
 	"mono-jig/broker/providers"
 )
 
-// GitHub's command-line side (cliProvider).
+// GitHub's command-line side (ProviderCLI).
 
 type githubSettings struct {
 	User string `json:"user"`
@@ -37,29 +37,29 @@ func or(s, def string) string {
 
 const keychainGitHub = "mono-jig-github"
 
-var githubCLI = cliProvider{
-	name: "github", keychain: keychainGitHub, login: loginGitHub,
-	status: func(s settings) string {
-		g := providerSettings[githubSettings](s, "github")
+var GitHub = ProviderCLI{
+	Name: "github", Keychain: keychainGitHub, Login: loginGitHub,
+	Status: func(s Settings) string {
+		g := ProviderSettings[githubSettings](s, "github")
 		if g == nil {
 			return ""
 		}
 		return fmt.Sprintf("%s on %s, token from %s", g.User, g.host(), githubTokenSource(*g))
 	},
-	forgotten: func(s settings) string {
-		if g := providerSettings[githubSettings](s, "github"); g != nil && g.Token == "gh" {
+	Forgotten: func(s Settings) string {
+		if g := ProviderSettings[githubSettings](s, "github"); g != nil && g.Token == "gh" {
 			return "forgotten; your own gh login stays (gh auth logout to end it)"
 		}
 		return "forgotten"
 	},
-	broker: githubBroker,
+	Broker: githubBroker,
 }
 
 // githubBroker: on once login recorded a user. JIG_GITHUB_USER (empty:
 // off), JIG_GITHUB_HOST and JIG_GITHUB_TOKEN_COMMAND override.
-func githubBroker(s settings) providers.Provider {
+func githubBroker(s Settings) providers.Provider {
 	gh := githubSettings{Token: "gh"}
-	if g := providerSettings[githubSettings](s, "github"); g != nil {
+	if g := ProviderSettings[githubSettings](s, "github"); g != nil {
 		gh = *g
 	}
 	gh.User = env("JIG_GITHUB_USER", gh.User)
@@ -153,9 +153,9 @@ func loginGitHub(args []string) {
 	} else if !strings.EqualFold(who, g.User) {
 		fail("the token belongs to %s, not %s", who, g.User)
 	}
-	s := loadSettings()
-	s.setProvider("github", g)
-	saveSettings(s)
+	s := LoadSettings()
+	s.SetProvider("github", g)
+	SaveSettings(s)
 	fmt.Printf("github: the agent acts for %s on %s, with the token from %s\n", g.User, g.host(), githubTokenSource(g))
 }
 

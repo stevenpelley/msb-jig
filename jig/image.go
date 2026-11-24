@@ -1,4 +1,4 @@
-package main
+package jig
 
 import (
 	"crypto/sha256"
@@ -39,9 +39,9 @@ import (
 // rm, then open, to move one to a new image.
 
 // baseImage is the image the base image builds on, and the plain image
-// sandboxes start from without one: JIG_BASE_IMAGE, default Ubuntu. Its
+// sandboxes start from without one: JIG_BASE_IMAGE, default the track's. Its
 // packages must suit provision/'s components (base uses apt).
-func baseImage() string { return env("JIG_BASE_IMAGE", "ubuntu:26.04") }
+func baseImage() string { return env("JIG_BASE_IMAGE", track.BaseImage) }
 
 // sandboxImage is the image new sandboxes start from: JIG_IMAGE, else the
 // last image mono-jig image build made, else plain Ubuntu. local is
@@ -50,7 +50,7 @@ func sandboxImage() (ref string, local bool) {
 	if v := os.Getenv("JIG_IMAGE"); v != "" {
 		return v, false
 	}
-	if s := loadSettings(); s.Image != "" {
+	if s := LoadSettings(); s.Image != "" {
 		return s.Image, true
 	}
 	return baseImage(), false
@@ -82,9 +82,9 @@ func imageCmd(args []string) {
 		ref, _ := sandboxImage()
 		fmt.Println(ref)
 	case "reset":
-		s := loadSettings()
+		s := LoadSettings()
 		s.Image = ""
-		saveSettings(s)
+		SaveSettings(s)
 		fmt.Println("new sandboxes start from", baseImage(), "(everything installed at the first start)")
 	default:
 		usage()
@@ -174,9 +174,9 @@ func buildImage(engine, file, ctxDir string) string {
 			fail("loading the image into microsandbox: %v", err)
 		}
 	}
-	s := loadSettings()
+	s := LoadSettings()
 	s.Image = tag
-	saveSettings(s)
+	SaveSettings(s)
 	return tag
 }
 

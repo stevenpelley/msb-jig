@@ -1,4 +1,4 @@
-package main
+package jig
 
 import (
 	"fmt"
@@ -72,7 +72,7 @@ func code(name, state string, args []string) {
 	}
 	sshConfig(name, state)
 	root := filepath.Dir(state)
-	fail("%v", theEditor.Open(root, editorProfile(root), sshHost(name), guestDir(args)))
+	fail("%v", track.Editor.Open(root, editorProfile(root), sshHost(name), guestDir(args)))
 }
 
 // guestDir is the folder mono-jig code opens: an absolute guest path

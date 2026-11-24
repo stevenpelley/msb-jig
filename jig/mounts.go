@@ -1,4 +1,4 @@
-package main
+package jig
 
 import (
 	"context"
@@ -128,7 +128,7 @@ func saveMounts(name, state string, specs []string) {
 		}
 		ms = append(ms, mt)
 	}
-	if ok, err := theBackend.Exists(context.Background(), name); err != nil {
+	if ok, err := track.Backend.Exists(context.Background(), name); err != nil {
 		fail("%v", err)
 	} else if ok {
 		fail("%s exists, and its mounts were fixed when it was made: mono-jig rm %s, then again with --mount", name, name)

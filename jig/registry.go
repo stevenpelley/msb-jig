@@ -1,4 +1,4 @@
-package main
+package jig
 
 import (
 	"fmt"
@@ -8,34 +8,35 @@ import (
 	"mono-jig/broker/providers"
 )
 
-// cliProvider is a provider's command-line side: mono-jig login and
+// ProviderCLI is a provider's command-line side: mono-jig login and
 // logout, its line in mono-jig login's status, its settings
-// (settings.json, under name) and the broker provider they turn on. Each
-// is in login_<name>.go; cliProviders lists them, in the order login all
-// asks.
-type cliProvider struct {
-	name     string // mono-jig login <name>; its key in settings.json
-	keychain string // its Keychain item, if any: logout and uninstall delete it
-	login    func(args []string)
-	// status says how it's logged in, or "" if it isn't.
-	status func(s settings) string
-	// forgotten is what logout says, before the settings and the Keychain
+// (settings.json, under Name; ProviderSettings, SetProvider) and the
+// broker provider they turn on. The personal track's are GitLab, GitHub,
+// Claude and AWS (login_<name>.go); Track.Providers lists a track's, in
+// the order login all asks.
+type ProviderCLI struct {
+	Name     string // mono-jig login <name>; its key in settings.json
+	Keychain string // its Keychain item, if any: logout and uninstall delete it
+	Login    func(args []string)
+	// Status says how it's logged in, or "" if it isn't.
+	Status func(s Settings) string
+	// Forgotten is what logout says, before the settings and the Keychain
 	// item go.
-	forgotten func(s settings) string
-	// broker is the provider the settings turn on, under the JIG_*
+	Forgotten func(s Settings) string
+	// Broker is the provider the settings turn on, under the JIG_*
 	// variables; nil if it's off.
-	broker func(s settings) providers.Provider
+	Broker func(s Settings) providers.Provider
 }
 
-func cliProviders() []cliProvider {
-	return []cliProvider{gitlabCLI, githubCLI, claudeCLI, awsCLI}
+func cliProviders() []ProviderCLI {
+	return track.Providers
 }
 
-func cliProviderNamed(name string) (cliProvider, bool) {
+func cliProviderNamed(name string) (ProviderCLI, bool) {
 	ps := cliProviders()
-	i := slices.IndexFunc(ps, func(p cliProvider) bool { return p.name == name })
+	i := slices.IndexFunc(ps, func(p ProviderCLI) bool { return p.Name == name })
 	if i < 0 {
-		return cliProvider{}, false
+		return ProviderCLI{}, false
 	}
 	return ps[i], true
 }
@@ -43,7 +44,7 @@ func cliProviderNamed(name string) (cliProvider, bool) {
 func cliProviderNames() string {
 	var names []string
 	for _, p := range cliProviders() {
-		names = append(names, p.name)
+		names = append(names, p.Name)
 	}
 	return strings.Join(names, ", ")
 }
@@ -52,9 +53,9 @@ func cliProviderNames() string {
 // variables.
 func brokerConfig() providers.Config {
 	var b providers.Config
-	s := loadSettings()
+	s := LoadSettings()
 	for _, p := range cliProviders() {
-		if bp := p.broker(s); bp != nil {
+		if bp := p.Broker(s); bp != nil {
 			b.Providers = append(b.Providers, bp)
 		}
 	}
@@ -78,7 +79,7 @@ func login(args []string) {
 		if !ok {
 			usage()
 		}
-		p.login(args[1:])
+		p.Login(args[1:])
 	}
 	fmt.Println("sandboxes pick this up when they next start (mono-jig stop, then open)")
 }
@@ -87,20 +88,20 @@ func login(args []string) {
 // choose, with each login's defaults.
 func loginAll() {
 	for _, p := range cliProviders() {
-		if strings.EqualFold(ask("log in to "+p.name+"? [y/N] "), "y") {
-			p.login(nil)
+		if strings.EqualFold(ask("log in to "+p.Name+"? [y/N] "), "y") {
+			p.Login(nil)
 		}
 	}
 }
 
 func loginStatus() {
-	s := loadSettings()
+	s := LoadSettings()
 	for _, p := range cliProviders() {
-		st := p.status(s)
+		st := p.Status(s)
 		if st == "" {
-			st = "not logged in (mono-jig login " + p.name + ")"
+			st = "not logged in (mono-jig login " + p.Name + ")"
 		}
-		fmt.Printf("%-7s %s\n", p.name, st)
+		fmt.Printf("%-7s %s\n", p.Name, st)
 	}
 }
 
@@ -118,15 +119,15 @@ func logout(args []string) {
 			ps = append(ps, p)
 		}
 	}
-	s := loadSettings()
+	s := LoadSettings()
 	for _, p := range ps {
-		fmt.Printf("%s: %s\n", p.name, p.forgotten(s))
-		s.setProvider(p.name, nil)
-		if p.keychain != "" {
-			keychainDelete(p.keychain)
+		fmt.Printf("%s: %s\n", p.Name, p.Forgotten(s))
+		s.SetProvider(p.Name, nil)
+		if p.Keychain != "" {
+			keychainDelete(p.Keychain)
 		}
 	}
-	saveSettings(s)
+	SaveSettings(s)
 	fmt.Println("running sandboxes keep the old setting until they stop")
 }
 
@@ -134,8 +135,8 @@ func logout(args []string) {
 func keychainItems() []string {
 	var out []string
 	for _, p := range cliProviders() {
-		if p.keychain != "" {
-			out = append(out, p.keychain)
+		if p.Keychain != "" {
+			out = append(out, p.Keychain)
 		}
 	}
 	return out

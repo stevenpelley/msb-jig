@@ -1,4 +1,4 @@
-package main
+package jig
 
 import (
 	"encoding/json"
@@ -13,7 +13,7 @@ import (
 	"mono-jig/broker/providers"
 )
 
-// GitLab's command-line side (cliProvider).
+// GitLab's command-line side (ProviderCLI).
 
 type gitlabSettings struct {
 	User string `json:"user"`
@@ -25,29 +25,29 @@ type gitlabSettings struct {
 
 const keychainGitLab = "mono-jig-gitlab"
 
-var gitlabCLI = cliProvider{
-	name: "gitlab", keychain: keychainGitLab, login: loginGitLab,
-	status: func(s settings) string {
-		g := providerSettings[gitlabSettings](s, "gitlab")
+var GitLab = ProviderCLI{
+	Name: "gitlab", Keychain: keychainGitLab, Login: loginGitLab,
+	Status: func(s Settings) string {
+		g := ProviderSettings[gitlabSettings](s, "gitlab")
 		if g == nil {
 			return ""
 		}
 		return fmt.Sprintf("%s on %s, token from %s", g.User, g.URL, tokenSource(*g))
 	},
-	forgotten: func(s settings) string {
-		if g := providerSettings[gitlabSettings](s, "gitlab"); g != nil && g.Token == "glab" {
+	Forgotten: func(s Settings) string {
+		if g := ProviderSettings[gitlabSettings](s, "gitlab"); g != nil && g.Token == "glab" {
 			return "forgotten; your own glab login stays (glab auth logout to end it)"
 		}
 		return "forgotten"
 	},
-	broker: gitlabBroker,
+	Broker: gitlabBroker,
 }
 
 // gitlabBroker: on once login recorded a user. JIG_GITLAB_USER (empty:
 // off), JIG_GITLAB_URL and JIG_GITLAB_TOKEN_COMMAND override.
-func gitlabBroker(s settings) providers.Provider {
+func gitlabBroker(s Settings) providers.Provider {
 	gl := gitlabSettings{URL: "https://gitlab.com", Token: "glab"}
-	if g := providerSettings[gitlabSettings](s, "gitlab"); g != nil {
+	if g := ProviderSettings[gitlabSettings](s, "gitlab"); g != nil {
 		gl = *g
 	}
 	user := env("JIG_GITLAB_USER", gl.User)
@@ -141,9 +141,9 @@ func loginGitLab(args []string) {
 	} else if !strings.EqualFold(who, g.User) {
 		fail("the token belongs to %s, not %s", who, g.User)
 	}
-	s := loadSettings()
-	s.setProvider("gitlab", g)
-	saveSettings(s)
+	s := LoadSettings()
+	s.SetProvider("gitlab", g)
+	SaveSettings(s)
 	fmt.Printf("gitlab: the agent acts for %s on %s, with the token from %s\n", g.User, u.Host, tokenSource(g))
 }
 
