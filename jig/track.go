@@ -46,6 +46,9 @@ type Track struct {
 	// after the providers': environment (package mirrors, say), packages,
 	// files, and a section of the agent's instructions.
 	Guest guest.Config
+	// BrokerMode is the broker's mode for a sandbox created without
+	// --broker: "server" or "proxy" (jig/brokermode.go). Empty: server.
+	BrokerMode string
 }
 
 // Personal is the personal track: GitLab, GitHub, Claude and AWS; Claude
@@ -72,6 +75,12 @@ func (t Track) withDefaults() Track {
 	}
 	if len(t.Allowlist) == 0 {
 		t.Allowlist = []allowlist.Layer{allowlist.Base()}
+	}
+	if t.BrokerMode == "" {
+		t.BrokerMode = modeServer
+	}
+	if t.BrokerMode != modeServer && t.BrokerMode != modeProxy {
+		fail("the track's BrokerMode %q: want server or proxy", t.BrokerMode)
 	}
 	if err := t.Guest.Validate(); err != nil {
 		fail("the track's guest settings: %v", err)

@@ -19,3 +19,4 @@ groups:
   - github
   - gitlab
   - aws
+  - npm

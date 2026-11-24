@@ -21,8 +21,9 @@ import (
 // run. API is the REST upstream (api.github.com): lookups go
 // through it, with the user's credential.
 type Checks struct {
-	User string // the GitHub user the agent acts for
-	API  *broker.Upstream
+	User   string // the GitHub user the agent acts for
+	API    *broker.Upstream
+	Owners owners // Config.Owners (owners.go)
 }
 
 // --- lookups: what GitHub says, never what the request claims ---
@@ -67,14 +68,6 @@ func (g *Checks) nodePRHead(c *broker.Call, id string) *string {
 	if id == "" {
 		return nil
 	}
-	b, _ := json.Marshal(map[string]any{"query": nodePRQuery, "variables": map[string]any{"id": id}})
-	u := *g.API.URL
-	u.Path, u.RawPath = "/graphql", ""
-	q, err := http.NewRequestWithContext(c.R.Context(), http.MethodPost, u.String(), bytes.NewReader(b))
-	if err != nil || g.API.Auth(q.Header) != nil {
-		return nil
-	}
-	q.Header.Set("Content-Type", "application/json")
 	type head struct {
 		HeadRefName       string `json:"headRefName"`
 		IsCrossRepository bool   `json:"isCrossRepository"`
@@ -87,7 +80,7 @@ func (g *Checks) nodePRHead(c *broker.Call, id string) *string {
 			} `json:"node"`
 		} `json:"data"`
 	}
-	if !g.do(q, &resp) || resp.Data.Node == nil {
+	if !g.graphql(c, nodePRQuery, map[string]any{"id": id}, &resp) || resp.Data.Node == nil {
 		return nil
 	}
 	h := resp.Data.Node.head
@@ -101,6 +94,19 @@ func (g *Checks) nodePRHead(c *broker.Call, id string) *string {
 		return broker.Ptr("fork:" + h.HeadRefName)
 	}
 	return broker.Ptr(h.HeadRefName)
+}
+
+// graphql runs a lookup query with the user's token and decodes a 200 into v.
+func (g *Checks) graphql(c *broker.Call, query string, vars map[string]any, v any) bool {
+	b, _ := json.Marshal(map[string]any{"query": query, "variables": vars})
+	u := *g.API.URL
+	u.Path, u.RawPath = "/graphql", ""
+	q, err := http.NewRequestWithContext(c.R.Context(), http.MethodPost, u.String(), bytes.NewReader(b))
+	if err != nil || g.API.Auth(q.Header) != nil {
+		return false
+	}
+	q.Header.Set("Content-Type", "application/json")
+	return g.do(q, v)
 }
 
 // get calls the REST API with the user's token and decodes a 200 into v.

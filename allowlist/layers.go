@@ -131,7 +131,10 @@ func Layers(builtin []Layer, files ...string) ([]Layer, error) {
 
 // Compile turns layers into entries, deduplicated, each labeled with the
 // first layer and group that allowed it. Groups whose provider is in
-// brokered are left out: the broker serves those hosts.
+// brokered are left out: the broker serves those hosts. Their hosts leave
+// wherever else they're listed too (another group, a layer's hosts), so a
+// provider can broker a host a broader group also allows; a wildcard
+// elsewhere that covers one stays.
 func Compile(layers []Layer, brokered ...string) ([]Entry, error) {
 	cat, err := Catalog()
 	if err != nil {
@@ -154,6 +157,15 @@ func Compile(layers []Layer, brokered ...string) ([]Entry, error) {
 		skip[p] = true
 	}
 	seen := map[string]bool{}
+	for _, g := range groups {
+		if g.Provider != "" && skip[g.Provider] {
+			for _, h := range g.Hosts {
+				if e, err := ParseEntry(h); err == nil {
+					seen[e.String()] = true // brokered: never added
+				}
+			}
+		}
+	}
 	var out []Entry
 	add := func(spec, layer, group string) error {
 		e, err := ParseEntry(spec)

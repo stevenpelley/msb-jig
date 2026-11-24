@@ -1,8 +1,10 @@
 # Writing a track
 
-*2026-11-24, at msb-jig after 16c1ad9 (Go 1.26, msb 0.7.16). The
-personal track is the only one built; everything below about another
-track is* unverified *until one is.*
+*2026-11-24, at msb-jig after 16c1ad9 (Go 1.26, msb 0.7.16); updated the
+same day for a work track (branch work-track-support): GitHub owners,
+the npm provider, kiro-cli, `Track.BrokerMode`. The personal track is
+the only one run in a sandbox; a work track is built and unit-tested,
+and everything below about running one is* unverified.*
 
 A **track** is one harness command built on this library: its providers,
 agent, editor, VM runtime, base image, built-in allowlist, and its own
@@ -52,6 +54,7 @@ type Track struct {
     Allowlist  []allowlist.Layer    // built-in layers; default allowlist.Base() alone
     Components map[string]string    // provision files added or replaced
     Guest      guest.Config         // the track's own guest settings, every start
+    BrokerMode string               // "server" (default) or "proxy": a new sandbox's mode without --broker
 }
 ```
 
@@ -60,8 +63,8 @@ scratch. The library's pieces are all exported for reuse:
 
 | Axis | Interface | Library's own |
 |---|---|---|
-| Providers | `providers.Provider` (broker) + `jig.ProviderCLI` (login) | `jig.GitLab`, `jig.GitHub`, `jig.Claude`, `jig.AWS` |
-| Agent | `agent.Agent` | `agent.ClaudeCode{}` |
+| Providers | `providers.Provider` (broker) + `jig.ProviderCLI` (login) | `jig.GitLab`, `jig.GitHub`, `jig.Claude`, `jig.AWS`, `jig.NPM` |
+| Agent | `agent.Agent` | `agent.ClaudeCode{}`, `agent.KiroCLI{}` |
 | Editor | `editor.Editor` | `editor.VSCode{}` |
 | VM runtime | `sandbox.Backend`, `sandbox.Guest` | `sandbox.Microsandbox{}` |
 | Allowlist | YAML layers | `allowlist.Base()` |
@@ -144,6 +147,34 @@ The library's providers may serve a work track as they are:
 shape, *unverified*), and `providers.GitLab` a URL. GitHub Enterprise
 Server (API under `/api/v3` on the web host) doesn't fit yet.
 
+`providers.GitHub.Owners` limits the user's credential to some owners'
+repositories (an organisation's): other owners' are read without it and
+never written (`broker/github/owners.go`, which lists what counts, and
+the limit of GraphQL's check). A track sets it by wrapping
+`jig.GitHub.Broker`:
+
+```go
+gh := jig.GitHub
+gh.Broker = func(s jig.Settings) providers.Provider {
+    p := jig.GitHub.Broker(s)
+    if p == nil {
+        return nil
+    }
+    g := p.(providers.GitHub)
+    g.Owners = []string{"example-org"}
+    return g
+}
+```
+
+`providers.NPM` serves npm registries read-only, each with its own token
+command and scopes (`broker/npm`); `jig.NPM` logs in to
+registry.npmjs.org with a granular token in the Keychain (`npm login`'s
+last two hours). A track adds a registry (another host, for `@scope`) the
+same way, wrapping `jig.NPM.Broker`, and defines its host's allowlist
+group with `provider: npm`. In server mode a project's `.npmrc` naming a
+registry's real URL for a scope bypasses the guest's settings; proxy
+mode doesn't have that gap (`Track.BrokerMode: "proxy"`).
+
 ### The login half: `jig.ProviderCLI`
 
 ```go
@@ -194,9 +225,17 @@ type Agent interface {
   where the agent reads them. Claude Code's go in `~/.claude/CLAUDE.md`.
 - Its hosts (installer, sign-in) go in the track's allowlist.
 
-Another agent (kiro-cli, say) is a new type. Where it reads its
-instructions and how it signs in through the broker are *unverified*.
-If its API needs a credential, that's a provider too, like `anthropic`.
+`agent.KiroCLI` is kiro-cli (`agent/70-kiro.sh`: a pinned release,
+checked by SHA-256, in `/usr/local/bin`): its instructions in
+`~/.kiro/steering/mono-jig.md`, every capability allowed in
+`~/.kiro/settings/permissions.yaml`, self-update off. It signs in inside
+the sandbox (`kiro-cli login --use-device-flow`), so its credential is
+the sandbox's; holding it in the broker, like `anthropic` for Claude
+Code, is *unverified*. Its hosts (`cli.kiro.dev`,
+`prod.download.cli.kiro.dev`, `app.kiro.dev`, `*.us-east-1.kiro.dev`,
+`q.us-east-1.amazonaws.com`, and the sign-in's) go in the track's
+allowlist. That kiro-cli always includes a steering file without front
+matter is *unverified*.
 
 ## Editor
 
@@ -310,6 +349,11 @@ balanced groups and the personal providers' and Claude Code's. The
 groups in `allowlist/lists/` stay available either way. `mono-jig
 allowlist` prints the result; `mono-jig denied <name>` shows what was
 refused.
+
+A provider's group's hosts leave the allowlist while the broker serves
+it, from every group and layer that lists them exactly; a wildcard
+elsewhere stays (the `aws` group's `*.amazonaws.com` leaves, but a layer's
+exact `q.us-east-1.amazonaws.com` doesn't).
 
 ## Corporate CA
 

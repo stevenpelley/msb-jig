@@ -79,7 +79,7 @@ func val(p *string) string {
 }
 
 // GraphQL parses the document rather than trusting operation names.
-// Queries pass; a mutation is decided by its entry in mutations. The
+// Queries pass (with Owners, those about the owners); a mutation is decided by its entry in mutations. The
 // body is read with broker.ReadJSONBody: no "QUERY" beside "query", no
 // query in the URL.
 func (g *Checks) GraphQL(c *broker.Call) broker.Decision {
@@ -102,6 +102,9 @@ func (g *Checks) GraphQL(c *broker.Call) broker.Decision {
 	for _, op := range q.Operations {
 		switch op.Operation {
 		case ast.Query:
+			if d := g.Owners.queryAbout(op, gq.Variables); !d.Allow {
+				return d
+			}
 			continue
 		case ast.Mutation:
 		default:
@@ -143,5 +146,8 @@ func (g *Checks) GraphQL(c *broker.Call) broker.Decision {
 	if in == nil {
 		return broker.Deny("GraphQL mutation %s without input", f.Name)
 	}
-	return check(g, c, in)
+	if d := check(g, c, in); !d.Allow {
+		return d
+	}
+	return g.mutationAbout(c, f.Name, in)
 }
