@@ -22,7 +22,6 @@ import (
 
 	"mono-jig/allowlist"
 	"mono-jig/broker"
-	"mono-jig/broker/awsmcp"
 	"mono-jig/broker/providers"
 	"mono-jig/guest"
 )
@@ -73,8 +72,6 @@ const (
 	// brokerNames are pointed at the guest's bridge (in proxy mode, only
 	// AWSHost).
 	brokerNames = providers.GitLabHost + " " + providers.GitHubHost + " " + providers.AnthropicHost + " " + providers.AWSHost
-	// mcpcliDir is where the supervisor writes mcpcli, on every start.
-	mcpcliDir = "/usr/local/lib/mono-jig/mcpcli"
 )
 
 type config struct {
@@ -364,9 +361,9 @@ func openSandbox(ctx context.Context, c config) (*m.Sandbox, bool, error) {
 		// The env can change after create (unlike the egress rules), but
 		// only while stopped: apply the current one, so a sandbox from an
 		// older supervisor, or whose Claude setting changed, matches it.
-		env := clientEnv(c)
+		env := guestConfig(c).Env
 		var gone []string
-		for _, k := range optionalEnv {
+		for _, k := range optionalEnv(c) {
 			if _, ok := env[k]; !ok {
 				gone = append(gone, k)
 			}
@@ -406,7 +403,7 @@ func openSandbox(ctx context.Context, c config) (*m.Sandbox, bool, error) {
 			// SNI plus the sandbox's own DNS answers (docs/microsandbox.md).
 			DisableStrict: true,
 		}),
-		m.WithEnv(clientEnv(c)),
+		m.WithEnv(guestConfig(c).Env),
 		// Debug: the only level that records denied names (denials.go).
 		m.WithLogLevel(m.LogLevelDebug),
 		m.WithMounts(mounts(c)),
@@ -416,111 +413,29 @@ func openSandbox(ctx context.Context, c config) (*m.Sandbox, bool, error) {
 	return sb, true, err
 }
 
-// clientEnv is what provision.sh writes to /etc/profile.d and
-// /etc/environment for the broker, git, claude and aws-env components. Neither file
-// reaches a microsandbox session: msb ssh and exec run /bin/sh -c from the
-// guest's init, without PAM or a login shell. The sandbox's own environment
-// does: it is set at create and re-applied on every start (openSandbox).
-// TestClientEnvMatchesProvision keeps the names in step.
-func clientEnv(c config) map[string]string {
-	env := map[string]string{
-		"GIT_TERMINAL_PROMPT": "0",
-		"NODE_EXTRA_CA_CERTS": "/etc/ssl/certs/ca-certificates.crt",
-	}
-	// The tokens are placeholders, for the tools that won't start without
-	// one; the broker drops them and sends the user's.
-	if c.broker.GitLabUser != "" {
-		env["GITLAB_HOST"], env["GITLAB_TOKEN"], env["GITLAB_API_PROTOCOL"] = gitlabHost(c), "placeholder", "https"
-	}
-	switch {
-	case c.broker.GitHubUser != "" && c.proxy:
-		env["GH_TOKEN"] = "placeholder"
-	case c.broker.GitHubUser != "":
-		env["GH_HOST"], env["GH_ENTERPRISE_TOKEN"] = providers.GitHubHost, "placeholder"
-	}
-	if c.broker.AnthropicTokenCmd != "" {
-		if !c.proxy {
-			env["ANTHROPIC_BASE_URL"] = "https://" + providers.AnthropicHost
-		}
-		env["CLAUDE_CODE_OAUTH_TOKEN"] = "placeholder"
-	}
-	if c.broker.AWSOn() {
-		env["MCP_GATEWAY_URL"] = awsURL
-	}
-	return env
-}
-
-// optionalEnv are the clientEnv variables a provider adds: removed from a
-// sandbox whose provider has gone.
-var optionalEnv = []string{"GITLAB_HOST", "GITLAB_TOKEN", "GITLAB_API_PROTOCOL", "GH_HOST", "GH_ENTERPRISE_TOKEN", "GH_TOKEN",
-	"ANTHROPIC_BASE_URL", "CLAUDE_CODE_OAUTH_TOKEN", "MCP_GATEWAY_URL"}
-
-// gitlabHost is the GitLab host the guest calls: the broker's name, or in
-// proxy mode GitLab's own.
-func gitlabHost(c config) string {
-	if !c.proxy {
-		return providers.GitLabHost
-	}
-	u, _ := url.Parse(c.broker.GitLabURL)
-	return u.Hostname()
-}
-
-// brokerURLs are the URLs the guest's tools use for each configured
-// provider (empty: not configured): the broker's names, or in proxy mode
-// the real ones.
-func brokerURLs(c config) (gitlab, github, anthropic string) {
-	if c.broker.GitLabUser != "" {
-		gitlab = "https://" + gitlabHost(c)
-	}
-	if c.broker.GitHubUser != "" {
-		github = "https://" + providers.GitHubHost
-		if c.proxy {
-			github = "https://" + providers.GitHubWebHost
-		}
-	}
-	if c.broker.AnthropicTokenCmd != "" {
-		anthropic = "https://" + providers.AnthropicHost
-		if c.proxy {
-			anthropic = "https://" + providers.AnthropicAPIHost
-		}
-	}
-	return gitlab, github, anthropic
-}
-
-// awsURL is the broker's AWS MCP endpoint, for mcpcli and curl.
-const awsURL = "https://" + providers.AWSHost + awsmcp.Path
-
 // provision runs provision.sh as root: all of it on the first start (a
-// marker in the guest records it), and on later starts only broker-env,
-// claude-env and aws-env, so git's and glab's settings, Claude Code's, the
-// agent's instructions and mcpcli follow the broker's providers (clientEnv does the same for the sandbox's
-// own env). The script and mcpcli are written from this binary each time.
+// marker in the guest records it), and on later starts only apply, which
+// writes guestConfig (the environment, git's and glab's settings, Claude
+// Code's, the agent's instructions, mcpcli), so the guest follows the
+// broker's providers. openSandbox sets the same environment on the
+// sandbox itself. The script and the settings are written from this
+// binary each time.
 func provision(ctx context.Context, sb *m.Sandbox, c config, log *slog.Logger) error {
 	done, err := sb.FS().Exists(ctx, provisioned)
+	if err != nil {
+		return err
+	}
+	settings, err := guestConfig(c).JSON()
 	if err != nil {
 		return err
 	}
 	if err := sb.FS().WriteString(ctx, "/root/provision.sh", guest.ProvisionScript); err != nil {
 		return err
 	}
-	if err := sb.FS().Mkdir(ctx, mcpcliDir); err != nil {
+	if err := sb.FS().Write(ctx, guest.ConfigFile, settings); err != nil {
 		return err
 	}
-	for name, body := range guest.MCPCLI {
-		if err := sb.FS().WriteString(ctx, mcpcliDir+"/"+name, body); err != nil {
-			return err
-		}
-	}
-	aws := ""
-	if c.broker.AWSOn() {
-		aws = awsURL
-	}
-	gitlab, github, anthropic := brokerURLs(c)
-	mode := modeServer
-	if c.proxy {
-		mode = modeProxy
-	}
-	first, comps := "", "broker-env claude-env aws-env"
+	first, comps := "", "apply"
 	if !done {
 		comps = firstComponents(ctx, sb, c, log)
 		log.Info("provisioning the guest (first start)", "components", comps)
@@ -533,16 +448,12 @@ fi
 	}
 	script := fmt.Sprintf(`set -euo pipefail
 %s
-export SANDBOX_USER=%s SANDBOX_UID=%d PROVISION_COMPONENTS=%q BROKER_MODE=%s
-export BROKER_GITLAB_URL=%q BROKER_GITHUB_URL=%q
-export BROKER_GITLAB_USER=%q BROKER_GITHUB_USER=%q BROKER_GITLAB_MCP= BROKER_ANTHROPIC_URL=%q BROKER_CA_FILE=%s
-export BROKER_AWS_URL=%q BROKER_AWS_PROFILES=%q MCPCLI_DIR=%s
+export SANDBOX_USER=%s SANDBOX_UID=%d PROVISION_COMPONENTS=%q BROKER_CA_FILE=%s GUEST_CONFIG=%s
 bash /root/provision.sh
 home=$(getent passwd %[2]s | cut -d: -f6)
-if [ -d %[15]s ] && [ ! -e "$home/host" ]; then ln -s %[15]s "$home/host"; fi
-mkdir -p %[16]s && touch %[17]s
-`, first, guestUser, guestUID, comps, mode, gitlab, github, c.broker.GitLabUser, c.broker.GitHubUser, anthropic, guestCA,
-		aws, strings.Join(c.broker.AWSProfiles, " "), mcpcliDir, shareGuest, filepath.Dir(provisioned), provisioned)
+if [ -d %[7]s ] && [ ! -e "$home/host" ]; then ln -s %[7]s "$home/host"; fi
+mkdir -p %[8]s && touch %[9]s
+`, first, guestUser, guestUID, comps, guestCA, guest.ConfigFile, shareGuest, filepath.Dir(provisioned), provisioned)
 	h, err := sb.ShellStream(ctx, script, m.WithExecUser("root"))
 	if err != nil {
 		return err
@@ -604,9 +515,9 @@ func mounts(c config) map[string]m.MountConfig {
 // components are provision.sh's, for this sandbox.
 func components(c config) string {
 	if c.dockerGiB > 0 {
-		return "base git broker docker claude aws-env"
+		return "base git broker docker claude"
 	}
-	return "base git broker claude aws-env"
+	return "base git broker claude"
 }
 
 // imageComponents are the parts of provision.sh mono-jig image build
@@ -634,8 +545,7 @@ func firstComponents(ctx context.Context, sb *m.Sandbox, c config, log *slog.Log
 			comps = append(comps, p)
 		}
 	}
-	// claude includes claude-env, which a baked claude needs at start.
-	return strings.Join(append(comps, "broker-env", "claude-env", "aws-env"), " ")
+	return strings.Join(append(comps, "apply"), " ")
 }
 
 // parseImageFile reads imageFile: components=<parts> and provision=<hash>.

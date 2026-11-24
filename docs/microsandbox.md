@@ -278,20 +278,24 @@ variable set at create (`-e`) reaches both SSH and exec sessions.
   sandbox at create. On every start it re-applies them to the stopped
   sandbox (`Modify` with `next_start`; a running sandbox refuses: "env
   requires restart"), so a sandbox from an older supervisor, or one whose
-  Claude setting changed, follows. `TestClientEnvMatchesProvision` keeps
-  the names in step with `provision.sh`.
-- `provision.sh` writes each component's variables to
-  `/etc/profile.d/<name>.sh` and to a marked block in `/etc/environment`,
-  which pam_env reads for every sshd session, login or not (Lima).
-  Unverified on Lima itself.
+  Claude setting changed, follows.
+- `provision.sh` writes the same variables to
+  `/etc/profile.d/80-mono-jig.sh` and to a marked block in
+  `/etc/environment`, which pam_env reads for every sshd session, login
+  or not (Lima). Unverified on Lima itself.
+- *Since 2026-11-24 both come from one Go value, `guestConfig`
+  (`cmd/mono-jig/guestconfig.go`), and `provision.sh`'s `apply` component
+  writes it; before, Go's `clientEnv` and bash's `client_env` calls were
+  kept in step by a test, one profile.d file per component (80–84).*
 
 Checked on `inv2` (recreated): a non-login SSH command gets all of them,
 and `glab api user` and `claude -p` work in it. Restarted with
 `JIG_CLAUDE_TOKEN_COMMAND=` the Claude variables are gone, and back on the
 next normal `up`. Login shells follow too: on every start after the
 first, the supervisor writes the current `provision.sh` into the guest and
-runs only its `claude-env` component, which rewrites (or removes) the
-Claude profile.d file and `/etc/environment` block. Checked both ways on
+runs only its `claude-env` component (since 2026-11-24, `apply`), which
+rewrites (or removes) the Claude profile.d file and `/etc/environment`
+block. Checked both ways on
 `inv2`: login shell, plain command and `/etc/environment` all agree.
 
 ## What we'd lose or have to settle

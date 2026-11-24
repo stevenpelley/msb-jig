@@ -49,14 +49,14 @@ A provider is named in each of these:
 | `Hosts`, `Brokered`, `Build` | an `if` block each |
 | `cmd/mono-jig/settings.go` | `gitlabSettings`, `githubSettings`, the Keychain names |
 | `login.go` | `loginGitLab`, `loginGitHub`, … and the `switch` |
-| `supervisor.go` | `brokerConfig`, `clientEnv`, `optionalEnv`, `brokerURLs`, `brokerNames` and `hostsLine`, the `BROKER_*` exports in `provision` |
-| `provision.sh` | `broker-env` (insteadOf, `GH_HOST`, glab's config) and a section of the agent's instructions each |
+| `supervisor.go` | `brokerConfig`, `brokerNames` and `hostsLine` |
+| `guestconfig.go` | a function each (`gitlabGuest`, …): environment, insteadOf, glab's config, mcpcli, and its section of the agent's instructions (`guest/instructions/<name>.md`) |
 | `allowlist/lists/base.yaml` | the provider groups |
 | `cmd/mono-jig-sbx` | a second wiring of the same providers |
 
-The guest's environment is written twice, in Go (`clientEnv`) and in
-bash (`client_env`), and `TestClientEnvMatchesProvision` exists only to
-keep them in step.
+*Until step 1 (below, done 2026-11-24) the guest's environment was
+written twice, in Go (`clientEnv`) and in bash (`client_env`), and
+`provision.sh` had a block per provider.*
 
 GitHub is fixed to github.com: `GitHubWebHost` and `GitHubAPIHost` are
 constants, and login and the token command pass `--hostname github.com`.
@@ -109,11 +109,11 @@ Not handled anywhere. It matters in four places:
 
 The agent is its own axis, separate from the editor:
 
-- `provision.sh`: the `claude` and `claude-env` components,
-  `hasCompletedOnboarding`, `claude mcp add`.
-- The instructions go to `~/.claude/CLAUDE.md`; kiro-cli reads steering
-  files from elsewhere (*unverified*).
-- `clientEnv`: `ANTHROPIC_BASE_URL`, `CLAUDE_CODE_OAUTH_TOKEN`.
+- `provision.sh`: the `claude` component (the installer).
+- `guestconfig.go` `claudeCode`: `ANTHROPIC_BASE_URL`,
+  `CLAUDE_CODE_OAUTH_TOKEN`, `hasCompletedOnboarding`, and the
+  instructions in `~/.claude/CLAUDE.md`; kiro-cli reads steering files
+  from elsewhere (*unverified*).
 - The editor settings name `anthropic.claude-code`.
 - The allowlist groups `claude-code` and `anthropic`.
 
@@ -209,6 +209,7 @@ Each step stands alone and is checked by the existing end-to-end runs.
 1. **Guest settings in Go.** `GuestConfig`; `clientEnv` and the
    provisioned files come from it; `broker-env` and `claude-env` shrink
    to the generic step. Removes the Go and bash duplication.
+   *Done 2026-11-24, see [Step 1 as built](#step-1-as-built).*
 2. **The provider registry.** GitLab, GitHub, Anthropic and AWS on it,
    replacing the wiring in `providers.go`, `settings.go`, `login.go` and
    `supervisor.go`. GitHub's host configurable.
@@ -223,6 +224,43 @@ Each step stands alone and is checked by the existing end-to-end runs.
 
 Steps 1 to 3 carry most of the value; 5 and 6 make Kiro, kiro-cli and
 another VM runtime replacements rather than forks.
+
+## Step 1 as built
+
+*2026-11-24. Unit tests only; the end-to-end runs (a sandbox created,
+restarted, and restarted with a provider removed) are* unverified.
+
+- `guest.Config` (`guest/config.go`): `Env`, `Git` (each key's values
+  replace the guest's), `GitClear`, `Files` (text, a symbolic link, or
+  JSON merged into what's there; a marker first line marks a file as
+  ours), `Packages`, and `Instructions` (Markdown sections, which the
+  agent puts in its own file).
+- `cmd/mono-jig/guestconfig.go` builds it: one function per provider
+  (`gitlabGuest`, `githubGuest`, `awsGuest`) and one for the agent
+  (`claudeCode`). The sandbox's own environment is its `Env`;
+  `optionalEnv` and `GitClear` come from the same functions with every
+  provider on, so nothing lists names by hand.
+- The supervisor writes it as `/root/guest.json`; `provision.sh`'s
+  `apply` component (every start) applies it with `jq`. It replaces
+  `broker-env`, `claude-env` and `aws-env`; `broker` now only trusts the
+  broker's CA. One environment file, `/etc/profile.d/80-mono-jig.sh` and
+  one `/etc/environment` block, replace the five older ones, which
+  `apply` removes. Files it wrote and no longer wants are removed, if
+  still ours (`/var/lib/mono-jig/guest-files` lists them).
+- The agent's instructions are templates, `guest/instructions/*.md`,
+  rendered in Go. The output is unchanged but for one fix: GitLab's
+  host is the configured one, not always gitlab.com (and git's
+  `insteadOf` for GitLab follows it too).
+- Changing a provider's guest settings no longer changes `provision.sh`,
+  so no image rebuild.
+- Dropped: `BROKER_GITLAB_MCP` (registering GitLab's MCP server with
+  Claude Code), which nothing set since the 2026-11-22 decision for glab;
+  and `BROKER_SESSION_TOKEN`, the sbx broker's session header, which
+  nothing set either. A guest for `mono-jig-sbx` would need its own
+  `guest.Config`.
+- Edge left: a sandbox provisioned before this whose provider is removed
+  at the same restart as the upgrade keeps that provider's glab config,
+  instructions or mcpcli link, since there's no list of files yet.
 
 ## The PR marker
 
@@ -244,8 +282,8 @@ history unless someone edits it out.
 
 Recommendation: keep the branch as the only authority and drop the title
 tag requirement. *Done 2026-11-24: the broker no longer checks titles,
-and the agent's instructions no longer ask for the tag.* If a visible flag is wanted beyond the branch name the
-provider already shows, have the agent add a label (`agent`) when it
+and the agent's instructions no longer ask for the tag.* If a visible
+flag is wanted beyond the branch name the provider already shows, have the agent add a label (`agent`) when it
 opens the PR, treated as a hint only. Labels on GitHub's
 `POST /repos/{o}/{r}/issues/{n}/labels` create a missing label, which
 needs write access; GitLab creates missing labels from `labels=` on an
@@ -267,3 +305,6 @@ labels today).
   `editor/vscode.go`, `guest/provision.sh`, `guest/image.Dockerfile`,
   `broker/policy.go`, `allowlist/lists/base.yaml`.
 - `docs/design.md`: the two tracks, the sandbox backend interface.
+- Step 1: this repo after 4478cbb: `guest/config.go`,
+  `guest/instructions/`, `cmd/mono-jig/guestconfig.go`,
+  `guest/provision.sh` (`apply`); jq 1.8.2 on the Mac for its expressions.

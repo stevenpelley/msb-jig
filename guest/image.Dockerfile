@@ -13,7 +13,7 @@ ARG PROVISION_COMPONENTS
 ARG PROVISION_HASH
 COPY provision.sh /opt/mono-jig/provision.sh
 RUN SANDBOX_USER="$SANDBOX_USER" SANDBOX_UID="$SANDBOX_UID" \
-    PROVISION_COMPONENTS="$PROVISION_COMPONENTS" BROKER_GITLAB_URL= \
+    PROVISION_COMPONENTS="$PROVISION_COMPONENTS" \
     bash /opt/mono-jig/provision.sh \
  && rm -rf /var/lib/apt/lists/* \
  && mkdir -p /etc/mono-jig \

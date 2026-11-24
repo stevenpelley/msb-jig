@@ -6,16 +6,12 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
-	"regexp"
-	"slices"
-	"sort"
 	"strings"
 	"testing"
 
 	m "github.com/superradcompany/microsandbox/sdk/go"
 
 	"mono-jig/allowlist"
-	"mono-jig/guest"
 )
 
 func TestEgressRules(t *testing.T) {
@@ -29,42 +25,6 @@ func TestEgressRules(t *testing.T) {
 			r.Protocol != m.PolicyProtocolTCP || r.Port != want.port {
 			t.Errorf("rule %d: %+v, want %v", i, r, want)
 		}
-	}
-}
-
-// The variables provision.sh writes for the components the supervisor
-// provisions (client_env 80-84: git, broker, node CA, claude, aws) are the ones
-// clientEnv sets on the sandbox, in either broker mode.
-func TestClientEnvMatchesProvision(t *testing.T) {
-	var want []string
-	// The client_env calls, and the provider arrays they take: gl=(...) and gh=(...).
-	call := regexp.MustCompile(`(?m)^\s*(?:client_env 8[0-4]-\S+|\[\[ .* \]\] && g[lh]=\()((?:.*\\\n)*.*)$`)
-	name := regexp.MustCompile(`([A-Z_]+)=`)
-	for _, c := range call.FindAllStringSubmatch(guest.ProvisionScript, -1) {
-		for _, n := range name.FindAllStringSubmatch(c[1], -1) {
-			want = append(want, n[1])
-		}
-	}
-	var c config
-	c.broker.GitLabUser, c.broker.GitHubUser = "u", "u"
-	c.broker.AnthropicTokenCmd = "true"
-	c.broker.AWSProfiles = []string{"p"}
-	c.broker.GitLabURL = "https://gitlab.com"
-	seen := map[string]bool{}
-	var got []string
-	for _, proxy := range []bool{false, true} {
-		c.proxy = proxy
-		for k := range clientEnv(c) {
-			if !seen[k] {
-				seen[k] = true
-				got = append(got, k)
-			}
-		}
-	}
-	want = slices.Compact(slices.Sorted(slices.Values(want)))
-	sort.Strings(got)
-	if len(want) == 0 || strings.Join(got, " ") != strings.Join(want, " ") {
-		t.Errorf("clientEnv sets %v; provision.sh writes %v", got, want)
 	}
 }
 
