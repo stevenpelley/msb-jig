@@ -75,10 +75,10 @@ func setup() {
 		}
 	}
 	image, local := sandboxImage()
-	if e := imageEngine(""); ok && image == defaultImage && os.Getenv("JIG_IMAGE") == "" && e != "" {
+	if e := imageEngine(""); ok && image == baseImage() && os.Getenv("JIG_IMAGE") == "" && e != "" {
 		fmt.Println("building the base image with", e, "(mono-jig image build)")
 		image, local = buildImage(e, "", ""), true
-	} else if ok && image == defaultImage {
+	} else if ok && image == baseImage() {
 		fmt.Println("no docker or podman: sandboxes start from plain Ubuntu and install everything at their first start")
 	}
 	if ok && !local {

@@ -75,6 +75,10 @@ the web host under `/api/v3`, doesn't fit the route tables yet.*
 
 ### Base image
 
+*Since step 4 (done 2026-11-24, below) the image is `JIG_BASE_IMAGE` and
+`provision.sh` is component files; a non-Debian base still needs its own
+`base` (and `ca`) component.*
+
 - `image.Dockerfile` and `defaultImage` say `ubuntu:26.04`.
 - `provision.sh` assumes Debian: `apt-get`, `update-ca-certificates`,
   `useradd`, glab from apt.
@@ -230,6 +234,7 @@ Each step stands alone and is checked by the existing end-to-end runs.
    *Done 2026-11-24, see [Step 3 as built](#step-3-as-built).*
 4. **The base image configurable** (`BASE_IMAGE`, `Track.BaseImage`);
    `provision.sh` split into components.
+   *Done 2026-11-24, see [Step 4 as built](#step-4-as-built).*
 5. **Agent and Editor**, with Claude Code and VS Code as the first.
 6. **The supervisor split**: broker host, `Backend`, provisioning.
 7. **The module renamed and moved** to its own repo; the personal track
@@ -336,6 +341,32 @@ unverified.
   likely needs `UV_NATIVE_TLS=1` or `SSL_CERT_FILE` in the supervisor's
   environment (both *unverified*).
 
+## Step 4 as built
+
+*2026-11-24. Unit tests; an image build from another base is*
+unverified.
+
+- `JIG_BASE_IMAGE` (default `ubuntu:26.04`) is what the base image builds
+  on (`ARG BASE_IMAGE` in `image.Dockerfile`, part of the base image's
+  tag) and the plain image a sandbox starts from without a built one.
+  `Track.BaseImage` will set it.
+- `guest/provision/`: `provision.sh` sources `lib.sh` (the settings and
+  helpers), then `components/*.sh` in name order: `10-ca`, `20-base`,
+  `30-sshd`, `40-git`, `50-broker`, `60-docker`, `70-claude`, `90-apply`.
+  Each still runs only when `PROVISION_COMPONENTS` names it. The code is
+  unchanged, only moved.
+- `guest.Provision()` returns the files as a fresh map, so a track can
+  replace a component (`components/20-base.sh` for a base without apt) or
+  add one; `ProvisionHash` covers the whole set, and the base image
+  records it as before.
+- The supervisor writes the set to `/root/provision/` on every start
+  (replacing the last, and removing the old `/root/provision.sh`); the
+  image build copies it to `/opt/mono-jig/provision/`; the sbx stand-in
+  `guest/Dockerfile` copies it too.
+- Debian-specific still: `base` (apt, `useradd`), `ca` and `broker`
+  (`update-ca-certificates`), `git` (gh and glab from apt), `apply`'s
+  package install (apt, `dpkg -s`).
+
 ## The PR marker
 
 The broker decides whether the agent may change a pull or merge request
@@ -387,3 +418,5 @@ labels today).
 - Step 3: this repo after 1bfe2c8: `cmd/mono-jig/{ca,image,supervisor}.go`,
   `guest/image.Dockerfile`, `guest/provision.sh` (`ca`); OpenSSL 4.1.0 and
   awk on the Mac for the split.
+- Step 4: this repo after 2cba953: `guest/provision/`, `guest/provision.go`,
+  `guest/image.Dockerfile`, `cmd/mono-jig/{image,supervisor}.go`.

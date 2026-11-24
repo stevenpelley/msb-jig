@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"path"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -46,7 +47,8 @@ import (
 // Environment:
 //
 //	JIG_STATE                 state directories (default ~/.mono-jig)
-//	JIG_IMAGE                 the OCI image (default: the one mono-jig image build made, else ubuntu:26.04)
+//	JIG_IMAGE                 the OCI image (default: the one mono-jig image build made, else JIG_BASE_IMAGE)
+//	JIG_BASE_IMAGE            what the base image builds on (default ubuntu:26.04; base uses apt)
 //	JIG_MEMORY                MiB (default 4096)
 //	JIG_CPUS                  vCPUs (default 4)
 //	JIG_DISK                  root disk, GiB (default 32; sparse)
@@ -67,6 +69,8 @@ const (
 	brokerPort  = 443 // the vsock port, and the guest's loopback port
 	guestCA     = "/usr/local/share/ca-certificates/mono-jig-broker-src.crt"
 	provisioned = "/var/lib/mono-jig/provisioned"
+	// provisionDir is where the supervisor writes provision/, every start.
+	provisionDir = "/root/provision"
 	// dockerDir is on its own ext4 disk: the root is overlayfs, and Docker's
 	// overlay snapshots can't sit on overlayfs ("invalid argument").
 	dockerDir = "/var/lib/docker"
@@ -379,8 +383,22 @@ func provision(ctx context.Context, sb *m.Sandbox, c config, log *slog.Logger) e
 	if err != nil {
 		return err
 	}
-	if err := sb.FS().WriteString(ctx, "/root/provision.sh", guest.ProvisionScript); err != nil {
+	// The binary's provision files, replacing the last start's.
+	if ok, err := sb.FS().Exists(ctx, provisionDir); err != nil {
 		return err
+	} else if ok {
+		if err := sb.FS().RemoveDir(ctx, provisionDir); err != nil {
+			return err
+		}
+	}
+	for name, body := range guest.Provision() {
+		p := provisionDir + "/" + name
+		if err := sb.FS().Mkdir(ctx, path.Dir(p)); err != nil {
+			return err
+		}
+		if err := sb.FS().WriteString(ctx, p, body); err != nil {
+			return err
+		}
 	}
 	if err := sb.FS().Write(ctx, guest.ConfigFile, settings); err != nil {
 		return err
@@ -402,11 +420,12 @@ fi
 	script := fmt.Sprintf(`set -euo pipefail
 %s
 export SANDBOX_USER=%s SANDBOX_UID=%d PROVISION_COMPONENTS=%q BROKER_CA_FILE=%s GUEST_CONFIG=%s GUEST_CA=%s
-bash /root/provision.sh
+rm -f /root/provision.sh  # the single script before provision/
+bash %[11]s/provision.sh
 home=$(getent passwd %[2]s | cut -d: -f6)
 if [ -d %[8]s ] && [ ! -e "$home/host" ]; then ln -s %[8]s "$home/host"; fi
 mkdir -p %[9]s && touch %[10]s
-`, first, guestUser, guestUID, comps, guestCA, guest.ConfigFile, guestCAFile, shareGuest, filepath.Dir(provisioned), provisioned)
+`, first, guestUser, guestUID, comps, guestCA, guest.ConfigFile, guestCAFile, shareGuest, filepath.Dir(provisioned), provisioned, provisionDir)
 	h, err := sb.ShellStream(ctx, script, m.WithExecUser("root"))
 	if err != nil {
 		return err
@@ -489,9 +508,9 @@ func firstComponents(ctx context.Context, sb *m.Sandbox, c config, log *slog.Log
 	if s, err := sb.FS().ReadString(ctx, imageFile); err == nil {
 		baked, hash = parseImageFile(s)
 	}
-	if hash != "" && hash != guest.ProvisionHash() {
-		log.Warn("the image was built from another provision.sh; to bring it up to date: mono-jig image build, then rm and open",
-			"image", hash, "binary", guest.ProvisionHash())
+	if want := guest.ProvisionHash(guest.Provision()); hash != "" && hash != want {
+		log.Warn("the image was built from other provision files; to bring it up to date: mono-jig image build, then rm and open",
+			"image", hash, "binary", want)
 	}
 	var comps []string
 	for _, p := range strings.Fields(components(c)) {

@@ -3,9 +3,10 @@
 FROM ubuntu:26.04
 ARG SANDBOX_USER=agent
 ARG PROVISION_COMPONENTS="base sshd git docker claude"
-COPY provision.sh install-keys.sh /opt/mono-jig/
+COPY provision/ /opt/mono-jig/provision/
+COPY install-keys.sh /opt/mono-jig/
 RUN SANDBOX_USER=$SANDBOX_USER PROVISION_COMPONENTS="$PROVISION_COMPONENTS" \
-    bash /opt/mono-jig/provision.sh \
+    bash /opt/mono-jig/provision/provision.sh \
  && rm -rf /var/lib/apt/lists/* \
  # No baked-in host keys: each sandbox gets its own from install-keys.sh.
  && rm -f /etc/ssh/ssh_host_*

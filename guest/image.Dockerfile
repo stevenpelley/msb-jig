@@ -1,4 +1,5 @@
-# The base image for microsandbox sandboxes: provision.sh's parts that
+# The base image for microsandbox sandboxes (on BASE_IMAGE, default
+# Ubuntu): provision.sh's parts that
 # depend on nothing but the image (packages, the agent user, git, Docker,
 # Claude Code), so a sandbox's first start doesn't install them.
 # mono-jig image build builds it from the copies embedded in the
@@ -6,18 +7,19 @@
 # supervisor which parts are here and from which provision.sh.
 # The parts that depend on your logins and on the sandbox (the broker's
 # CA and settings, Claude's and AWS's settings) run at every start.
-FROM ubuntu:26.04
+ARG BASE_IMAGE=ubuntu:26.04
+FROM ${BASE_IMAGE}
 ARG SANDBOX_USER
 ARG SANDBOX_UID
 ARG PROVISION_COMPONENTS
 ARG PROVISION_HASH
-COPY provision.sh /opt/mono-jig/provision.sh
+COPY provision/ /opt/mono-jig/provision/
 # Extra CAs (mono-jig ca), before anything downloads: ca-certificates,
 # installed by provision.sh's base, trusts them.
 COPY ca/ /usr/local/share/ca-certificates/mono-jig-build/
 RUN SANDBOX_USER="$SANDBOX_USER" SANDBOX_UID="$SANDBOX_UID" \
     PROVISION_COMPONENTS="$PROVISION_COMPONENTS" \
-    bash /opt/mono-jig/provision.sh \
+    bash /opt/mono-jig/provision/provision.sh \
  && rm -rf /var/lib/apt/lists/* \
  && mkdir -p /etc/mono-jig \
  && printf 'components=%s\nprovision=%s\n' "$PROVISION_COMPONENTS" "$PROVISION_HASH" >/etc/mono-jig/image

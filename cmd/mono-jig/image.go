@@ -22,8 +22,8 @@ import (
 // on the Mac:
 //
 //   - the base image, localhost/mono-jig-base:<hash>, from the
-//     Dockerfile and provision.sh embedded in this binary
-//     (guest/image.Dockerfile): Ubuntu with provision.sh's parts that depend
+//     Dockerfile and provision/ embedded in this binary
+//     (guest/image.Dockerfile): baseImage (Ubuntu) with provision.sh's parts that depend
 //     only on the image (imageComponents: packages, the agent user, git,
 //     gh, glab, Docker, Claude Code). The engine caches it, so it's rebuilt
 //     only when provision.sh changes;
@@ -34,11 +34,14 @@ import (
 // records it in settings.json; new sandboxes start from it. Their first
 // start runs only what the image doesn't have (firstComponents): the
 // broker's CA and settings, and Claude's and AWS's. A plain image
-// (JIG_IMAGE=ubuntu:26.04) still works, with everything installed at the
+// (JIG_IMAGE=ubuntu:26.04, or baseImage) still works, with everything installed at the
 // first start. A sandbox keeps the image it was created from: mono-jig
 // rm, then open, to move one to a new image.
 
-const defaultImage = "ubuntu:26.04"
+// baseImage is the image the base image builds on, and the plain image
+// sandboxes start from without one: JIG_BASE_IMAGE, default Ubuntu. Its
+// packages must suit provision/'s components (base uses apt).
+func baseImage() string { return env("JIG_BASE_IMAGE", "ubuntu:26.04") }
 
 // sandboxImage is the image new sandboxes start from: JIG_IMAGE, else the
 // last image mono-jig image build made, else plain Ubuntu. local is
@@ -50,7 +53,7 @@ func sandboxImage() (ref string, local bool) {
 	if s := loadSettings(); s.Image != "" {
 		return s.Image, true
 	}
-	return defaultImage, false
+	return baseImage(), false
 }
 
 const starterDockerfile = `# Your sandbox image, on top of mono-jig's base: Ubuntu with the agent
@@ -82,7 +85,7 @@ func imageCmd(args []string) {
 		s := loadSettings()
 		s.Image = ""
 		saveSettings(s)
-		fmt.Println("new sandboxes start from", defaultImage, "(everything installed at the first start)")
+		fmt.Println("new sandboxes start from", baseImage(), "(everything installed at the first start)")
 	default:
 		usage()
 	}
@@ -183,7 +186,8 @@ func baseArgs() []string {
 		"SANDBOX_USER=" + guestUser,
 		"SANDBOX_UID=" + strconv.Itoa(guestUID),
 		"PROVISION_COMPONENTS=" + imageComponents,
-		"PROVISION_HASH=" + guest.ProvisionHash(),
+		"PROVISION_HASH=" + guest.ProvisionHash(guest.Provision()),
+		"BASE_IMAGE=" + baseImage(),
 	}
 }
 
@@ -191,29 +195,31 @@ func baseArgs() []string {
 // extra CAs included.
 func baseTag() string {
 	h := sha256.New()
-	for _, s := range slices.Concat([]string{guest.ImageDockerfile, guest.ProvisionScript}, baseArgs(), extraCAs()) {
+	for _, s := range slices.Concat([]string{guest.ImageDockerfile}, baseArgs(), extraCAs()) {
 		fmt.Fprintf(h, "%d:%s", len(s), s)
 	}
 	return "localhost/mono-jig-base:" + hex.EncodeToString(h.Sum(nil)[:6])
 }
 
 // buildBase builds the base image from the embedded Dockerfile and
-// provision.sh, and the extra CAs (ca/), in a temporary context directory.
+// provision/, and the extra CAs (ca/), in a temporary context directory.
 func buildBase(engine string) string {
 	dir, err := os.MkdirTemp("", "mono-jig-base-")
 	if err != nil {
 		fail("%v", err)
 	}
 	defer os.RemoveAll(dir)
-	files := map[string]string{"Dockerfile": guest.ImageDockerfile, "provision.sh": guest.ProvisionScript,
-		"ca/README": "Extra CAs (mono-jig ca), one .crt each.\n"}
+	files := map[string]string{"Dockerfile": guest.ImageDockerfile, "ca/README": "Extra CAs (mono-jig ca), one .crt each.\n"}
+	for name, body := range guest.Provision() {
+		files["provision/"+name] = body
+	}
 	for i, ca := range extraCAs() {
 		files[fmt.Sprintf("ca/%d.crt", i+1)] = ca
 	}
-	if err := os.Mkdir(filepath.Join(dir, "ca"), 0o755); err != nil {
-		fail("%v", err)
-	}
 	for name, body := range files {
+		if err := os.MkdirAll(filepath.Dir(filepath.Join(dir, name)), 0o755); err != nil {
+			fail("%v", err)
+		}
 		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o644); err != nil {
 			fail("%v", err)
 		}

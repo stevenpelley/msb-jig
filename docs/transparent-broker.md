@@ -459,7 +459,7 @@ what its mode needs.
 | Anonymous reads | `github/routes.go`, `gitlab/routes.go` | In proxy mode only, the last route (of `github.com`'s table, for GitHub) forwards a GET or HEAD that no earlier route matched to the provider without the credential (`anonymous.read`). Unmatched writes are still denied |
 | CA | `broker/ca.go` | `NewCA`/`LoadOrCreateCA` take extra permitted domains. A kept CA must cover them, or the supervisor stops and says to `rm` |
 | Supervisor | `cmd/mono-jig/supervisor.go`, `brokermode.go` | Listens on `127.0.0.1` on a port chosen at create and saved in `<state>/proxy-port`, since microsandbox keeps the proxy address with the sandbox. Makes a new password on every start and sets it in its own environment (`JIG_PROXY_PASSWORD`). The allowlist keeps the forge groups and adds the brokered hosts on 443; only AWS's group is dropped. `/etc/hosts` maps only `aws.broker.internal` |
-| Guest | `cmd/mono-jig/guestconfig.go` (proxy mode; until 2026-11-24 `guest/provision.sh` with `BROKER_MODE=proxy`) | No `insteadOf`, `GH_HOST` or `ANTHROPIC_BASE_URL`. `GH_TOKEN`, `GITLAB_TOKEN` and `CLAUDE_CODE_OAUTH_TOKEN` are placeholders. `GITLAB_HOST` is the real host. glab's config names it |
+| Guest | each provider's `Guest(proxy)` in `broker/providers`, and `claudeCode` in `cmd/mono-jig/guestconfig.go` (until 2026-11-24 `guest/provision.sh` with `BROKER_MODE=proxy`) | No `insteadOf`, `GH_HOST` or `ANTHROPIC_BASE_URL`. `GH_TOKEN`, `GITLAB_TOKEN` and `CLAUDE_CODE_OAUTH_TOKEN` are placeholders. `GITLAB_HOST` is the real host. glab's config names it |
 
 The vsock route and `broker.sock` stay in proxy mode, for AWS. They serve
 the same providers.

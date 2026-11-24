@@ -1,29 +1,55 @@
-// Package guest is what goes into the sandbox VM: provision.sh (run by
+// Package guest is what goes into the sandbox VM: provision/ (run by
 // the supervisor at start, and by the image's Dockerfile at build), the
 // image's Dockerfile, and mcpcli, the agent's MCP client.
 package guest
 
 import (
 	"crypto/sha256"
-	_ "embed"
+	"embed"
 	"encoding/hex"
+	"fmt"
+	"io/fs"
+	"maps"
+	"slices"
+	"strings"
 )
 
-// ProvisionScript is provision.sh.
-//
-//go:embed provision.sh
-var ProvisionScript string
+// Provision is provision.sh and the files it sources (lib.sh,
+// components/NN-<name>.sh), by path under provision/. A fresh map each
+// call: a track replaces or adds a component in it.
+func Provision() map[string]string {
+	out := map[string]string{}
+	err := fs.WalkDir(provisionFS, "provision", func(p string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
+		b, err := provisionFS.ReadFile(p)
+		out[strings.TrimPrefix(p, "provision/")] = string(b)
+		return err
+	})
+	if err != nil {
+		panic(err)
+	}
+	return out
+}
+
+//go:embed provision
+var provisionFS embed.FS
 
 // ImageDockerfile builds the base image for microsandbox sandboxes, with
-// provision.sh beside it.
+// provision/ beside it.
 //
 //go:embed image.Dockerfile
 var ImageDockerfile string
 
-// ProvisionHash identifies this provision.sh, as the base image records it.
-func ProvisionHash() string {
-	h := sha256.Sum256([]byte(ProvisionScript))
-	return hex.EncodeToString(h[:6])
+// ProvisionHash identifies a set of provision files, as the base image
+// records it.
+func ProvisionHash(files map[string]string) string {
+	h := sha256.New()
+	for _, k := range slices.Sorted(maps.Keys(files)) {
+		fmt.Fprintf(h, "%d:%s%d:%s", len(k), k, len(files[k]), files[k])
+	}
+	return hex.EncodeToString(h.Sum(nil)[:6])
 }
 
 // MCPCLI is mcpcli, the agent's MCP client for the broker's AWS MCP
