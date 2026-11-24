@@ -96,6 +96,10 @@ func TestProxyMode(t *testing.T) {
 		{"POST", "github.com", "/o/r/git-upload-pack", "", 200, gh, "POST /o/r.git/git-upload-pack Basic YWxpY2U6Z2h0b2s="},
 		{"GET", "github.com", "/o/r/archive/refs/heads/main.tar.gz", "", 200, gh, "GET /o/r/archive/refs/heads/main.tar.gz "},
 		{"POST", "github.com", "/login/oauth/access_token", "", 403, gh, ""},
+		// Each host has its own table: github.com doesn't serve the API.
+		{"GET", "github.com", "/api/v3/user", "", 200, gh, "GET /api/v3/user "},
+		{"POST", "github.com", "/api/graphql", `{"query":"query { viewer { login } }"}`, 403, gh, ""},
+		{"POST", "api.github.com", "/o/r/git-receive-pack", "", 403, gh, ""},
 		// GitLab: the API with the credential, other reads without it.
 		{"GET", glHost, "/api/v4/projects/1", "", 200, gl, "GET /api/v4/projects/1 Bearer gltok"},
 		{"GET", glHost, "/g/p/-/raw/main/README.md", "", 200, gl, "GET /g/p/-/raw/main/README.md "},

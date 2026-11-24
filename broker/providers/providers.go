@@ -131,19 +131,19 @@ func Build(ctx context.Context, c Config, state string, log *slog.Logger) (map[s
 		}
 	}
 
-	// github.broker.internal: git, REST, GraphQL, as gh calls a GitHub
-	// Enterprise Server. On once mono-jig login github recorded a user.
+	// GitHub: git, REST, GraphQL. In server mode one host,
+	// github.broker.internal, as gh calls a GitHub Enterprise Server; in
+	// proxy mode github.com (git) and api.github.com (the API). On once
+	// mono-jig login github recorded a user.
 	if c.GitHubUser != "" {
-		p := b.provider("github", github.Routes(b.upstreams(GitHubHost, "github"), github.Config{
-			User: c.GitHubUser, Token: token(c.GitHubTokenCmd), Anonymous: c.Proxy,
-			GitURL: c.GitHubURL, APIURL: c.GitHubAPIURL}))
+		up := b.upstreams(GitHubHost, "github")
+		gc := github.Config{User: c.GitHubUser, Token: token(c.GitHubTokenCmd), GitURL: c.GitHubURL, APIURL: c.GitHubAPIURL}
 		if c.Proxy {
-			// One provider, two hosts: api.github.com's paths are mapped
-			// to the routes' /api/v3/... and /api/graphql.
-			b.out[GitHubWebHost] = p
-			b.out[GitHubAPIHost] = broker.Alias{To: p, Path: githubAPIPath}
+			web, api := github.ProxyRoutes(up, gc)
+			b.out[GitHubWebHost] = b.provider("github", web)
+			b.out[GitHubAPIHost] = b.provider("github", api)
 		} else {
-			b.out[GitHubHost] = p
+			b.out[GitHubHost] = b.provider("github", github.ServerRoutes(up, gc))
 		}
 	}
 
@@ -169,16 +169,6 @@ func Build(ctx context.Context, c Config, state string, log *slog.Logger) (map[s
 		b.out[AWSHost] = b.provider("aws", awsmcp.Routes(proxy))
 	}
 	return b.out, nil
-}
-
-// githubAPIPath maps an api.github.com path to the GitHub routes' form,
-// that of a GitHub Enterprise Server: /graphql is /api/graphql, the rest
-// is under /api/v3.
-func githubAPIPath(p string) string {
-	if p == "/graphql" {
-		return "/api/graphql"
-	}
-	return "/api/v3" + p
 }
 
 // builder collects the providers, and makes their upstreams.

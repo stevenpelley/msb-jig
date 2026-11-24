@@ -414,6 +414,13 @@ broker.
    The provider then sees exactly today's requests. The prefix is added
    before `broker.Server`'s path checks run, and those checks must still
    run on the rewritten path.
+
+   (Built that way first, then replaced on 2026-11-24: the alias left
+   one table serving both hosts, so in proxy mode `github.com/api/v3/...`
+   reached the API with the credential, and the reader had to work out
+   which routes applied in which mode. Now each mode builds only its own
+   tables, from the same route lists with the path prefix as a
+   parameter, so they can't drift; see "Proxy mode as built".)
 2. **Rewriting `Location` must be off in proxy mode.** `Upstream`
    rewrites upstream `Location` headers to `Public` plus `Strip`
    (`broker/upstream.go`). Behind the alias map, that would produce
@@ -447,9 +454,9 @@ what its mode needs.
 | Piece | Where | What it does |
 |---|---|---|
 | Front end | `broker/connect.go` (`Proxy`) | Basic auth (user `jig`). Peeks the first bytes: TLS with a brokered SNI is terminated and handed to one `http.Server` (h2 and HTTP/1.1) through a channel listener; other SNI is spliced to the CONNECT's `ip:port`; TLS with no SNI, or a ClientHello longer than one record, is refused; plain HTTP whose first request has a brokered `Host` gets 403, or is refused if its headers can't be read; anything else, including server-first protocols after 3 s, is spliced. One log line per connection (`"msg":"connect"`) |
-| Host names | `broker/providers` (`Config.Proxy`, `Hosts`) | The providers are keyed by their real names: the GitLab URL's host, `github.com`, `api.github.com`, `api.anthropic.com`. `aws.broker.internal` stays. `api.github.com` goes through `broker.Alias`, which maps `/graphql` to `/api/graphql` and everything else to `/api/v3/...`, then checks the path again |
+| Host names | `broker/providers` (`Config.Proxy`, `Hosts`) | The providers are keyed by their real names: the GitLab URL's host, `github.com`, `api.github.com`, `api.anthropic.com`. `aws.broker.internal` stays. GitHub builds only the active mode's tables (`github.ServerRoutes`, `ProxyRoutes`): in server mode one table under `/api/v3`, `/api/graphql` and git; in proxy mode `github.com` gets git and anonymous reads, `api.github.com` the API at GitHub's own paths. Both come from the same route lists, with the REST prefix as a parameter. (Until 2026-11-24 a path alias mapped `api.github.com` onto the server-mode table.) GitLab's paths are the same in both modes |
 | Location | `broker/upstream.go` | `Upstreams.Public` is nil in proxy mode, so `Location` and `Link` aren't rewritten. GitLab's LFS `href` rewrite is skipped too; the `header` is still removed |
-| Anonymous reads | `github/routes.go`, `gitlab/routes.go` | In proxy mode only, the last route forwards a GET or HEAD that no earlier route matched to the provider without the credential (`anonymous.read`). Unmatched writes are still denied |
+| Anonymous reads | `github/routes.go`, `gitlab/routes.go` | In proxy mode only, the last route (of `github.com`'s table, for GitHub) forwards a GET or HEAD that no earlier route matched to the provider without the credential (`anonymous.read`). Unmatched writes are still denied |
 | CA | `broker/ca.go` | `NewCA`/`LoadOrCreateCA` take extra permitted domains. A kept CA must cover them, or the supervisor stops and says to `rm` |
 | Supervisor | `cmd/mono-jig/supervisor.go`, `brokermode.go` | Listens on `127.0.0.1` on a port chosen at create and saved in `<state>/proxy-port`, since microsandbox keeps the proxy address with the sandbox. Makes a new password on every start and sets it in its own environment (`JIG_PROXY_PASSWORD`). The allowlist keeps the forge groups and adds the brokered hosts on 443; only AWS's group is dropped. `/etc/hosts` maps only `aws.broker.internal` |
 | Guest | `guest/provision.sh` (`BROKER_MODE=proxy`) | No `insteadOf`, `GH_HOST` or `ANTHROPIC_BASE_URL`. `GH_TOKEN`, `GITLAB_TOKEN` and `CLAUDE_CODE_OAUTH_TOKEN` are placeholders. `GITLAB_HOST` is the real host. glab's config names it |
@@ -472,7 +479,7 @@ removed afterwards.
 |---|---|
 | Provisioning (apt over HTTP, the Claude Code installer over HTTPS) | Worked, all spliced through the broker |
 | Guest environment | `GH_TOKEN`, `GITLAB_TOKEN`, `CLAUDE_CODE_OAUTH_TOKEN` placeholders, `GITLAB_HOST=gitlab.com`; no `insteadOf`; `/etc/hosts` has only `aws.broker.internal` |
-| `gh api user`, `gh repo view`, `gh pr list` (REST and GraphQL on `api.github.com`) | The user's login, through the alias |
+| `gh api user`, `gh repo view`, `gh pr list` (REST and GraphQL on `api.github.com`) | The user's login, through the alias. Re-run after the per-mode tables replaced it (below) |
 | `git ls-remote`, `git clone` from `github.com`; `git ls-remote` from `gitlab.com` | Worked, with the credential injected |
 | `curl` a GitHub archive URL | 302 to `codeload.github.com` (`anonymous.read`) |
 | `curl -X POST https://github.com/login/oauth/access_token` | 403, "isn't a request the github provider serves" |
@@ -487,6 +494,17 @@ removed afterwards.
 | Certificate the guest sees for `github.com` | Issued by `mono-jig broker CA (<name>)`; curl, git, OpenSSL, Go (`gh`, `glab`) and Node accepted it under the name constraint |
 | `down`, then `up` without the flag | Same port, new password, `gh` and `glab` work again |
 | `up --broker server` on the proxy-mode sandbox | Refused, with the `rm` hint |
+
+Re-run on 2026-11-24 after the GitHub tables were split by mode, in
+fresh sandboxes (one per mode, removed afterwards). The proxy-mode
+checks above all gave the same results. New:
+
+| Check | Result |
+|---|---|
+| `GET github.com/api/v3/user` (proxy mode) | 404 from github.com, sent as `anonymous.read`, without the credential |
+| `POST github.com/api/graphql` (proxy mode) | 403: `github.com`'s table has no API |
+| `POST api.github.com/<owner>/<repo>/git-upload-pack` (proxy mode) | 403: `api.github.com`'s table has no git |
+| Server mode: `gh api user`, `gh repo view`, `gh pr list`, `git ls-remote`, `glab api user` | Worked through `github.broker.internal`; a merge and an unlisted read were refused |
 
 A server-mode sandbox, made the same day with the same binary, still had
 `GH_HOST`, `GITLAB_HOST` and `ANTHROPIC_BASE_URL` pointing at

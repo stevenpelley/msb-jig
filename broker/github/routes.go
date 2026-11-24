@@ -11,44 +11,78 @@ type Config struct {
 	Token broker.Token // the user's token (gh's login, or the Keychain)
 	// Tests: the upstreams, if not https://github.com and https://api.github.com.
 	GitURL, APIURL string
-	// Anonymous (proxy mode, where every github.com request reaches the
-	// broker): reads that match no route go to github.com without the
-	// credential, for public archives, release downloads and go get.
-	Anonymous bool
 }
 
-// Routes is every request the GitHub provider serves: its upstreams, each
-// with its credential, then its routes. The first route that matches
-// serves a request. Anything else is denied, except in proxy mode
-// (Config.Anonymous), where reads (GET, HEAD) that match no route go to
-// github.com without the credential: the last route. The checks are in
-// checks.go and graphql.go.
+// The provider's route tables, one set per broker mode. Each table is
+// every request a host serves: the first route that matches serves a
+// request, and anything else is denied, except where a table ends in
+// anonymous reads. The checks are in checks.go and graphql.go.
 //
-// In proxy mode the sandbox calls github.com and api.github.com by their
-// own names; providers.Build maps api.github.com's paths to /api/v3/...
-// and /api/graphql (broker.Alias), so these routes serve both modes.
-func Routes(up broker.Upstreams, c Config) []broker.Route {
-	git := up.To(c.git(), broker.Basic(c.User, c.Token)) // git: HTTP Basic, as git sends it
-	api := up.To(c.api(), broker.Bearer(c.Token))        // REST: /api/v3/<path> is api.github.com/<path>
-	api.Strip = "/api/v3"
-	graphql := up.To(c.api(), broker.Bearer(c.Token)) // GraphQL: /api/graphql is api.github.com/graphql
-	graphql.Path = "/graphql"
-	logs := Logs{API: api} // follows a log's redirect itself, so the sandbox needs no route to blob storage
-	gh := &Checks{User: c.User, API: api}
+//   - Server mode (ServerRoutes): one host, github.broker.internal,
+//     called the way gh calls a GitHub Enterprise Server: REST under
+//     /api/v3, GraphQL at /api/graphql, git at /<owner>/<repo>.
+//   - Proxy mode (ProxyRoutes): the real hosts. api.github.com takes the
+//     API at GitHub's own paths (/repos/..., /graphql); github.com takes
+//     git, then reads that match no route, sent without the credential
+//     (public archives, release downloads, go get).
+//
+// The rules are the same in both; only the paths and hosts differ.
 
-	const repo = "/api/v3/repos/{owner}/{repo}"
-	const pr = repo + "/pulls/{number}"
-	routes := []broker.Route{
+// ServerRoutes is server mode's one table.
+func ServerRoutes(up broker.Upstreams, c Config) []broker.Route {
+	p := c.parts(up, "/api/v3")
+	return append(p.apiRoutes("/api/graphql"), p.gitRoutes()...)
+}
+
+// ProxyRoutes is proxy mode's tables: github.com's (web) and
+// api.github.com's (api).
+func ProxyRoutes(up broker.Upstreams, c Config) (web, api []broker.Route) {
+	p := c.parts(up, "")
+	web = append(p.gitRoutes(), broker.Route{Method: "GET HEAD", Path: "/{path...}", Op: "anonymous.read", Check: broker.Read, To: up.To(c.git(), broker.NoAuth)})
+	return web, p.apiRoutes("/graphql")
+}
+
+// parts are the upstreams, each with its credential, and the checks the
+// routes share. prefix is what the sandbox's REST paths have and
+// api.github.com's don't.
+type parts struct {
+	prefix            string
+	git, api, graphql *broker.Upstream
+	logs              Logs
+	gh                *Checks
+}
+
+func (c Config) parts(up broker.Upstreams, prefix string) parts {
+	api := up.To(c.api(), broker.Bearer(c.Token)) // REST: <prefix>/<path> is api.github.com/<path>
+	api.Strip = prefix
+	graphql := up.To(c.api(), broker.Bearer(c.Token)) // GraphQL, at api.github.com/graphql
+	graphql.Path = "/graphql"
+	return parts{
+		prefix:  prefix,
+		git:     up.To(c.git(), broker.Basic(c.User, c.Token)), // git: HTTP Basic, as git sends it
+		api:     api,
+		graphql: graphql,
+		logs:    Logs{API: api}, // follows a log's redirect itself, so the sandbox needs no route to blob storage
+		gh:      &Checks{User: c.User, API: api},
+	}
+}
+
+// apiRoutes are REST under p.prefix and GraphQL at graphqlPath.
+func (p parts) apiRoutes(graphqlPath string) []broker.Route {
+	api, gh := p.api, p.gh
+	repo := p.prefix + "/repos/{owner}/{repo}"
+	pr := repo + "/pulls/{number}"
+	return []broker.Route{
 		// Never merge. Listed so the denial says why; approving is refused
 		// in ReviewPR.
 		{Method: "PUT", Path: pr + "/merge", Op: "pr.merge", Check: broker.Never(broker.NeverMerge)},
 		{Method: "POST", Path: repo + "/merges", Op: "pr.merge", Check: broker.Never(broker.NeverMerge)},
 
 		// REST: reads.
-		{Method: "GET", Path: repo + "/actions/runs/{run}/logs", Op: "api.read", Check: broker.Read, To: logs},
-		{Method: "GET", Path: repo + "/actions/runs/{run}/attempts/{attempt}/logs", Op: "api.read", Check: broker.Read, To: logs},
-		{Method: "GET", Path: repo + "/actions/jobs/{job}/logs", Op: "api.read", Check: broker.Read, To: logs},
-		{Method: "GET HEAD", Path: "/api/v3/{path...}", Op: "api.read", Check: broker.Read, To: api},
+		{Method: "GET", Path: repo + "/actions/runs/{run}/logs", Op: "api.read", Check: broker.Read, To: p.logs},
+		{Method: "GET", Path: repo + "/actions/runs/{run}/attempts/{attempt}/logs", Op: "api.read", Check: broker.Read, To: p.logs},
+		{Method: "GET", Path: repo + "/actions/jobs/{job}/logs", Op: "api.read", Check: broker.Read, To: p.logs},
+		{Method: "GET HEAD", Path: p.prefix + "/{path...}", Op: "api.read", Check: broker.Read, To: api},
 
 		// REST: pull requests from agent branches.
 		{Method: "POST", Path: repo + "/pulls", Op: "pr.create", Check: gh.CreatePR, To: api},
@@ -65,17 +99,18 @@ func Routes(up broker.Upstreams, c Config) []broker.Route {
 
 		// GraphQL: queries, and the mutations listed in mutations
 		// (graphql.go); merges refused.
-		{Method: "POST", Path: "/api/graphql", Op: "graphql", Check: gh.GraphQL, To: graphql},
+		{Method: "POST", Path: graphqlPath, Op: "graphql", Check: gh.GraphQL, To: p.graphql},
+	}
+}
 
-		// git, at <owner>/<repo>(.git)/…. No LFS.
+// gitRoutes are git, at /<owner>/<repo>(.git)/…. No LFS.
+func (p parts) gitRoutes() []broker.Route {
+	gh, git := p.gh, p.git
+	return []broker.Route{
 		{Method: "GET", Path: "/{owner}/{repo}/info/refs", Op: "git.refs", Check: gh.GitRefs, To: git, Rewrite: gitproto.StripPushCaps},
 		{Method: "POST", Path: "/{owner}/{repo}/git-upload-pack", Op: "git.fetch", Check: gh.GitRepo, To: git},
 		{Method: "POST", Path: "/{owner}/{repo}/git-receive-pack", Op: "git.push", Check: gh.Push, To: git},
 	}
-	if c.Anonymous {
-		routes = append(routes, broker.Route{Method: "GET HEAD", Path: "/{path...}", Op: "anonymous.read", Check: broker.Read, To: up.To(c.git(), broker.NoAuth)})
-	}
-	return routes
 }
 
 func (c Config) git() string { return or(c.GitURL, "https://github.com") }

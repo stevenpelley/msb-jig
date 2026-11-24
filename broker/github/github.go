@@ -1,8 +1,9 @@
-// Package github is the broker's GitHub provider, served as
-// github.broker.internal: git smart HTTP (to github.com), and the API the
-// way gh calls a GitHub Enterprise Server, REST under /api/v3/ and GraphQL
-// at /api/graphql (to api.github.com). LFS isn't served. Its routes are in
-// routes.go; here are their checks, and graphql.go has every mutation.
+// Package github is the broker's GitHub provider: git smart HTTP (to
+// github.com) and the API, REST and GraphQL (to api.github.com). LFS isn't
+// served. In server mode the sandbox calls it as github.broker.internal,
+// the way gh calls a GitHub Enterprise Server; in proxy mode it calls
+// github.com and api.github.com. Its route tables, one set per mode, are
+// in routes.go; here are their checks, and graphql.go has every mutation.
 package github
 
 import (
