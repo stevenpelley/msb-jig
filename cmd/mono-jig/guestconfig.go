@@ -22,8 +22,12 @@ func guestConfig(c config) guest.Config {
 	g := guest.Config{
 		Env: map[string]string{
 			"GIT_TERMINAL_PROMPT": "0",
-			// Node-based tools (Claude Code's MCP client) don't read the system store.
+			// The system store, with the broker's CA and the extra ones:
+			// Node-based tools (Claude Code's MCP client) and Python's
+			// requests (certifi) don't read it by default.
 			"NODE_EXTRA_CA_CERTS": "/etc/ssl/certs/ca-certificates.crt",
+			"SSL_CERT_FILE":       "/etc/ssl/certs/ca-certificates.crt",
+			"REQUESTS_CA_BUNDLE":  "/etc/ssl/certs/ca-certificates.crt",
 		},
 		// What provision.sh set before apply recorded its git keys.
 		GitClear: legacyGitKeys,

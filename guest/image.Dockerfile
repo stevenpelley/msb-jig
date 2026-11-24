@@ -12,6 +12,9 @@ ARG SANDBOX_UID
 ARG PROVISION_COMPONENTS
 ARG PROVISION_HASH
 COPY provision.sh /opt/mono-jig/provision.sh
+# Extra CAs (mono-jig ca), before anything downloads: ca-certificates,
+# installed by provision.sh's base, trusts them.
+COPY ca/ /usr/local/share/ca-certificates/mono-jig-build/
 RUN SANDBOX_USER="$SANDBOX_USER" SANDBOX_UID="$SANDBOX_UID" \
     PROVISION_COMPONENTS="$PROVISION_COMPONENTS" \
     bash /opt/mono-jig/provision.sh \

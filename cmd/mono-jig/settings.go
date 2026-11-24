@@ -11,13 +11,15 @@ import (
 
 // settings are what mono-jig login records, in <root>/settings.json:
 // which providers the broker serves, and as whom, each under its login
-// name (cliProvider), and the image mono-jig image build made. No
-// secrets: tokens stay in the Keychain or in the tools' own logins on the
-// Mac. The JIG_* variables override them (cliProvider.broker), for the
-// checks.
+// name (cliProvider), the image mono-jig image build made, and the extra
+// CAs' files. No secrets: tokens stay in the Keychain or in the tools' own
+// logins on the Mac. The JIG_* variables override them
+// (cliProvider.broker, extraCAFiles), for the checks.
 type settings struct {
 	// Image is the image mono-jig image build made (image.go).
 	Image string
+	// CAs are the extra CA certificates' files (ca.go).
+	CAs []string
 	// providers are each provider's own settings, by login name.
 	providers map[string]json.RawMessage
 }
@@ -29,6 +31,9 @@ func (s settings) MarshalJSON() ([]byte, error) {
 	}
 	if s.Image != "" {
 		m["image"] = s.Image
+	}
+	if len(s.CAs) > 0 {
+		m["cas"] = s.CAs
 	}
 	return json.Marshal(m)
 }
@@ -43,6 +48,12 @@ func (s *settings) UnmarshalJSON(b []byte) error {
 			return err
 		}
 		delete(m, "image")
+	}
+	if v, ok := m["cas"]; ok {
+		if err := json.Unmarshal(v, &s.CAs); err != nil {
+			return err
+		}
+		delete(m, "cas")
 	}
 	s.providers = m
 	return nil

@@ -16,7 +16,11 @@
 #                        settings, files such as glab's config, mcpcli and the
 #                        agent's instructions. The supervisor runs it on every
 #                        start, so the guest follows the broker's providers.
+#                        ca, first on every start, trusts the extra CAs in
+#                        GUEST_CA (a TLS-inspecting proxy's root), before
+#                        anything downloads.
 #   GUEST_CONFIG         apply's settings, JSON (default /root/guest.json)
+#   GUEST_CA             ca's certificates, PEM (default /root/guest-ca.pem)
 #   BROKER_CA_FILE       the broker's CA certificate, installed as trusted if given
 set -euo pipefail
 
@@ -24,6 +28,7 @@ SANDBOX_USER="${SANDBOX_USER:-agent}"
 SANDBOX_UID="${SANDBOX_UID:-}"
 PROVISION_COMPONENTS="${PROVISION_COMPONENTS:-base sshd git broker docker claude}"
 GUEST_CONFIG="${GUEST_CONFIG:-/root/guest.json}"
+GUEST_CA="${GUEST_CA:-/root/guest-ca.pem}"
 BROKER_CA_FILE="${BROKER_CA_FILE:-}"
 export DEBIAN_FRONTEND=noninteractive
 
@@ -54,6 +59,23 @@ if [[ $EUID -ne 0 ]]; then
   exit 1
 fi
 
+# --- ca: the extra CAs, one file each, replacing the last start's ---
+# No jq here: a first start from a plain image has none yet. Without
+# ca-certificates (the same), base's install trusts them.
+if want ca; then
+  dir=/usr/local/share/ca-certificates/mono-jig-extra
+  rm -rf "$dir"
+  if [[ -s $GUEST_CA ]]; then
+    install -d -m 0755 "$dir"
+    awk -v dir="$dir" '/-----BEGIN CERTIFICATE-----/ { n++; f = sprintf("%s/%d.crt", dir, n) }
+      n { print > f } /-----END CERTIFICATE-----/ { close(f) }' "$GUEST_CA"
+    log "extra CAs: $(find "$dir" -name '*.crt' | wc -l)"
+  fi
+  if command -v update-ca-certificates >/dev/null; then
+    update-ca-certificates --fresh >/dev/null
+  fi
+fi
+
 # --- base: the user and the tools Kiro's and VS Code's remote servers need ---
 if want base; then
   log "base packages"
@@ -62,6 +84,8 @@ if want base; then
     ca-certificates curl tar gzip coreutils diffutils findutils util-linux \
     procps iproute2 netcat-openbsd jq less sudo locales \
     socat python3 python3-venv >/dev/null
+  # Any extra CAs copied in before ca-certificates was (the image build).
+  update-ca-certificates >/dev/null
   # socat: the supervisor's bridge to the broker. python3-venv: mcpcli.
   if ! id "$SANDBOX_USER" >/dev/null 2>&1; then
     log "user $SANDBOX_USER"

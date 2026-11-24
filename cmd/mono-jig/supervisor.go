@@ -81,9 +81,10 @@ type config struct {
 	diskGiB     uint32 // the root disk
 	dockerGiB   uint32 // 0: no Docker
 	rules       []m.PolicyRule
-	mounts      []Mount // host folders (mounts.go)
-	proxy       bool    // the broker's mode is proxy (brokermode.go)
-	proxyAddr   string  // in proxy mode, where the broker's proxy listens
+	mounts      []Mount  // host folders (mounts.go)
+	proxy       bool     // the broker's mode is proxy (brokermode.go)
+	cas         []string // extra CA certificates, PEM (ca.go)
+	proxyAddr   string   // in proxy mode, where the broker's proxy listens
 }
 
 func loadConfig(name, state string) config {
@@ -108,6 +109,7 @@ func loadConfig(name, state string) config {
 	}
 	c.diskGiB, c.dockerGiB = uint32(disk), uint32(docker)
 	c.broker = brokerConfig()
+	c.cas = extraCAs()
 	c.proxy = loadBrokerMode(state) == modeProxy
 	c.broker.Proxy = c.proxy
 	entries, err := allowed(c.broker)
@@ -383,9 +385,12 @@ func provision(ctx context.Context, sb *m.Sandbox, c config, log *slog.Logger) e
 	if err := sb.FS().Write(ctx, guest.ConfigFile, settings); err != nil {
 		return err
 	}
-	first, comps := "", "apply"
+	if err := sb.FS().WriteString(ctx, guestCAFile, strings.Join(c.cas, "")); err != nil {
+		return err
+	}
+	first, comps := "", "ca apply"
 	if !done {
-		comps = firstComponents(ctx, sb, c, log)
+		comps = "ca " + firstComponents(ctx, sb, c, log)
 		log.Info("provisioning the guest (first start)", "components", comps)
 		first = `export DEBIAN_FRONTEND=noninteractive
 if ! command -v socat >/dev/null; then
@@ -396,12 +401,12 @@ fi
 	}
 	script := fmt.Sprintf(`set -euo pipefail
 %s
-export SANDBOX_USER=%s SANDBOX_UID=%d PROVISION_COMPONENTS=%q BROKER_CA_FILE=%s GUEST_CONFIG=%s
+export SANDBOX_USER=%s SANDBOX_UID=%d PROVISION_COMPONENTS=%q BROKER_CA_FILE=%s GUEST_CONFIG=%s GUEST_CA=%s
 bash /root/provision.sh
 home=$(getent passwd %[2]s | cut -d: -f6)
-if [ -d %[7]s ] && [ ! -e "$home/host" ]; then ln -s %[7]s "$home/host"; fi
-mkdir -p %[8]s && touch %[9]s
-`, first, guestUser, guestUID, comps, guestCA, guest.ConfigFile, shareGuest, filepath.Dir(provisioned), provisioned)
+if [ -d %[8]s ] && [ ! -e "$home/host" ]; then ln -s %[8]s "$home/host"; fi
+mkdir -p %[9]s && touch %[10]s
+`, first, guestUser, guestUID, comps, guestCA, guest.ConfigFile, guestCAFile, shareGuest, filepath.Dir(provisioned), provisioned)
 	h, err := sb.ShellStream(ctx, script, m.WithExecUser("root"))
 	if err != nil {
 		return err

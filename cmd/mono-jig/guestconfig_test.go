@@ -97,7 +97,7 @@ func TestGuestConfigProxyMode(t *testing.T) {
 func TestGuestConfigNone(t *testing.T) {
 	var c config
 	g := guestConfig(c)
-	if len(g.Env) != 2 || len(g.Files) != 0 || len(g.Instructions) != 0 {
+	if len(g.Env) != 4 || len(g.Files) != 0 || len(g.Instructions) != 0 {
 		t.Errorf("%+v", g)
 	}
 	if h := hostsLine(c); strings.Contains(h, "127.0.0.1") {

@@ -83,7 +83,8 @@ the web host under `/api/v3`, doesn't fit the route tables yet.*
 
 ### A corporate CA (TLS inspection)
 
-Not handled anywhere. It matters in four places:
+*Since step 3 (done 2026-11-24, below) the first two are handled; the
+Mac's two are still the user's to set up.* It matters in four places:
 
 - **The image build on the Mac.** `apt-get` and Claude Code's installer
   run inside `docker build` or `podman build` and fail verification.
@@ -226,6 +227,7 @@ Each step stands alone and is checked by the existing end-to-end runs.
    *Done 2026-11-24, see [Step 2 as built](#step-2-as-built).*
 3. **Extra CAs**, at image build and every start, with `SSL_CERT_FILE`
    and `REQUESTS_CA_BUNDLE`. Small, and needed on the first day at work.
+   *Done 2026-11-24, see [Step 3 as built](#step-3-as-built).*
 4. **The base image configurable** (`BASE_IMAGE`, `Track.BaseImage`);
    `provision.sh` split into components.
 5. **Agent and Editor**, with Claude Code and VS Code as the first.
@@ -301,6 +303,39 @@ sandbox started from it, are* unverified.
   (each provider under its name, and `image`), but is read generically.
 - GitHub's host: see above.
 
+## Step 3 as built
+
+*2026-11-24. Unit tests, and the certificate split checked with awk on the
+Mac; an image build and a sandbox behind a TLS-inspecting proxy are*
+unverified.
+
+- `mono-jig ca <pem-file>...` records the files (absolute paths, so a
+  rotated file is read again; `--clear` forgets them, no arguments shows
+  them). `JIG_EXTRA_CAS` overrides. Each certificate must parse and be a
+  CA. On a Mac whose proxy root is in the System keychain, one way to get
+  the PEM is `security find-certificate -a -p -c <name>
+  /Library/Keychains/System.keychain` (*unverified*).
+- **The image build** copies them into the context (`ca/`), and the
+  Dockerfile puts them in `/usr/local/share/ca-certificates/mono-jig-build/`
+  before `provision.sh` runs, so its downloads verify; installing
+  `ca-certificates` trusts them, and `base` runs `update-ca-certificates`
+  again. They're part of the base image's tag, so changing them rebuilds
+  it. They stay in that image until the next build.
+- **Every start**: the supervisor writes them to `/root/guest-ca.pem`, and
+  `provision.sh`'s new `ca` component, first, splits them into
+  `/usr/local/share/ca-certificates/mono-jig-extra/` (replacing the last
+  start's) and runs `update-ca-certificates --fresh`. It uses awk, not jq:
+  on a first start from a plain image nothing is installed yet. That
+  `update-ca-certificates` reads subdirectories is *unverified*.
+- The guest's environment always has `SSL_CERT_FILE` and
+  `REQUESTS_CA_BUNDLE` (the system bundle), beside `NODE_EXTRA_CA_CERTS`.
+  They also make Python trust the broker's CA. `AWS_CA_BUNDLE` isn't set:
+  the AWS CLI isn't in the guest.
+- **Not done, on the Mac:** the broker should verify through the
+  keychain (Go's default on macOS), and the AWS MCP proxy under uv
+  likely needs `UV_NATIVE_TLS=1` or `SSL_CERT_FILE` in the supervisor's
+  environment (both *unverified*).
+
 ## The PR marker
 
 The broker decides whether the agent may change a pull or merge request
@@ -349,3 +384,6 @@ labels today).
   `guest/provision.sh` (`apply`); jq 1.8.2 on the Mac for its expressions.
 - Step 2: this repo after fb4d052: `broker/providers/`,
   `cmd/mono-jig/{registry,login_*,settings,guestconfig}.go`.
+- Step 3: this repo after 1bfe2c8: `cmd/mono-jig/{ca,image,supervisor}.go`,
+  `guest/image.Dockerfile`, `guest/provision.sh` (`ca`); OpenSSL 4.1.0 and
+  awk on the Mac for the split.

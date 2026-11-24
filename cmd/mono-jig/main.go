@@ -52,6 +52,9 @@ func usage() {
                           use these AWS profiles (signing in with SSO if needed); none: choose from a list
   logout [gitlab|github|claude|aws]
                           forget them (all, if none named)
+  ca [<pem-file>...|--clear]
+                          extra CA certificates the sandboxes trust, such as a
+                          TLS-inspecting proxy's root; none given: show them
   open <name> [dir]       start the sandbox (creating it the first time) and open VS Code
                           on dir (relative to the sandbox user's home; default: home)
   open <name> [dir] --mount host[:guest][:rw] ...
@@ -109,6 +112,8 @@ func main() {
 		logout(os.Args[2:])
 	case "image":
 		imageCmd(os.Args[2:])
+	case "ca":
+		caCmd(os.Args[2:])
 	case "uninstall":
 		uninstall(os.Args[2:])
 	case "cp":

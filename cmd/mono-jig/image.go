@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strconv"
 	"time"
 
@@ -186,24 +187,33 @@ func baseArgs() []string {
 	}
 }
 
-// baseTag names the base image by everything it's built from.
+// baseTag names the base image by everything it's built from, the
+// extra CAs included.
 func baseTag() string {
 	h := sha256.New()
-	for _, s := range append([]string{guest.ImageDockerfile, guest.ProvisionScript}, baseArgs()...) {
+	for _, s := range slices.Concat([]string{guest.ImageDockerfile, guest.ProvisionScript}, baseArgs(), extraCAs()) {
 		fmt.Fprintf(h, "%d:%s", len(s), s)
 	}
 	return "localhost/mono-jig-base:" + hex.EncodeToString(h.Sum(nil)[:6])
 }
 
 // buildBase builds the base image from the embedded Dockerfile and
-// provision.sh, in a temporary context directory.
+// provision.sh, and the extra CAs (ca/), in a temporary context directory.
 func buildBase(engine string) string {
 	dir, err := os.MkdirTemp("", "mono-jig-base-")
 	if err != nil {
 		fail("%v", err)
 	}
 	defer os.RemoveAll(dir)
-	for name, body := range map[string]string{"Dockerfile": guest.ImageDockerfile, "provision.sh": guest.ProvisionScript} {
+	files := map[string]string{"Dockerfile": guest.ImageDockerfile, "provision.sh": guest.ProvisionScript,
+		"ca/README": "Extra CAs (mono-jig ca), one .crt each.\n"}
+	for i, ca := range extraCAs() {
+		files[fmt.Sprintf("ca/%d.crt", i+1)] = ca
+	}
+	if err := os.Mkdir(filepath.Join(dir, "ca"), 0o755); err != nil {
+		fail("%v", err)
+	}
+	for name, body := range files {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o644); err != nil {
 			fail("%v", err)
 		}
