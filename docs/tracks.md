@@ -211,6 +211,33 @@ its login: the site, its cloud ID (from the site's public
 in the Keychain (`mono-jig-jira`), checked with `GET /rest/api/3/myself`
 before it's stored.
 
+`jig.OAuthMCP` is a hosted MCP server's login for a server no vendor CLI
+holds a token for: the harness is the OAuth client (`oauth/`). `login
+<id>` finds the authorization server from the server's 401 (RFC 9728,
+RFC 8414), registers a public client once (RFC 7591, a loopback
+redirect on a port kept for later logins), signs in in the Mac's browser
+(authorization code, PKCE S256, `resource`), keeps the refresh token in
+the Keychain (`mono-jig-<id>`) and the client in `settings.json`, then
+lists the server's tools against the track's list. Its broker provider
+is a `providers.MCPServer` whose token is an `oauth.Source`: the access
+token in memory until a minute before it expires, then refreshed, a
+rotated refresh token written back in place, with a file lock so two
+sandboxes' brokers never spend one refresh token twice.
+
+```go
+jig.OAuthMCP{
+    ID:     "example",
+    Title:  "Example",
+    URL:    "https://mcp.example.org/",
+    Scopes: []string{"read:all", "offline_access"}, // read scopes, and a refresh token
+    Tools:  []string{"search_items", "get_item"},
+}.CLI()
+```
+
+Servers that make confidential clients (a client secret) aren't
+supported. Logout removes the refresh token; the registered client stays
+at the authorization server.
+
 ### The login half: `jig.ProviderCLI`
 
 ```go

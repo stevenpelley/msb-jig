@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/stevenpelley/msb-jig/broker"
 	"github.com/stevenpelley/msb-jig/broker/hostedmcp"
 	"github.com/stevenpelley/msb-jig/guest"
 )
@@ -18,14 +19,17 @@ import (
 // agent limited to a list of tools (broker/hostedmcp). A track makes one
 // per server. In server mode it's served under <ID>.mcp.broker.internal,
 // in proxy mode under its URL's host. The agent reaches it with mcpcli or
-// curl at the URL in $<NAME>_MCP_URL.
+// curl at the URL in $<ID>_MCP_URL.
 type MCPServer struct {
 	ID       string   // its Name: allowlist group and login name; a-z, 0-9 and -
 	Title    string   // its name in the agent's instructions; default ID
 	URL      string   // the endpoint: https://mcp.example.org/v1/mcp
 	Tools    []string // the tools the agent may call
 	TokenCmd string   // prints the user's token
-	Upstream string   // tests: the server's origin, if not URL's
+	// Token, if set, is the user's token instead of TokenCmd's: an OAuth
+	// client's (oauth.Source.Token), refreshed in the broker.
+	Token    broker.Token
+	Upstream string // tests: the server's origin, if not URL's
 }
 
 var mcpNameRE = regexp.MustCompile(`^[a-z][a-z0-9-]{0,30}$`)
@@ -51,7 +55,10 @@ func (m MCPServer) Hosts(proxy bool) []string {
 }
 
 func (m MCPServer) config() (hostedmcp.Config, error) {
-	c := hostedmcp.Config{Name: m.ID, URL: m.URL, Tools: m.Tools, Token: Token(m.TokenCmd)}
+	c := hostedmcp.Config{Name: m.ID, URL: m.URL, Tools: m.Tools, Token: m.Token}
+	if c.Token == nil {
+		c.Token = Token(m.TokenCmd)
+	}
 	if !mcpNameRE.MatchString(m.ID) {
 		return c, fmt.Errorf("the MCP server's name %q: want a-z, 0-9 and -", m.ID)
 	}
