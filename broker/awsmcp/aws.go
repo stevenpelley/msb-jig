@@ -18,8 +18,8 @@ import (
 	"os/exec"
 	"path/filepath"
 
-	"msb-jig/broker"
-	"msb-jig/broker/mcp"
+	"github.com/stevenpelley/msb-jig/broker"
+	"github.com/stevenpelley/msb-jig/broker/mcp"
 )
 
 // Path is the endpoint.

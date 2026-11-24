@@ -11,7 +11,7 @@ import (
 	"net/http"
 	"strings"
 
-	"msb-jig/broker"
+	"github.com/stevenpelley/msb-jig/broker"
 )
 
 // RefUpdate is one ref command from a push.

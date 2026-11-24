@@ -10,7 +10,7 @@ import (
 	"net/http"
 	"strings"
 
-	"msb-jig/broker"
+	"github.com/stevenpelley/msb-jig/broker"
 )
 
 // Routes is every request the Anthropic provider serves: its upstream,

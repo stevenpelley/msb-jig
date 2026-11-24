@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"msb-jig/broker/providers"
+	"github.com/stevenpelley/msb-jig/broker/providers"
 )
 
 // login's Settings configure the broker; the JIG_* variables override them.

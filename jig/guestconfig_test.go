@@ -5,9 +5,9 @@ import (
 	"strings"
 	"testing"
 
-	"msb-jig/agent"
-	"msb-jig/broker/providers"
-	"msb-jig/guest"
+	"github.com/stevenpelley/msb-jig/agent"
+	"github.com/stevenpelley/msb-jig/broker/providers"
+	"github.com/stevenpelley/msb-jig/guest"
 )
 
 func allOn(proxy bool) config {

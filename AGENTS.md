@@ -6,7 +6,7 @@ than a sandbox product plus settings (what sets it apart from sbx and
 OpenShell). It serves one-shot investigations and vulnerability
 remediation, and everyday development. It limits what the agent can
 reach, mainly over the network, with finer rules than the providers' own
-roles and tokens allow. Design notes plus the code (Go module `msb-jig`,
+roles and tokens allow. Design notes plus the code (Go module `github.com/stevenpelley/msb-jig`,
 `docs/prototype-plan.md`).
 
 **This repository is the library** (since 2026-11-24, split from the

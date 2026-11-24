@@ -6,8 +6,8 @@ import (
 	"net/url"
 	"testing"
 
-	"msb-jig/broker"
-	"msb-jig/broker/providers"
+	"github.com/stevenpelley/msb-jig/broker"
+	"github.com/stevenpelley/msb-jig/broker/providers"
 )
 
 // sbx mode: plain HTTP, Host host.docker.internal:<port>, a session

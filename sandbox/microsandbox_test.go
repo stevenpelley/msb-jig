@@ -5,7 +5,7 @@ import (
 
 	m "github.com/superradcompany/microsandbox/sdk/go"
 
-	"msb-jig/allowlist"
+	"github.com/stevenpelley/msb-jig/allowlist"
 )
 
 func TestEgressRules(t *testing.T) {

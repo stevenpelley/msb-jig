@@ -11,7 +11,7 @@ import (
 
 	m "github.com/superradcompany/microsandbox/sdk/go"
 
-	"msb-jig/allowlist"
+	"github.com/stevenpelley/msb-jig/allowlist"
 )
 
 // Microsandbox runs sandboxes with microsandbox's Go SDK, attached: if

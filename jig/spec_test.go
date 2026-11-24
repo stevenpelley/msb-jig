@@ -5,7 +5,7 @@ import (
 	"slices"
 	"testing"
 
-	"msb-jig/broker"
+	"github.com/stevenpelley/msb-jig/broker"
 )
 
 // The spec carries the mounts (owned by the agent), Docker's disk, the

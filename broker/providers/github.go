@@ -4,8 +4,8 @@ import (
 	"context"
 	"net/http"
 
-	"msb-jig/broker/github"
-	"msb-jig/guest"
+	"github.com/stevenpelley/msb-jig/broker/github"
+	"github.com/stevenpelley/msb-jig/guest"
 )
 
 // GitHub: git, REST and GraphQL, for one user. In server mode under

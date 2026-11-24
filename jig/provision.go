@@ -9,8 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"msb-jig/guest"
-	"msb-jig/sandbox"
+	"github.com/stevenpelley/msb-jig/guest"
+	"github.com/stevenpelley/msb-jig/sandbox"
 )
 
 // provision runs provision.sh as root: all of it on the first start (a

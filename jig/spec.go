@@ -5,8 +5,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"msb-jig/broker"
-	"msb-jig/sandbox"
+	"github.com/stevenpelley/msb-jig/broker"
+	"github.com/stevenpelley/msb-jig/sandbox"
 )
 
 // openSandbox starts the sandbox through the backend, creating it the

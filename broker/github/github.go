@@ -14,7 +14,7 @@ import (
 	"net/url"
 	"strings"
 
-	"msb-jig/broker"
+	"github.com/stevenpelley/msb-jig/broker"
 )
 
 // Checks are the GitHub provider's checks, which the routes (routes.go)

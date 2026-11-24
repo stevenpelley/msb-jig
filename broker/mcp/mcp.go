@@ -12,7 +12,7 @@ import (
 	"net/http"
 	"strings"
 
-	"msb-jig/broker"
+	"github.com/stevenpelley/msb-jig/broker"
 )
 
 // Message is one JSON-RPC message.

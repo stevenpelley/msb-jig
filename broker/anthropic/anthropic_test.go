@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"msb-jig/broker"
-	"msb-jig/broker/providers"
+	"github.com/stevenpelley/msb-jig/broker"
+	"github.com/stevenpelley/msb-jig/broker/providers"
 )
 
 const anthropicHost = "anthropic.broker.internal"

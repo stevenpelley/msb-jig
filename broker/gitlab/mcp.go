@@ -7,8 +7,8 @@ import (
 	"strconv"
 	"strings"
 
-	"msb-jig/broker"
-	"msb-jig/broker/mcp"
+	"github.com/stevenpelley/msb-jig/broker"
+	"github.com/stevenpelley/msb-jig/broker/mcp"
 )
 
 // GitLab's MCP server calls GitLab's API from GitLab's side, where the

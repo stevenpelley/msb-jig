@@ -11,7 +11,7 @@ import (
 	"sync"
 	"testing"
 
-	"msb-jig/broker"
+	"github.com/stevenpelley/msb-jig/broker"
 )
 
 // upstream records what reached it, and answers with a Location on its

@@ -19,8 +19,8 @@ import (
 	"syscall"
 	"time"
 
-	"msb-jig/broker"
-	"msb-jig/broker/mcp"
+	"github.com/stevenpelley/msb-jig/broker"
+	"github.com/stevenpelley/msb-jig/broker/mcp"
 )
 
 // Bridge is the plumbing between HTTP and AWS's stdio proxy.

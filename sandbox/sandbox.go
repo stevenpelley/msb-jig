@@ -8,7 +8,7 @@ import (
 	"context"
 	"time"
 
-	"msb-jig/allowlist"
+	"github.com/stevenpelley/msb-jig/allowlist"
 )
 
 // Backend runs sandboxes.

@@ -35,8 +35,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"msb-jig/allowlist"
-	"msb-jig/editor"
+	"github.com/stevenpelley/msb-jig/allowlist"
+	"github.com/stevenpelley/msb-jig/editor"
 )
 
 func usage() {

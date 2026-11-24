@@ -7,8 +7,8 @@ import (
 	"net/url"
 	"strings"
 
-	"msb-jig/broker/gitlab"
-	"msb-jig/guest"
+	"github.com/stevenpelley/msb-jig/broker/gitlab"
+	"github.com/stevenpelley/msb-jig/guest"
 )
 
 // GitLab: git, LFS, REST, GraphQL and GitLab's MCP server, for one user.

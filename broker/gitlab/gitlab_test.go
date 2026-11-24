@@ -14,8 +14,8 @@ import (
 	"sync"
 	"testing"
 
-	"msb-jig/broker/brokertest"
-	"msb-jig/broker/providers"
+	"github.com/stevenpelley/msb-jig/broker/brokertest"
+	"github.com/stevenpelley/msb-jig/broker/providers"
 )
 
 const host = "gitlab.broker.internal"

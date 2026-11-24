@@ -11,9 +11,9 @@ import (
 	"sync"
 	"testing"
 
-	"msb-jig/broker"
-	"msb-jig/broker/brokertest"
-	"msb-jig/broker/providers"
+	"github.com/stevenpelley/msb-jig/broker"
+	"github.com/stevenpelley/msb-jig/broker/brokertest"
+	"github.com/stevenpelley/msb-jig/broker/providers"
 )
 
 const ghHost = "github.broker.internal"

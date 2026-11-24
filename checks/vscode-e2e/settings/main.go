@@ -10,7 +10,7 @@ import (
 	"encoding/json"
 	"os"
 
-	"msb-jig/editor"
+	"github.com/stevenpelley/msb-jig/editor"
 )
 
 func main() {

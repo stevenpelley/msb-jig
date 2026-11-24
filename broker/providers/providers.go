@@ -23,8 +23,8 @@ import (
 	"slices"
 	"strings"
 
-	"msb-jig/broker"
-	"msb-jig/guest"
+	"github.com/stevenpelley/msb-jig/broker"
+	"github.com/stevenpelley/msb-jig/guest"
 )
 
 // Hostnames the sandbox uses for each provider in server mode. In proxy

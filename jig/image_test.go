@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"msb-jig/guest"
+	"github.com/stevenpelley/msb-jig/guest"
 )
 
 func TestParseImageFile(t *testing.T) {

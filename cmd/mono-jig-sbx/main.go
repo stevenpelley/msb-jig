@@ -27,8 +27,8 @@ import (
 	"strings"
 	"time"
 
-	"msb-jig/broker"
-	"msb-jig/broker/providers"
+	"github.com/stevenpelley/msb-jig/broker"
+	"github.com/stevenpelley/msb-jig/broker/providers"
 )
 
 func fail(f string, a ...any) {

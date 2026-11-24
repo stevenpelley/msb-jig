@@ -1,4 +1,4 @@
-module msb-jig
+module github.com/stevenpelley/msb-jig
 
 go 1.26.0
 

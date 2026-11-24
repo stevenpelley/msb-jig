@@ -4,8 +4,8 @@ import (
 	"context"
 	"net/http"
 
-	"msb-jig/broker/anthropic"
-	"msb-jig/guest"
+	"github.com/stevenpelley/msb-jig/broker/anthropic"
+	"github.com/stevenpelley/msb-jig/guest"
 )
 
 // AnthropicAPIHost is the Claude API's real host, which proxy mode

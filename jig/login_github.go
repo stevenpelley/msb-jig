@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"msb-jig/broker/providers"
+	"github.com/stevenpelley/msb-jig/broker/providers"
 )
 
 // GitHub's command-line side (ProviderCLI).

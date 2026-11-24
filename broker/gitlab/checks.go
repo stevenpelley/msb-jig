@@ -11,8 +11,8 @@ import (
 	"github.com/vektah/gqlparser/v2/ast"
 	"github.com/vektah/gqlparser/v2/parser"
 
-	"msb-jig/broker"
-	"msb-jig/broker/gitproto"
+	"github.com/stevenpelley/msb-jig/broker"
+	"github.com/stevenpelley/msb-jig/broker/gitproto"
 )
 
 // The checks on the GitLab routes (routes.go).

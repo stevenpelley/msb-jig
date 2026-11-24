@@ -21,7 +21,7 @@ import (
 	"sync"
 	"testing"
 
-	"msb-jig/broker"
+	"github.com/stevenpelley/msb-jig/broker"
 )
 
 const (

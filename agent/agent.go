@@ -8,8 +8,8 @@ import (
 	_ "embed"
 	"strings"
 
-	"msb-jig/broker/providers"
-	"msb-jig/guest"
+	"github.com/stevenpelley/msb-jig/broker/providers"
+	"github.com/stevenpelley/msb-jig/guest"
 )
 
 // Agent is a coding agent.

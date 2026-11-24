@@ -1,8 +1,8 @@
 package github
 
 import (
-	"msb-jig/broker"
-	"msb-jig/broker/gitproto"
+	"github.com/stevenpelley/msb-jig/broker"
+	"github.com/stevenpelley/msb-jig/broker/gitproto"
 )
 
 // Config is what the provider needs from mono-jig login.

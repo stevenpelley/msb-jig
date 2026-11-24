@@ -15,7 +15,7 @@ import (
 	"strconv"
 	"time"
 
-	"msb-jig/guest"
+	"github.com/stevenpelley/msb-jig/guest"
 )
 
 // Sandbox images. mono-jig image build builds, with Docker or Podman

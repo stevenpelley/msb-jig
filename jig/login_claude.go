@@ -5,7 +5,7 @@ import (
 	"os"
 	"strings"
 
-	"msb-jig/broker/providers"
+	"github.com/stevenpelley/msb-jig/broker/providers"
 )
 
 // Claude's command-line side (ProviderCLI): the Anthropic provider, for

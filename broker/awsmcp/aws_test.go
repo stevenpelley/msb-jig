@@ -16,9 +16,9 @@ import (
 
 	"log/slog"
 
-	"msb-jig/broker"
-	"msb-jig/broker/awsmcp"
-	"msb-jig/broker/providers"
+	"github.com/stevenpelley/msb-jig/broker"
+	"github.com/stevenpelley/msb-jig/broker/awsmcp"
+	"github.com/stevenpelley/msb-jig/broker/providers"
 )
 
 // awsProtocolVersion is what the broker asks the proxy for (bridge.go).

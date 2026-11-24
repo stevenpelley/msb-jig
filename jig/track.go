@@ -5,10 +5,10 @@ import (
 	"path/filepath"
 	"strings"
 
-	"msb-jig/agent"
-	"msb-jig/editor"
-	"msb-jig/guest"
-	"msb-jig/sandbox"
+	"github.com/stevenpelley/msb-jig/agent"
+	"github.com/stevenpelley/msb-jig/editor"
+	"github.com/stevenpelley/msb-jig/guest"
+	"github.com/stevenpelley/msb-jig/sandbox"
 )
 
 // Track is what differs between the personal and the work harness
