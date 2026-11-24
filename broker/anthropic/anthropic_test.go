@@ -116,11 +116,24 @@ func TestAnthropicStreams(t *testing.T) {
 	}
 }
 
+// Reads of the account pass.
+func TestAnthropicAccountReads(t *testing.T) {
+	ok := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {})
+	srv, calls := anthropicBroker(t, ok, "echo sk-ant-oat01-real")
+	if resp := anthropicReq(t, srv, "GET", "/api/oauth/profile", "", nil); resp.StatusCode != http.StatusOK || calls.Load() != 1 {
+		t.Errorf("GET /api/oauth/profile: %d, %d calls", resp.StatusCode, calls.Load())
+	}
+}
+
 func TestAnthropicRefusals(t *testing.T) {
 	ok := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {})
 	srv, calls := anthropicBroker(t, ok, "echo sk-ant-oat01-real")
 	if resp := anthropicReq(t, srv, "GET", "/admin", "", nil); resp.StatusCode != http.StatusForbidden {
 		t.Errorf("path outside /v1/ and /api/: %d", resp.StatusCode)
+	}
+	// Writes to the account's OAuth endpoints could mint a credential.
+	if resp := anthropicReq(t, srv, "POST", "/api/oauth/claude_cli/create_api_key", "{}", nil); resp.StatusCode != http.StatusForbidden {
+		t.Errorf("create_api_key: %d", resp.StatusCode)
 	}
 	srv2, calls2 := anthropicBroker(t, ok, "false")
 	if resp := anthropicReq(t, srv2, "POST", "/v1/messages", "{}", nil); resp.StatusCode != http.StatusServiceUnavailable {

@@ -89,13 +89,19 @@ func (g *Checks) sameProject(c *broker.Call, pid, target string) bool {
 // --- request bodies ---
 
 // params merges query parameters with a JSON or form body into flat
-// strings, the shape GitLab's REST API takes.
+// strings, the shape GitLab's REST API takes, as Rails does: the body's
+// value wins, and the last of a repeated key. A JSON key twice (ignoring
+// case) is refused (broker.DecodeJSON), and so is _method, which Rack
+// reads as the request's real method.
 func params(c *broker.Call) (map[string]string, error) {
 	out := map[string]string{}
 	for k, v := range c.R.URL.Query() {
 		if len(v) > 0 {
 			out[k] = v[len(v)-1]
 		}
+	}
+	if _, ok := out["_method"]; ok {
+		return nil, fmt.Errorf("_method isn't accepted: it would change the request's method")
 	}
 	body, err := c.ReadBody()
 	if err != nil {
@@ -108,8 +114,8 @@ func params(c *broker.Call) (map[string]string, error) {
 	switch {
 	case strings.HasPrefix(ct, "application/json"):
 		var m map[string]any
-		if err := json.Unmarshal(body, &m); err != nil {
-			return nil, fmt.Errorf("body isn't a JSON object")
+		if err := broker.DecodeJSON(body, &m); err != nil {
+			return nil, fmt.Errorf("body isn't a JSON object with unique keys: %v", err)
 		}
 		for k, v := range m {
 			switch x := v.(type) {
@@ -131,6 +137,9 @@ func params(c *broker.Call) (map[string]string, error) {
 		}
 	default:
 		return nil, fmt.Errorf("unsupported Content-Type %q for an API write", ct)
+	}
+	if _, ok := out["_method"]; ok {
+		return nil, fmt.Errorf("_method isn't accepted: it would change the request's method")
 	}
 	return out, nil
 }

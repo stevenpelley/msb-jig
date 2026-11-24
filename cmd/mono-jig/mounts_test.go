@@ -13,9 +13,12 @@ func TestParseMount(t *testing.T) {
 		spec string
 		want Mount
 	}{
-		{dir, Mount{Host: dir, Guest: "/mnt/" + base}},
+		// Read-only unless :rw.
+		{dir, Mount{Host: dir, Guest: "/mnt/" + base, ReadOnly: true}},
 		{dir + ":ro", Mount{Host: dir, Guest: "/mnt/" + base, ReadOnly: true}},
-		{dir + ":/mnt/src", Mount{Host: dir, Guest: "/mnt/src"}},
+		{dir + ":rw", Mount{Host: dir, Guest: "/mnt/" + base}},
+		{dir + ":/mnt/src", Mount{Host: dir, Guest: "/mnt/src", ReadOnly: true}},
+		{dir + ":/mnt/src:rw", Mount{Host: dir, Guest: "/mnt/src"}},
 		{dir + ":/mnt/a/../src:ro", Mount{Host: dir, Guest: "/mnt/src", ReadOnly: true}},
 	}
 	for _, c := range ok {

@@ -80,9 +80,11 @@ func val(p *string) string {
 }
 
 // GraphQL parses the document rather than trusting operation names.
-// Queries pass; a mutation is decided by its entry in mutations.
+// Queries pass; a mutation is decided by its entry in mutations. The
+// body is read with broker.ReadJSONBody: no "QUERY" beside "query", no
+// query in the URL.
 func (g *Checks) GraphQL(c *broker.Call) broker.Decision {
-	b, err := c.ReadBody()
+	b, err := c.ReadJSONBody()
 	if err != nil {
 		return broker.Deny("%v", err)
 	}

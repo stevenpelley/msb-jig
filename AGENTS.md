@@ -47,6 +47,11 @@ docs keeps the names of things that are gone (`investigator-net`,
    **Not air-tight, on purpose** (2026-11-22): the harness makes the safe
    path the easy one; it doesn't stop deliberate acts. A user who pastes
    a token into the sandbox can use it, and we don't try to prevent that.
+   Nor does the allowlist stop data leaving: some allowed hosts take
+   uploads to storage anyone can own, given a signed URL
+   (`*.blob.core.windows.net`, `*.googleapis.com`, and `*.amazonaws.com`
+   when AWS isn't brokered). It limits where the agent reaches with
+   credentials, not what it can send.
 
    **No dependency on sbx** (2026-11-22): assume work won't allow Docker
    accounts. Prototyped on sbx, then Lima; it now runs on microsandbox
@@ -130,9 +135,9 @@ The agent runs on the Mac itself and asks before running commands.
 | `docs/enforcement.md` | Making the harness required (2026-11-22): threats, model-gated chain of trust, network and provider-side options, small provider asks |
 | `broker/providers/` | **Start reviewing here.** `Build` lists the providers: what turns each on, and the `Routes` function that holds its policy |
 | `broker/<provider>/routes.go` | `Routes` (`gitlab`, `github`; in `anthropic.go` and `aws.go` for the two without per-request rules): the provider's upstreams with their credentials, then its route table (every request it serves, the check it runs, where it goes); anything unmatched is denied. The checks are beside it (`checks.go`, `mcp.go`, `graphql.go`); tests run through `providers.Build` |
-| `broker/` | The core: `broker.go` (routes, matching, decision log), `policy.go` (the shared rules: agent branches, title tags), `upstream.go` (credential injection, header rewriting), `server.go` (routing by host, SNI check), `listen.go` (TLS, Unix socket, token commands), `ca.go` (the name-constrained CA). `gitproto/` parses pushes, `mcp/` JSON-RPC, `brokertest/` the shared test fixtures |
+| `broker/` | The core: `broker.go` (routes, matching, decision log), `policy.go` (the shared rules: agent branches, title tags), `upstream.go` (credential injection, header rewriting), `request.go` (reading requests as the provider does: no dot segments, no case-variant JSON keys, no URL parameters beside a checked body), `server.go` (routing by host, SNI check), `listen.go` (TLS, Unix socket, token commands), `ca.go` (the name-constrained CA). `gitproto/` parses pushes, `mcp/` JSON-RPC, `brokertest/` the shared test fixtures |
 | `allowlist/` | The egress allowlist: groups (`lists/sbx-balanced.yaml`, copied from sbx's balanced policy, and `lists/groups.yaml`, ours and the providers'), the base layer, user and org layers; a provider's hosts drop out when the broker serves it |
-| `cmd/mono-jig/` | The CLI. `setup`, `login`, `logout`, `open`, `stop`, `uninstall` for users (`login.go`; settings in `~/.mono-jig/settings.json`, tokens in the Keychain, extra hosts in `~/.mono-jig/allowlist.yaml`); beneath them `up\|run\|down\|shell\|code\|ssh-config\|rm <name>` (`lifecycle.go`, `supervisor.go`: broker plus VM through the microsandbox Go SDK; `remote.go`: SSH and VS Code); `image.go`: `image build`, your own image from a Dockerfile (Docker or Podman, then `msb load`); `mounts.go`: the exchange folder, `--mount` at create, `cp`; `allowlist` prints the compiled list; `ssh-setup` for sshd-based sandboxes |
+| `cmd/mono-jig/` | The CLI. `setup`, `login`, `logout`, `open`, `stop`, `uninstall` for users (`login.go`; settings in `~/.mono-jig/settings.json`, tokens in the Keychain, extra hosts in `~/.mono-jig/allowlist.yaml`); beneath them `up\|run\|down\|shell\|code\|ssh-config\|rm <name>` (`lifecycle.go`, `supervisor.go`: broker plus VM through the microsandbox Go SDK; `remote.go`: SSH and VS Code); `image.go`: `image build`, your own image from a Dockerfile (Docker or Podman, then `msb load`); `mounts.go`: the exchange folder, `--mount` at create (read-only unless `:rw`), `cp`; `allowlist` prints the compiled list; `ssh-setup` for sshd-based sandboxes |
 | `cmd/mono-jig-sbx/` | The broker for an sbx sandbox: on the Mac's loopback, plain HTTP, behind a session token |
 | `editor/` | How the editor reaches a sandbox: per-sandbox SSH keys and config, the harness's VS Code settings |
 | `guest/` | What goes into the VM: `provision.sh` (one script for the image and the microsandbox guest), `install-keys.sh`, the image's `Dockerfile`, `mcpcli/` (the agent's MCP client, copied from the `sbx-mcp-client` skill) |
@@ -144,6 +149,12 @@ The agent runs on the Mac itself and asks before running commands.
   (`go vet` doesn't check formatting; `gofmt -l` lists unformatted
   files without failing, hence the `test -z`), and `checks/step1-docker.sh`
   (needs Docker; builds `mono-jig-sandbox:dev`).
+- A check reads a request the way the provider will, or the request means
+  one thing to the broker and another upstream. Read bodies with
+  `ReadJSONBody` or `DecodeJSON` (`broker/request.go`), never plain
+  `json.Unmarshal` into a struct (Go matches keys ignoring case); don't
+  read a body while the URL's parameters could stand in for it; on
+  GitLab, refuse text that holds quick actions (`/merge`, `/approve`).
 - Research notes carry the date and tool versions they were checked
   against. Mark anything not tested or not confirmed in a source as
   *unverified*, and list sources at the end.

@@ -20,7 +20,7 @@ import (
 // --- REST checks ---
 
 // MRCreate: from an agent branch, into the same project, with a tagged
-// title, without arranging a merge.
+// title, without arranging a merge or a quick action.
 func (g *Checks) MRCreate(c *broker.Call) broker.Decision {
 	ps, err := params(c)
 	if err != nil {
@@ -34,19 +34,20 @@ func (g *Checks) MRCreate(c *broker.Call) broker.Decision {
 	source := ps["source_branch"]
 	return broker.All(
 		noAutoMerge(ps),
+		noQuickActions(ps),
 		broker.AgentBranch(g.User, source),
 		broker.TaggedTitle(g.User, opt(ps, "title"), true),
 	)
 }
 
 // MRUpdate: only a merge request from an agent branch; a new title must
-// be tagged; no merge arranged.
+// be tagged; no merge arranged, no quick action.
 func (g *Checks) MRUpdate(c *broker.Call) broker.Decision {
 	ps, err := params(c)
 	if err != nil {
 		return broker.Deny("%v", err)
 	}
-	if d := noAutoMerge(ps); !d.Allow {
+	if d := broker.All(noAutoMerge(ps), noQuickActions(ps)); !d.Allow {
 		return d
 	}
 	return broker.All(
@@ -56,10 +57,14 @@ func (g *Checks) MRUpdate(c *broker.Call) broker.Decision {
 }
 
 // MRNote: notes, discussions and resolving them, only on a merge request
-// from an agent branch.
+// from an agent branch, and without a quick action.
 func (g *Checks) MRNote(c *broker.Call) broker.Decision {
-	if _, err := params(c); err != nil { // reads the body, so it's forwarded whole
+	ps, err := params(c)
+	if err != nil {
 		return broker.Deny("%v", err)
+	}
+	if d := noQuickActions(ps); !d.Allow {
+		return d
 	}
 	return g.existing(c)
 }
@@ -70,11 +75,76 @@ func (g *Checks) existing(c *broker.Call) broker.Decision {
 	return broker.ExistingFromAgentBranch(g.User, g.mrSource(c, pid, c.Var("iid")))
 }
 
+// noAutoMerge refuses a request that arranges a merge. GitLab reads
+// booleans loosely ("1", "yes", "t", "on"…), so anything but a false
+// value counts as asking.
 func noAutoMerge(ps map[string]string) broker.Decision {
-	if ps["merge_when_pipeline_succeeds"] == "true" || ps["auto_merge"] == "true" {
-		return broker.Deny("%s (auto-merge)", broker.NeverMerge)
+	for _, k := range []string{"merge_when_pipeline_succeeds", "auto_merge"} {
+		if v, ok := ps[k]; ok && !falseValue(v) {
+			return broker.Deny("%s (%s)", broker.NeverMerge, k)
+		}
 	}
 	return broker.Allow()
+}
+
+func falseValue(v string) bool {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "", "0", "f", "false", "n", "no", "off", "null":
+		return true
+	}
+	return false
+}
+
+// quickActionRE is a line GitLab would run as a quick action: "/merge",
+// "/approve", "/title x" (a slash and a word at the start of a line).
+// A path such as "/usr/bin/env" isn't one.
+var quickActionRE = regexp.MustCompile(`(?m)^[ \t]*/[A-Za-z_]+([ \t].*)?\r?$`)
+
+// noQuickActions refuses text GitLab would run as quick actions. GitLab
+// runs them in notes and in merge request descriptions, with the user's
+// rights: "/merge" or "/approve" in a comment would do what the routes
+// refuse. Every value is checked, including the strings inside JSON
+// values, since which fields GitLab scans isn't ours to track.
+func noQuickActions(ps map[string]string) broker.Decision {
+	for k, v := range ps {
+		if a := quickAction(v); a != "" {
+			return broker.Deny("%s holds the quick action %q: GitLab would run it (quick actions aren't allowed through the broker)", k, a)
+		}
+	}
+	return broker.Allow()
+}
+
+// quickAction returns the first quick action in s, or in the strings of
+// s parsed as JSON.
+func quickAction(s string) string {
+	if m := quickActionRE.FindString(s); m != "" {
+		return strings.TrimSpace(m)
+	}
+	var v any
+	if strings.ContainsAny(s, "[{") && json.Unmarshal([]byte(s), &v) == nil {
+		return quickActionIn(v)
+	}
+	return ""
+}
+
+func quickActionIn(v any) string {
+	switch x := v.(type) {
+	case string:
+		return quickAction(x)
+	case map[string]any:
+		for _, e := range x {
+			if a := quickActionIn(e); a != "" {
+				return a
+			}
+		}
+	case []any:
+		for _, e := range x {
+			if a := quickActionIn(e); a != "" {
+				return a
+			}
+		}
+	}
+	return ""
 }
 
 func (g *Checks) BranchDelete(c *broker.Call) broker.Decision {
@@ -87,13 +157,25 @@ func (g *Checks) BranchDelete(c *broker.Call) broker.Decision {
 // GraphQLQueriesOnly parses the documents rather than trusting operation
 // names; only documents whose every operation is a query pass. No
 // mutation is on the list yet (glab uses REST for writes).
+//
+// GitLab reads the query from its merged parameters, so the broker reads
+// it the way GitLab would: on GET, each parameter at most once (Rails
+// takes the last, url.Values.Get the first); on POST, nothing in the URL
+// (a body Rails doesn't parse, say text/plain, would leave the URL's
+// query to run) and no key twice (broker.ReadJSONBody).
 func GraphQLQueriesOnly(c *broker.Call) broker.Decision {
 	var docs []string
 	switch c.R.Method {
 	case http.MethodGet:
-		docs = []string{c.R.URL.Query().Get("query")}
+		q := c.R.URL.Query()
+		for k, v := range q {
+			if len(v) > 1 {
+				return broker.Deny("the GraphQL parameter %s appears more than once", k)
+			}
+		}
+		docs = []string{q.Get("query")}
 	default:
-		body, err := c.ReadBody()
+		body, err := c.ReadJSONBody()
 		if err != nil {
 			return broker.Deny("%v", err)
 		}

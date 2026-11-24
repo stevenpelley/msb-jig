@@ -32,12 +32,14 @@ var Methods = map[string]bool{
 // Read reads the call's body as one JSON-RPC request with an allowed
 // method. Not one, it returns a denial, written as a JSON-RPC error:
 // batches, responses to server requests (sampling, elicitation; none are
-// expected) and other methods are refused.
+// expected) and other methods are refused, and so are parameters in the
+// URL and keys that repeat ignoring case (broker.ReadJSONBody), at any
+// depth, so the params a check decodes are the ones the server reads.
 func Read(c *broker.Call) (*Message, broker.Decision) {
 	var id json.RawMessage
 	code := -32600
 	c.DenyWith(func(w http.ResponseWriter, reason string) { RPCError(w, id, code, "mono-jig broker: "+reason) })
-	body, err := c.ReadBody()
+	body, err := c.ReadJSONBody()
 	if err != nil {
 		return nil, broker.Deny("%v", err)
 	}

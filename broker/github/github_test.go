@@ -197,6 +197,12 @@ func TestGitHubAPI(t *testing.T) {
 		{"POST", "/api/graphql", gql(create, `{"input":{"repositoryId":"R","baseRefName":"main","headRefName":"agent/alice/x","title":"Fix"}}`), false},
 		{"POST", "/api/graphql", gql(create, `{"input":{"repositoryId":"R","baseRefName":"main","headRefName":"feature","title":"[agent/alice] Fix"}}`), false},
 		{"POST", "/api/graphql", gql(create, `{"input":{"repositoryId":"R","baseRefName":"main","headRefName":"agent/alice/x","headRepositoryId":"F","title":"[agent/alice] Fix"}}`), false},
+		// A key twice, ignoring case: Go would read the second, GitHub the first.
+		{"POST", "/api/graphql", `{"query":"mutation { mergePullRequest(input:{pullRequestId:\"P\"}) { clientMutationId } }","QUERY":"query { viewer { login } }"}`, false},
+		{"POST", "/api/v3/repos/octo/dotfiles/pulls", `{"title":"[agent/alice] Fix","head":"agent/alice/x","head":"feature","base":"main"}`, false},
+		// No parameters in the URL beside a checked body.
+		{"POST", "/api/graphql?query=mutation+%7B+m+%7D", gql(`query { viewer { login } }`, ""), false},
+		{"PATCH", "/api/v3/repos/octo/dotfiles/pulls/1?title=untagged", `{"body":"more"}`, false},
 		// Literal arguments, not variables.
 		{"POST", "/api/graphql", gql(`mutation { createPullRequest(input:{repositoryId:"R", baseRefName:"main", headRefName:"agent/alice/x", title:"[agent/alice] Fix"}) { clientMutationId } }`, ""), true},
 		{"POST", "/api/graphql", gql(`mutation { createPullRequest(input:{repositoryId:"R", baseRefName:"main", headRefName:"main", title:"[agent/alice] Fix"}) { clientMutationId } }`, ""), false},

@@ -83,9 +83,11 @@ func (g *Checks) MCPCall(c *broker.Call) broker.Decision {
 	}
 	var a toolArgs
 	if len(call.Arguments) > 0 {
-		if err := json.Unmarshal(call.Arguments, &a); err != nil {
+		var all map[string]any
+		if json.Unmarshal(call.Arguments, &a) != nil || json.Unmarshal(call.Arguments, &all) != nil {
 			return broker.Deny("bad arguments")
 		}
+		a.flat = flatten(all)
 	}
 	c.Note("repo", rawString(a.ProjectID))
 	return writeTools[call.Name](g, c, &a)
@@ -104,10 +106,37 @@ type toolArgs struct {
 	Branch          *string         `json:"branch"`
 	StartProject    string          `json:"start_project"`
 	Method          string          `json:"method"`
+
+	flat map[string]string // every argument, as params gives REST's
 }
 
-// saveMergeRequest creates (no merge_request_iid) or updates one.
+// flatten makes arguments the shape params gives: strings as they are,
+// other values as JSON.
+func flatten(all map[string]any) map[string]string {
+	out := map[string]string{}
+	for k, v := range all {
+		switch x := v.(type) {
+		case string:
+			out[k] = x
+		case nil:
+		default:
+			b, _ := json.Marshal(x)
+			out[k] = string(b)
+		}
+	}
+	return out
+}
+
+// saveMergeRequest creates (no merge_request_iid) or updates one, named
+// by project_id and merge_request_iid only: one named by url could be
+// taken for a create. No merge arranged, no quick action (as on REST).
 func (g *Checks) saveMergeRequest(c *broker.Call, a *toolArgs) broker.Decision {
+	if a.URL != "" {
+		return broker.Deny("save_merge_request with url isn't on the broker's list: give project_id and merge_request_iid")
+	}
+	if d := broker.All(noAutoMerge(a.flat), noQuickActions(a.flat)); !d.Allow {
+		return d
+	}
 	iid := rawString(a.MergeRequestIID)
 	if iid == "" {
 		if len(a.TargetProjectID) > 0 && string(a.TargetProjectID) != "null" {
@@ -128,8 +157,11 @@ func (g *Checks) saveMergeRequest(c *broker.Call, a *toolArgs) broker.Decision {
 }
 
 // saveNote comments on or reviews a merge request from an agent branch;
-// never approves.
+// never approves, and runs no quick action.
 func (g *Checks) saveNote(c *broker.Call, a *toolArgs) broker.Decision {
+	if d := noQuickActions(a.flat); !d.Allow {
+		return d
+	}
 	switch a.Method {
 	case "approve", "unapprove":
 		return broker.Deny(broker.NeverApprove)

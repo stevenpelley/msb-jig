@@ -17,14 +17,20 @@ import (
 
 // Host folders in the sandbox. Every sandbox has an exchange folder,
 // <state>/share on the Mac, at /mnt/host in the guest (and ~/host, a link
-// to it). More folders are mounted with --mount host[:guest][:ro] when the
-// sandbox is created (mono-jig up or open): microsandbox can't change
+// to it), the one folder the agent writes on the Mac by default: nothing
+// on the Mac runs from it. More folders are mounted with
+// --mount host[:guest][:rw] when the sandbox is created (mono-jig up or open): microsandbox can't change
 // a sandbox's mounts afterwards, so the list is saved in
 // <state>/mounts.json, the supervisor applies it at create, and a sandbox
 // that exists refuses a new one (mono-jig rm first). Guest paths are
 // under /mnt: the agent's home is made at the first start, and a mount
 // there before it would leave it root's. mono-jig cp copies single
 // files either way without a mount.
+//
+// Mounts are read-only unless :rw says otherwise (docs/design.md, "Don't
+// mount host files read-write"): in a writable repo the agent could plant
+// .git/hooks, core.fsmonitor or .vscode/settings.json, which the Mac's own
+// tools would later run outside the sandbox, with the user's credentials.
 
 const (
 	guestMounts = "/mnt"
@@ -40,17 +46,17 @@ type Mount struct {
 	ReadOnly bool   `json:"readOnly,omitempty"`
 }
 
-// parseMount reads host[:guest][:ro]. The guest path defaults to
-// /mnt/<the host folder's name>.
+// parseMount reads host[:guest][:ro|:rw]: read-only unless :rw. The
+// guest path defaults to /mnt/<the host folder's name>.
 func parseMount(spec string) (Mount, error) {
 	parts := strings.Split(spec, ":")
-	var mt Mount
-	if n := len(parts); n > 1 && parts[n-1] == "ro" {
-		mt.ReadOnly = true
+	mt := Mount{ReadOnly: true}
+	if n := len(parts); n > 1 && (parts[n-1] == "ro" || parts[n-1] == "rw") {
+		mt.ReadOnly = parts[n-1] == "ro"
 		parts = parts[:n-1]
 	}
 	if len(parts) > 2 || parts[0] == "" {
-		return mt, fmt.Errorf("--mount %s: want host[:guest][:ro]", spec)
+		return mt, fmt.Errorf("--mount %s: want host[:guest][:ro|:rw]", spec)
 	}
 	host, err := filepath.Abs(expandHome(parts[0]))
 	if err != nil {
@@ -94,6 +100,18 @@ func splitMounts(args []string) (rest, specs []string) {
 	return rest, specs
 }
 
+// inRepo returns the folder holding .git at or above dir, or "".
+func inRepo(dir string) string {
+	for d := dir; ; d = filepath.Dir(d) {
+		if _, err := os.Stat(filepath.Join(d, ".git")); err == nil {
+			return d
+		}
+		if filepath.Dir(d) == d {
+			return ""
+		}
+	}
+}
+
 func mountsFile(state string) string { return filepath.Join(state, "mounts.json") }
 
 // saveMounts records the mounts for a sandbox about to be created.
@@ -106,6 +124,9 @@ func saveMounts(name, state string, specs []string) {
 		}
 		if slices.ContainsFunc(ms, func(o Mount) bool { return o.Guest == mt.Guest }) {
 			fail("--mount: two folders at %s", mt.Guest)
+		}
+		if repo := inRepo(mt.Host); !mt.ReadOnly && repo != "" {
+			fmt.Fprintf(os.Stderr, "warning: %s is mounted read-write and is in the git repository %s: the agent can write hooks and settings that git and your editor run on the Mac\n", mt.Host, repo)
 		}
 		ms = append(ms, mt)
 	}

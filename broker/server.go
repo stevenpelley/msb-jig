@@ -7,7 +7,9 @@ import (
 )
 
 // Server routes each request to the provider for its hostname, after the
-// checks every provider shares.
+// checks every provider shares: no absolute-form target, the TLS name
+// matching the Host, no dot segments in the path (request.go), and no
+// credential or method override from the sandbox.
 type Server struct {
 	// Providers by hostname, e.g. "gitlab.broker.internal".
 	Providers map[string]http.Handler
@@ -17,6 +19,10 @@ type Server struct {
 // from every outgoing one: the sandbox holds only placeholders, and an
 // Upstream's Auth sets the real credential.
 var credentialHeaders = []string{"Authorization", "Proxy-Authorization", "Private-Token", "Job-Token", "Cookie", "X-Jig-Session", "X-Api-Key"}
+
+// overrideHeaders would let a request routed as one method run upstream
+// as another (Rack's MethodOverride and the like): dropped.
+var overrideHeaders = []string{"X-Http-Method-Override", "X-Http-Method", "X-Method-Override"}
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Absolute-form request targets would let a client name another host.
@@ -40,7 +46,11 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		HTTPError(w, http.StatusNotFound, "no provider for host "+host)
 		return
 	}
-	for _, h := range credentialHeaders {
+	if why := badPath(r.URL.EscapedPath()); why != "" {
+		HTTPError(w, http.StatusBadRequest, why)
+		return
+	}
+	for _, h := range append(credentialHeaders, overrideHeaders...) {
 		r.Header.Del(h)
 	}
 	p.ServeHTTP(w, r)

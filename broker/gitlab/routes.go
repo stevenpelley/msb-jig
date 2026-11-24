@@ -26,7 +26,8 @@ func Routes(up broker.Upstreams, c Config) []broker.Route {
 	const p = "/api/v4/projects/{project}"
 	const mr = p + "/merge_requests/{iid}"
 	return []broker.Route{
-		// GitLab's MCP server: each tool call is checked (mcp.go).
+		// GitLab's MCP server: each tool call is checked against the tool
+		// lists readTools and writeTools (mcp.go).
 		{Method: "POST", Path: "/api/v4/mcp", Op: "mcp", Check: gl.MCPCall, To: mcp},
 		{Method: "GET DELETE", Path: "/api/v4/mcp", Op: "mcp.session", Check: broker.Read, To: mcp},
 
@@ -39,7 +40,8 @@ func Routes(up broker.Upstreams, c Config) []broker.Route {
 		// REST: reads.
 		{Method: "GET HEAD", Path: "/api/v4/{path...}", Op: "api.read", Check: broker.Read, To: api},
 
-		// REST: merge requests from agent branches.
+		// REST: merge requests from agent branches. Their text may hold no
+		// quick action (/merge, /approve), which GitLab would run.
 		{Method: "POST", Path: p + "/merge_requests", Op: "mr.create", Check: gl.MRCreate, To: api},
 		{Method: "PUT", Path: mr, Op: "mr.update", Check: gl.MRUpdate, To: api},
 		{Method: "POST", Path: mr + "/notes", Op: "mr.note", Check: gl.MRNote, To: api},

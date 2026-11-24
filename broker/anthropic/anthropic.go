@@ -14,11 +14,20 @@ import (
 )
 
 // Routes is every request the Anthropic provider serves: its upstream,
-// with the user's credential, then its routes. No per-request rules.
+// with the user's credential, then its routes. No per-request rules, but
+// one: the credential stays in custody.
 func Routes(up broker.Upstreams, c Config) []broker.Route {
 	api := up.To(c.api(), auth(c.Token))
 
 	return []broker.Route{
+		// OAuth account endpoints: reads only (Claude Code reads the
+		// profile and roles). A write there can mint a lasting credential,
+		// such as Claude Code's create_api_key at login, which would put
+		// one in the sandbox. Which writes exist is unverified, so all are
+		// refused.
+		{Method: "GET HEAD", Path: "/api/oauth/{path...}", Op: "anthropic.account", Check: broker.Read, To: api},
+		{Method: "*", Path: "/api/oauth/{path...}", Op: "anthropic.account", Check: broker.Never("writes to the account's OAuth endpoints could mint a credential in the sandbox")},
+
 		{Method: "*", Path: "/v1/{path...}", Op: "anthropic.call", Check: broker.Any, To: api},
 		{Method: "*", Path: "/api/{path...}", Op: "anthropic.call", Check: broker.Any, To: api},
 	}

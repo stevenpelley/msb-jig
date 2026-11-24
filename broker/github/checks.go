@@ -1,7 +1,6 @@
 package github
 
 import (
-	"bytes"
 	"encoding/json"
 	"regexp"
 	"strings"
@@ -14,14 +13,15 @@ import (
 
 // --- REST checks ---
 
-// body reads a REST write's JSON object (empty is allowed).
+// body reads a REST write's JSON object (empty is allowed), with no
+// parameters in the URL and no key twice (broker.ReadJSONBody).
 func body(c *broker.Call) (map[string]any, broker.Decision) {
-	b, err := c.ReadBody()
+	b, err := c.ReadJSONBody()
 	if err != nil {
 		return nil, broker.Deny("%v", err)
 	}
 	var m map[string]any
-	if len(bytes.TrimSpace(b)) > 0 {
+	if b != nil {
 		if err := json.Unmarshal(b, &m); err != nil {
 			return nil, broker.Deny("an API write's body must be a JSON object")
 		}

@@ -53,7 +53,7 @@ func usage() {
                           forget them (all, if none named)
   open <name> [dir]       start the sandbox (creating it the first time) and open VS Code
                           on dir (relative to the sandbox user's home; default: home)
-  open <name> [dir] --mount host[:guest][:ro] ...
+  open <name> [dir] --mount host[:guest][:rw] ...
                           when creating it, also mount these Mac folders (guest path under
                           /mnt; default /mnt/<folder name>). Every sandbox has
                           ~/.mono-jig/<name>/share at /mnt/host (and ~/host)

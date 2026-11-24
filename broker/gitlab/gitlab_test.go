@@ -219,6 +219,28 @@ func TestAPI(t *testing.T) {
 		{"POST", "/api/graphql", `{"query":"query Merge { currentUser { username } } mutation Q { mergeRequestCreate(input:{}) { errors } }"}`, false},
 		{"POST", "/api/graphql", `[{"query":"query { a }"},{"query":"mutation { createNote(input:{}) { errors } }"}]`, false},
 		{"POST", "/api/graphql", `{"query":"query { "}`, false},
+		// Quick actions: GitLab would run them with the user's rights.
+		{"POST", "/api/v4/projects/grp%2Fproj/merge_requests/1/notes", `{"body":"/merge"}`, false},
+		{"POST", "/api/v4/projects/grp%2Fproj/merge_requests/1/notes", `{"body":"looks good\n  /approve"}`, false},
+		{"POST", "/api/v4/projects/grp%2Fproj/merge_requests/1/discussions", `{"body":"/title main"}`, false},
+		{"PUT", "/api/v4/projects/grp%2Fproj/merge_requests/1", `{"description":"more\n/merge"}`, false},
+		{"POST", "/api/v4/projects/grp%2Fproj/merge_requests", `{"title":"[agent/alice] Fix","source_branch":"agent/alice/x","target_branch":"main","description":"/approve"}`, false},
+		{"POST", "/api/v4/projects/grp%2Fproj/merge_requests/1/notes", `{"body":"done","extra":{"nested":["/merge"]}}`, false},
+		{"POST", "/api/v4/projects/grp%2Fproj/merge_requests/1/notes", `{"body":"run /usr/bin/env, or a/merge, or /merge."}`, true},
+		// GitLab reads booleans loosely.
+		{"POST", "/api/v4/projects/grp%2Fproj/merge_requests", `{"title":"[agent/alice] Fix","source_branch":"agent/alice/x","target_branch":"main","merge_when_pipeline_succeeds":"1"}`, false},
+		{"PUT", "/api/v4/projects/grp%2Fproj/merge_requests/1", `{"auto_merge":"yes"}`, false},
+		{"PUT", "/api/v4/projects/grp%2Fproj/merge_requests/1", `{"auto_merge":false}`, true},
+		// A key twice, ignoring case: Go would read the second, GitLab the first.
+		{"PUT", "/api/v4/projects/grp%2Fproj/merge_requests/1", `{"title":"untagged","Title":"[agent/alice] ok"}`, false},
+		// _method would change the request's method in Rack.
+		{"POST", "/api/v4/projects/grp%2Fproj/merge_requests/1/notes?_method=PUT", `{"body":"x"}`, false},
+		// GraphQL: no query in the URL beside the body, no key twice, no
+		// repeated GET parameter.
+		{"POST", "/api/graphql?query=mutation+%7B+mergeRequestAccept(input:%7B%7D)+%7B+errors+%7D+%7D", `{"query":"query { a }"}`, false},
+		{"POST", "/api/graphql", `{"query":"mutation { mergeRequestAccept(input:{}) { errors } }","Query":"query { a }"}`, false},
+		{"GET", "/api/graphql?query=query+%7B+a+%7D&query=mutation+%7B+m+%7D", "", false},
+		{"GET", "/api/graphql?query=query+%7B+a+%7D", "", true},
 		{"POST", "/elsewhere", `{}`, false},
 		{"POST", "/api/v4/x/git-receive-pack", ``, false},
 	}
@@ -355,6 +377,11 @@ func TestMCPToolCalls(t *testing.T) {
 		{"branch in namespace", "add_branch", `{"project_id":"grp/proj","branch":"agent/alice/y","ref":"main"}`, true},
 		{"branch outside", "add_branch", `{"project_id":"grp/proj","branch":"release","ref":"main"}`, false},
 		{"branch, no name", "add_branch", `{"project_id":"grp/proj","ref":"main"}`, false},
+		{"note with a quick action", "save_note", `{"project_id":"grp/proj","merge_request_iid":1,"body":"ok\n/merge"}`, false},
+		{"review with a quick action", "save_merge_request_review", `{"method":"create_diff_note","project_id":"grp/proj","merge_request_iid":1,"body":"/approve"}`, false},
+		{"description with a quick action", "save_merge_request", `{"project_id":"grp/proj","merge_request_iid":1,"description":"/merge"}`, false},
+		{"update with auto-merge", "save_merge_request", `{"project_id":"grp/proj","merge_request_iid":1,"merge_when_pipeline_succeeds":true}`, false},
+		{"update by url", "save_merge_request", `{"url":"` + mrURL(2) + `","source_branch":"agent/alice/x","title":"[agent/alice] mine"}`, false},
 		{"merge", "accept_merge_request", `{"project_id":"grp/proj","merge_request_iid":1}`, false},
 		{"apply suggestion", "apply_suggestion", `{"id":1}`, false},
 		{"save project", "save_project", `{}`, false},
@@ -395,6 +422,10 @@ func TestMCPProtocolChecks(t *testing.T) {
 		{"not json-rpc", `{"method":"tools/call"}`, "JSON-RPC 2.0"},
 		{"unknown method", `{"jsonrpc":"2.0","id":1,"method":"resources/read","params":{}}`, "not allowed"},
 		{"sampling response", `{"jsonrpc":"2.0","id":1,"result":{}}`, "responses to server requests"},
+		// Keys twice, ignoring case: Go would read the second, GitLab the first.
+		{"tool name twice", `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"accept_merge_request","Name":"get_project","arguments":{}}}`, "twice"},
+		{"argument twice", `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"add_commit","arguments":{"branch":"main","Branch":"agent/alice/x"}}}`, "twice"},
+		{"method twice", `{"jsonrpc":"2.0","id":1,"method":"tools/call","Method":"ping","params":{}}`, "twice"},
 	} {
 		m, _ := rpc(t, c, cs.body)
 		e, _ := m["error"].(map[string]any)

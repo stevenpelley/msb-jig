@@ -53,7 +53,8 @@ func Routes(up broker.Upstreams, c Config) []broker.Route {
 		{Method: "POST", Path: repo + "/issues/{number}/comments", Op: "pr.note", Check: gh.ExistingPR, To: api},
 		{Method: "DELETE", Path: repo + "/git/refs/heads/{branch...}", Op: "branch.delete", Check: gh.DeleteBranch, To: api},
 
-		// GraphQL: queries, and the mutations in graphql.go.
+		// GraphQL: queries, and the mutations listed in mutations
+		// (graphql.go); merges refused.
 		{Method: "POST", Path: "/api/graphql", Op: "graphql", Check: gh.GraphQL, To: graphql},
 
 		// git, at <owner>/<repo>(.git)/…. No LFS.
