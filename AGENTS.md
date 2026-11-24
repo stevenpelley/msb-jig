@@ -1,13 +1,23 @@
-# AGENTS.md — mcp-restrict
+# AGENTS.md — mono-jig
 
-Exploration project: tools that limit what a coding agent in a sandbox can
+**mono-jig: the jig for the monorepo.** A packaged sandbox for coding
+agents, built for this monorepo's projects and their environment rather
+than a sandbox product plus settings (what sets it apart from sbx and
+OpenShell). It serves one-shot investigations and vulnerability
+remediation, and everyday development. It limits what the agent can
 reach, mainly over the network, with finer rules than the providers' own
-roles and tokens allow. Design notes plus the prototype's code (Go module
-`mcp-restrict`, `docs/prototype-plan.md`).
+roles and tokens allow. Design notes plus the code (Go module `mono-jig`,
+`docs/prototype-plan.md`).
+
+**Named mono-jig on 2026-11-23** (user): before that the project was
+`mcp-restrict` (directory and branch) and the CLI `investigator`
+(`~/.investigator`, `INV_*`, `inv-*` Keychain items). History in the
+docs keeps the names of things that are gone (`investigator-net`,
+`investigator-msb`, the Lima-only `INV_*` variables).
 
 ## Purpose
 
-1. **A packaged harness for coworkers** ("investigator in a box"). One
+1. **A packaged harness for coworkers.** One
    command starts a sandboxed agent that runs without permission prompts
    and reaches GitHub, AWS, Datadog and Wiz in restricted ways, using the
    developer's own credentials. A developer hands it a Datadog alert or a
@@ -23,13 +33,13 @@ roles and tokens allow. Design notes plus the prototype's code (Go module
    **Configurable into a general dev sandbox** (2026-11-22): the egress
    allowlist comes in layers: the base (sbx's balanced list plus our
    own groups, without the hosts of providers the broker serves), org
-   layers (`INV_LAYERS`) and the user's `~/.investigator/allowlist.yaml`
-   (2026-11-23; the `investigator` and `dev` profiles are gone). Domain
+   layers (`JIG_LAYERS`) and the user's `~/.mono-jig/allowlist.yaml`
+   (2026-11-23; the `mono-jig` and `dev` profiles are gone). Domain
    filtering is a separate policy from the broker's: the runtime's own.
    **The broker's policy covers only the managed providers.**
 
    **One process per sandbox** (2026-11-22): everything that runs
-   continuously on the Mac is packaged with the VM. The `investigator`
+   continuously on the Mac is packaged with the VM. The `mono-jig`
    supervisor owns the microsandbox VM and serves the broker; the VM's
    egress policy is microsandbox's own. They start and stop together. No
    `launchd` jobs, no containers on the Mac.
@@ -78,7 +88,7 @@ Keep these parties separate when reasoning about enforcement:
 ## Current state
 
 As of 2026-11-22. **microsandbox is the VM layer** (user's decision;
-`docs/microsandbox.md`, `docs/prototype-plan.md` step 6b). `investigator up <name>`
+`docs/microsandbox.md`, `docs/prototype-plan.md` step 6b). `mono-jig up <name>`
 starts one supervisor process per sandbox. It owns the VM through
 microsandbox's Go SDK and serves the broker on a Unix socket, which the
 guest reaches over vsock. If the process dies, so does the VM. The egress
@@ -100,14 +110,13 @@ The Lima backend was removed the same day (in git at `695143a`), with its
 netstack and gvisor.
 
 Still open:
-- VS Code: the bridges check runs unattended (`checks/vscode-e2e/`, step 2); the git extension's socket and the remote `code` CLI stay open; Claude Code's extension installs and works on the remote; a repo's `.vscode/settings.json` overrides our settings (no new bridge, but ports and askpass come back); `investigator code <name> [dir]` checked by the user;
+- VS Code: the bridges check runs unattended (`checks/vscode-e2e/`, step 2); the git extension's socket and the remote `code` CLI stay open; Claude Code's extension installs and works on the remote; a repo's `.vscode/settings.json` overrides our settings (no new bridge, but ports and askpass come back); `mono-jig code <name> [dir]` checked by the user;
 - allowing a host without `rm`: waiting for microsandbox#1538;
 - the work track;
-- the name and pitch (user, 2026-11-23): it's no longer just an
-  "investigator" but a full-featured sandbox (own image, host folders,
-  brokered providers, an editor over SSH). Sell it first for one-shot
-  investigations; with Kiro IDE's remote SSH, people may use it as their
-  everyday dev sandbox. Rename later.
+- the pitch (user, 2026-11-23): a full-featured sandbox (own image, host
+  folders, brokered providers, an editor over SSH). Sell it first for
+  one-shot investigations; with Kiro IDE's remote SSH, people may use it
+  as their everyday dev sandbox.
 
 The agent runs on the Mac itself and asks before running commands.
 
@@ -123,8 +132,8 @@ The agent runs on the Mac itself and asks before running commands.
 | `broker/<provider>/routes.go` | `Routes` (`gitlab`, `github`; in `anthropic.go` and `aws.go` for the two without per-request rules): the provider's upstreams with their credentials, then its route table (every request it serves, the check it runs, where it goes); anything unmatched is denied. The checks are beside it (`checks.go`, `mcp.go`, `graphql.go`); tests run through `providers.Build` |
 | `broker/` | The core: `broker.go` (routes, matching, decision log), `policy.go` (the shared rules: agent branches, title tags), `upstream.go` (credential injection, header rewriting), `server.go` (routing by host, SNI check), `listen.go` (TLS, Unix socket, token commands), `ca.go` (the name-constrained CA). `gitproto/` parses pushes, `mcp/` JSON-RPC, `brokertest/` the shared test fixtures |
 | `allowlist/` | The egress allowlist: groups (`lists/sbx-balanced.yaml`, copied from sbx's balanced policy, and `lists/groups.yaml`, ours and the providers'), the base layer, user and org layers; a provider's hosts drop out when the broker serves it |
-| `cmd/investigator/` | The CLI. `setup`, `login`, `logout`, `open`, `stop`, `uninstall` for users (`login.go`; settings in `~/.investigator/settings.json`, tokens in the Keychain, extra hosts in `~/.investigator/allowlist.yaml`); beneath them `up\|run\|down\|shell\|code\|ssh-config\|rm <name>` (`lifecycle.go`, `supervisor.go`: broker plus VM through the microsandbox Go SDK; `remote.go`: SSH and VS Code); `image.go`: `image build`, your own image from a Dockerfile (Docker or Podman, then `msb load`); `mounts.go`: the exchange folder, `--mount` at create, `cp`; `allowlist` prints the compiled list; `ssh-setup` for sshd-based sandboxes |
-| `cmd/investigator-sbx/` | The broker for an sbx sandbox: on the Mac's loopback, plain HTTP, behind a session token |
+| `cmd/mono-jig/` | The CLI. `setup`, `login`, `logout`, `open`, `stop`, `uninstall` for users (`login.go`; settings in `~/.mono-jig/settings.json`, tokens in the Keychain, extra hosts in `~/.mono-jig/allowlist.yaml`); beneath them `up\|run\|down\|shell\|code\|ssh-config\|rm <name>` (`lifecycle.go`, `supervisor.go`: broker plus VM through the microsandbox Go SDK; `remote.go`: SSH and VS Code); `image.go`: `image build`, your own image from a Dockerfile (Docker or Podman, then `msb load`); `mounts.go`: the exchange folder, `--mount` at create, `cp`; `allowlist` prints the compiled list; `ssh-setup` for sshd-based sandboxes |
+| `cmd/mono-jig-sbx/` | The broker for an sbx sandbox: on the Mac's loopback, plain HTTP, behind a session token |
 | `editor/` | How the editor reaches a sandbox: per-sandbox SSH keys and config, the harness's VS Code settings |
 | `guest/` | What goes into the VM: `provision.sh` (one script for the image and the microsandbox guest), `install-keys.sh`, the image's `Dockerfile`, `mcpcli/` (the agent's MCP client, copied from the `sbx-mcp-client` skill) |
 | `checks/` | `bridges.sh` (run in the editor's terminal), `vscode-e2e/` (VS Code over Remote-SSH, unattended, running `bridges.sh` through a probe extension), `step1-docker.sh` (step 1 against a container) |
@@ -134,7 +143,7 @@ The agent runs on the Mac itself and asks before running commands.
 - Verify: `test -z "$(gofmt -l .)" && go vet ./... && go test ./...`
   (`go vet` doesn't check formatting; `gofmt -l` lists unformatted
   files without failing, hence the `test -z`), and `checks/step1-docker.sh`
-  (needs Docker; builds `investigator-sandbox:dev`).
+  (needs Docker; builds `mono-jig-sandbox:dev`).
 - Research notes carry the date and tool versions they were checked
   against. Mark anything not tested or not confirmed in a source as
   *unverified*, and list sources at the end.
@@ -147,5 +156,5 @@ The agent runs on the Mac itself and asks before running commands.
 - Experiments that need a sandbox tool or a provider account run on
   the user's machine or a throwaway account; ask before creating
   anything in a real provider.
-- This is a project in the monorepo: work on branch `mcp-restrict` in
-  `.sbx/mcp-restrict/`, per the top-level `AGENTS.md`.
+- This is a project in the monorepo: work on branch `mono-jig` in
+  `.sbx/mono-jig/`, per the top-level `AGENTS.md`.

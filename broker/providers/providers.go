@@ -17,11 +17,11 @@ import (
 	"net/http"
 	"net/url"
 
-	"mcp-restrict/broker"
-	"mcp-restrict/broker/anthropic"
-	"mcp-restrict/broker/awsmcp"
-	"mcp-restrict/broker/github"
-	"mcp-restrict/broker/gitlab"
+	"mono-jig/broker"
+	"mono-jig/broker/anthropic"
+	"mono-jig/broker/awsmcp"
+	"mono-jig/broker/github"
+	"mono-jig/broker/gitlab"
 )
 
 // Hostnames the sandbox uses for each provider.
@@ -43,7 +43,7 @@ type Config struct {
 	AWSProfiles                           []string // the first is the default
 	AWSMCPCommand                         string   // tests: a stdio MCP server instead of AWS's proxy
 
-	// Overrides for tests and investigator-sbx; empty means the default.
+	// Overrides for tests and mono-jig-sbx; empty means the default.
 	GitHubURL, GitHubAPIURL, AnthropicURL string                     // https://github.com, https://api.github.com, https://api.anthropic.com
 	Public                                func(host string) *url.URL // how the sandbox reaches host: https://<host>
 	Client                                *http.Client               // the upstreams': broker.NewUpstreamClient()
@@ -80,7 +80,7 @@ func Build(ctx context.Context, c Config, state string, log *slog.Logger) (map[s
 	b := newBuilder(c, log)
 
 	// gitlab.broker.internal: git, LFS, REST, GraphQL, GitLab's MCP server.
-	// On once investigator login gitlab recorded a user.
+	// On once mono-jig login gitlab recorded a user.
 	if c.GitLabUser != "" {
 		b.serve(GitLabHost, gitlab.Routes(b.upstreams(GitLabHost, "gitlab"), gitlab.Config{
 			User: c.GitLabUser, URL: c.GitLabURL,
@@ -88,7 +88,7 @@ func Build(ctx context.Context, c Config, state string, log *slog.Logger) (map[s
 	}
 
 	// github.broker.internal: git, REST, GraphQL, as gh calls a GitHub
-	// Enterprise Server. On once investigator login github recorded a user.
+	// Enterprise Server. On once mono-jig login github recorded a user.
 	if c.GitHubUser != "" {
 		b.serve(GitHubHost, github.Routes(b.upstreams(GitHubHost, "github"), github.Config{
 			User: c.GitHubUser, Token: token(c.GitHubTokenCmd),
@@ -96,14 +96,14 @@ func Build(ctx context.Context, c Config, state string, log *slog.Logger) (map[s
 	}
 
 	// anthropic.broker.internal: the Claude API, for Claude Code. On once
-	// investigator login claude stored a token.
+	// mono-jig login claude stored a token.
 	if c.AnthropicTokenCmd != "" {
 		b.serve(AnthropicHost, anthropic.Routes(b.upstreams(AnthropicHost, "claude"), anthropic.Config{
 			Token: token(c.AnthropicTokenCmd), APIURL: c.AnthropicURL}))
 	}
 
 	// aws.broker.internal: the AWS MCP Server, through AWS's stdio proxy on
-	// the Mac. On once investigator login aws recorded profiles.
+	// the Mac. On once mono-jig login aws recorded profiles.
 	if c.AWSOn() {
 		proxy, err := awsmcp.Start(ctx, awsmcp.Config{Profiles: c.AWSProfiles, Command: c.AWSMCPCommand, State: state, Log: log})
 		if err != nil {
@@ -134,10 +134,10 @@ func newBuilder(c Config, log *slog.Logger) *builder {
 }
 
 // upstreams are a provider's: reached by the sandbox at host, with a
-// missing credential sending the user to investigator login <login>.
+// missing credential sending the user to mono-jig login <login>.
 func (b *builder) upstreams(host, login string) broker.Upstreams {
 	return broker.Upstreams{Public: b.public(host), Client: b.client,
-		NoCredential: "no credential: run investigator login " + login}
+		NoCredential: "no credential: run mono-jig login " + login}
 }
 
 // serve serves host from its route table.

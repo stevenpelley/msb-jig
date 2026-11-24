@@ -8,16 +8,16 @@ import (
 	"path/filepath"
 )
 
-// settings are what investigator login records, in <root>/settings.json:
+// settings are what mono-jig login records, in <root>/settings.json:
 // which providers the broker serves, and as whom. No secrets: tokens stay
 // in the Keychain (keychainGitLab, keychainGitHub, keychainClaude) or in
 // glab's and gh's own logins.
-// The INV_* variables override them (loadConfig), for the checks.
+// The JIG_* variables override them (loadConfig), for the checks.
 type settings struct {
 	GitLab *gitlabSettings `json:"gitlab,omitempty"`
 	GitHub *githubSettings `json:"github,omitempty"`
 	AWS    *awsSettings    `json:"aws,omitempty"`
-	// Image is the image investigator image build made (image.go).
+	// Image is the image mono-jig image build made (image.go).
 	Image string `json:"image,omitempty"`
 }
 
@@ -44,14 +44,14 @@ type awsSettings struct {
 
 // The Keychain items login writes and logout and uninstall delete.
 const (
-	keychainGitLab = "inv-gitlab"
-	keychainGitHub = "inv-github"
-	keychainClaude = "inv-claude"
+	keychainGitLab = "mono-jig-gitlab"
+	keychainGitHub = "mono-jig-github"
+	keychainClaude = "mono-jig-claude"
 )
 
 func stateRoot() string {
 	home, _ := os.UserHomeDir()
-	return env("INV_STATE", filepath.Join(home, ".investigator"))
+	return env("JIG_STATE", filepath.Join(home, ".mono-jig"))
 }
 
 func settingsPath() string { return filepath.Join(stateRoot(), "settings.json") }

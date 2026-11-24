@@ -1,4 +1,4 @@
-// Command investigator-sbx serves the broker's code-host providers to a
+// Command mono-jig-sbx serves the broker's code-host providers to a
 // Docker sbx sandbox: plain HTTP on the Mac's loopback, one port per
 // provider, which the sandbox reaches at host.docker.internal:<port>
 // through sbx's own proxy. sbx has no private channel from the sandbox to
@@ -6,7 +6,7 @@
 // the provider's credential). The providers and their rules are the same
 // as under microsandbox (broker/providers).
 //
-//	investigator-sbx -session-token-file <f> -gitlab-user <u> [-gitlab-listen 127.0.0.1:18443] \
+//	mono-jig-sbx -session-token-file <f> -gitlab-user <u> [-gitlab-listen 127.0.0.1:18443] \
 //	    [-github-user <u> -github-listen 127.0.0.1:18444]
 package main
 
@@ -27,12 +27,12 @@ import (
 	"strings"
 	"time"
 
-	"mcp-restrict/broker"
-	"mcp-restrict/broker/providers"
+	"mono-jig/broker"
+	"mono-jig/broker/providers"
 )
 
 func fail(f string, a ...any) {
-	fmt.Fprintf(os.Stderr, "investigator-sbx: "+f+"\n", a...)
+	fmt.Fprintf(os.Stderr, "mono-jig-sbx: "+f+"\n", a...)
 	os.Exit(1)
 }
 
@@ -41,11 +41,11 @@ func main() {
 	glUser := flag.String("gitlab-user", "", "the GitLab user the agent acts for (no GitLab if empty)")
 	glURL := flag.String("gitlab-url", "https://gitlab.com", "the GitLab the broker forwards to")
 	glListen := flag.String("gitlab-listen", "127.0.0.1:18443", "where to serve GitLab (loopback only)")
-	glTokenCmd := flag.String("gitlab-token-command", "", "a command printing the user's GitLab token (default: $INVESTIGATOR_GITLAB_TOKEN)")
+	glTokenCmd := flag.String("gitlab-token-command", "", "a command printing the user's GitLab token (default: $JIG_GITLAB_TOKEN)")
 	glMCPTokenCmd := flag.String("gitlab-mcp-token-command", "", "the same for GitLab's MCP server (default: the GitLab token)")
 	ghUser := flag.String("github-user", "", "the GitHub user the agent acts for (no GitHub if empty)")
 	ghListen := flag.String("github-listen", "127.0.0.1:18444", "where to serve GitHub (loopback only)")
-	ghTokenCmd := flag.String("github-token-command", "", "a command printing the user's GitHub token (default: $INVESTIGATOR_GITHUB_TOKEN)")
+	ghTokenCmd := flag.String("github-token-command", "", "a command printing the user's GitHub token (default: $JIG_GITHUB_TOKEN)")
 	flag.Parse()
 	if *tokFile == "" || (*glUser == "" && *ghUser == "") {
 		fail("-session-token-file and -gitlab-user or -github-user are required")
@@ -65,13 +65,13 @@ func main() {
 		}
 		pub := public(*glListen)
 		p := build(providers.Config{GitLabUser: *glUser, GitLabURL: *glURL, GitLabMCPTokenCmd: *glMCPTokenCmd,
-			GitLabTokenCmd: tokenCmd(*glTokenCmd, "INVESTIGATOR_GITLAB_TOKEN")}, pub, log)[providers.GitLabHost]
+			GitLabTokenCmd: tokenCmd(*glTokenCmd, "JIG_GITLAB_TOKEN")}, pub, log)[providers.GitLabHost]
 		go func() { errs <- listen(*glListen, pub, p, session, log) }()
 	}
 	if *ghUser != "" {
 		pub := public(*ghListen)
 		p := build(providers.Config{GitHubUser: *ghUser,
-			GitHubTokenCmd: tokenCmd(*ghTokenCmd, "INVESTIGATOR_GITHUB_TOKEN")}, pub, log)[providers.GitHubHost]
+			GitHubTokenCmd: tokenCmd(*ghTokenCmd, "JIG_GITHUB_TOKEN")}, pub, log)[providers.GitHubHost]
 		go func() { errs <- listen(*ghListen, pub, p, session, log) }()
 	}
 	fail("%v", <-errs)
@@ -115,11 +115,11 @@ func listen(addr string, pub *url.URL, p http.Handler, session string, log *slog
 
 // sessionCheck refuses requests without the session token, wherever the
 // sandbox's tools put their credential: git's http.extraHeader
-// (X-Investigator-Session), glab's PRIVATE-TOKEN, a Bearer or "token"
+// (X-Jig-Session), glab's PRIVATE-TOKEN, a Bearer or "token"
 // token, or a Basic password. broker.Server then drops all of them.
 func sessionCheck(session string, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		cands := []string{r.Header.Get("X-Investigator-Session"), r.Header.Get("Private-Token")}
+		cands := []string{r.Header.Get("X-Jig-Session"), r.Header.Get("Private-Token")}
 		a := r.Header.Get("Authorization")
 		for _, scheme := range []string{"Bearer ", "token "} {
 			if t, ok := strings.CutPrefix(a, scheme); ok {

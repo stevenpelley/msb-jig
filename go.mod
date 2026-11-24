@@ -1,4 +1,4 @@
-module mcp-restrict
+module mono-jig
 
 go 1.26.0
 

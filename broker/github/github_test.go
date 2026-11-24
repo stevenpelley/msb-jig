@@ -11,9 +11,9 @@ import (
 	"sync"
 	"testing"
 
-	"mcp-restrict/broker"
-	"mcp-restrict/broker/brokertest"
-	"mcp-restrict/broker/providers"
+	"mono-jig/broker"
+	"mono-jig/broker/brokertest"
+	"mono-jig/broker/providers"
 )
 
 const ghHost = "github.broker.internal"

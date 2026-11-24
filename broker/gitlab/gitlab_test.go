@@ -14,8 +14,8 @@ import (
 	"sync"
 	"testing"
 
-	"mcp-restrict/broker/brokertest"
-	"mcp-restrict/broker/providers"
+	"mono-jig/broker/brokertest"
+	"mono-jig/broker/providers"
 )
 
 const host = "gitlab.broker.internal"
@@ -374,7 +374,7 @@ func TestMCPToolCalls(t *testing.T) {
 		}
 		if denied {
 			text := res["content"].([]any)[0].(map[string]any)["text"].(string)
-			if !strings.Contains(text, "investigator broker denied "+cs.tool) {
+			if !strings.Contains(text, "mono-jig broker denied "+cs.tool) {
 				t.Errorf("%s: denial text %q", cs.name, text)
 			}
 		}

@@ -13,7 +13,7 @@ import (
 	"net/url"
 	"strings"
 
-	"mcp-restrict/broker"
+	"mono-jig/broker"
 )
 
 // Checks are the GitHub provider's checks, which the routes (routes.go)

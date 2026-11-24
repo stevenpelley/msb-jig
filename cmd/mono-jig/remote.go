@@ -2,7 +2,7 @@ package main
 
 import (
 	"fmt"
-	"mcp-restrict/editor"
+	"mono-jig/editor"
 	"os"
 	"os/exec"
 	"path"
@@ -18,7 +18,7 @@ import (
 func sshConfig(name, state string) string {
 	key := filepath.Join(state, "ssh_key")
 	if _, err := os.Stat(key); err != nil {
-		if out, err := exec.Command("ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-C", "investigator-"+name, "-f", key).CombinedOutput(); err != nil {
+		if out, err := exec.Command("ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-C", "mono-jig-"+name, "-f", key).CombinedOutput(); err != nil {
 			fail("ssh-keygen: %v: %s", err, out)
 		}
 		if out, err := exec.Command("msb", "ssh", "authorize", "--file", key+".pub").CombinedOutput(); err != nil {
@@ -47,14 +47,14 @@ func sshConfig(name, state string) string {
 		fail("%v", err)
 	}
 	root := filepath.Dir(state)
-	all := fmt.Sprintf("# Written by investigator: every sandbox's Host block.\nInclude %s\n", filepath.Join(root, "*", "ssh_config"))
+	all := fmt.Sprintf("# Written by mono-jig: every sandbox's Host block.\nInclude %s\n", filepath.Join(root, "*", "ssh_config"))
 	if err := os.WriteFile(filepath.Join(root, "ssh_config"), []byte(all), 0o600); err != nil {
 		fail("%v", err)
 	}
 	return block
 }
 
-func sshHost(name string) string { return "investigator-" + name }
+func sshHost(name string) string { return "mono-jig-" + name }
 
 // sshHosts are the host names of every sandbox under root.
 func sshHosts(root string) []string {
@@ -71,7 +71,7 @@ func sshHosts(root string) []string {
 // to the guest user's home) or the home itself.
 func code(name, state string, args []string) {
 	if pidOf(state) == 0 {
-		fail("%s isn't up: investigator up %s", name, name)
+		fail("%s isn't up: mono-jig up %s", name, name)
 	}
 	sshConfig(name, state)
 	root := filepath.Dir(state)
@@ -89,7 +89,7 @@ func code(name, state string, args []string) {
 	fail("%v", syscall.Exec(bin, argv, os.Environ()))
 }
 
-// guestDir is the folder investigator code opens: an absolute guest path
+// guestDir is the folder mono-jig code opens: an absolute guest path
 // as given, anything else under the guest user's home.
 func guestDir(args []string) string {
 	home := "/home/" + guestUser

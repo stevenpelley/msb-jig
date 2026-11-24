@@ -3,7 +3,7 @@
 # python SDK, creating the venv on first use. Arguments are passed through;
 # see `mcpcli --help`.
 #
-# Copied into the investigator guest from the sbx-mcp-client skill
+# Copied into the mono-jig guest from the sbx-mcp-client skill
 # (~/Dotfiles/agents/skills/sbx-mcp-client/scripts), unchanged but for the CA
 # line: there $MCP_GATEWAY_URL is the broker's https://aws.broker.internal/mcp,
 # whose CA is in the system store, not in certifi's.

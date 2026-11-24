@@ -13,7 +13,7 @@ set -euo pipefail
 
 here="$(cd "$(dirname "$0")/.." && pwd)"
 name="${NAME:-step1-$$}"
-image="${IMAGE:-investigator-sandbox:dev}"
+image="${IMAGE:-mono-jig-sandbox:dev}"
 state="$(mktemp -d)"
 fail=0
 pass() { echo "PASS  $*"; }
@@ -30,14 +30,14 @@ if ! docker image inspect "$image" >/dev/null 2>&1; then
 fi
 docker run -d --name "$name" "$image" >/dev/null
 
-(cd "$here" && go run ./cmd/investigator ssh-setup -name "$name" -state "$state" \
+(cd "$here" && go run ./cmd/mono-jig ssh-setup -name "$name" -state "$state" \
   -proxy-command "docker exec -i $name nc localhost 22") >/dev/null
 sb="$state/sandboxes/$name/ssh"
-tar -C "$sb/sandbox" -cf - . | docker exec -i "$name" /opt/investigator/install-keys.sh agent >/dev/null
+tar -C "$sb/sandbox" -cf - . | docker exec -i "$name" /opt/mono-jig/install-keys.sh agent >/dev/null
 docker cp "$here/checks/bridges.sh" "$name:/usr/local/bin/bridges.sh" >/dev/null
 
 cfg="$sb/config"
-host="investigator-$name"
+host="mono-jig-$name"
 for _ in $(seq 50); do
   ssh -F "$cfg" -o BatchMode=yes -o ConnectTimeout=5 "$host" true 2>/dev/null && break
   sleep 0.2

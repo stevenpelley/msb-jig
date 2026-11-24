@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# provision.sh: install everything the investigator sandbox needs.
+# provision.sh: install everything the mono-jig sandbox needs.
 #
 # One script for every packaging: the sandbox image's Dockerfile runs it at
 # build time, and the supervisor runs it (or some components) at every
@@ -25,7 +25,7 @@
 #   BROKER_GITHUB_URL    the same for GitHub (https://github.broker.internal).
 #                        Default empty: github.com stays github.com
 #   BROKER_CA_FILE       the broker's CA certificate, installed as trusted if given
-#   BROKER_SESSION_TOKEN sbx mode only: the token investigator-sbx requires,
+#   BROKER_SESSION_TOKEN sbx mode only: the token mono-jig-sbx requires,
 #                        sent by git (extraHeader), glab (its token) and the MCP client
 #   BROKER_GITLAB_USER   the GitLab user the agent acts for: writes the broker's
 #                        rules into the agent's instructions (~/.claude/CLAUDE.md)
@@ -56,7 +56,7 @@ BROKER_GITLAB_MCP="${BROKER_GITLAB_MCP:-}"
 BROKER_ANTHROPIC_URL="${BROKER_ANTHROPIC_URL:-}"
 BROKER_AWS_URL="${BROKER_AWS_URL:-}"
 BROKER_AWS_PROFILES="${BROKER_AWS_PROFILES:-}"
-MCPCLI_DIR="${MCPCLI_DIR:-/usr/local/lib/investigator/mcpcli}"
+MCPCLI_DIR="${MCPCLI_DIR:-/usr/local/lib/mono-jig/mcpcli}"
 export DEBIAN_FRONTEND=noninteractive
 
 want() { [[ " $PROVISION_COMPONENTS " == *" $1 "* ]]; }
@@ -74,7 +74,7 @@ client_env() {
   sed -i "/^# $name begin\$/,/^# $name end\$/d" /etc/environment
   (( $# )) || return 0
   {
-    echo "# Written by investigator provision.sh."
+    echo "# Written by mono-jig provision.sh."
     for kv in "$@"; do printf 'export %s="%s"\n' "${kv%%=*}" "${kv#*=}"; done
   } >"/etc/profile.d/$name.sh"
   chmod 0644 "/etc/profile.d/$name.sh"
@@ -112,9 +112,9 @@ if want sshd; then
   install -d -m 0755 /etc/ssh/sshd_config.d /run/sshd
   # Ubuntu's sshd_config includes sshd_config.d/*.conf first, and the first
   # value sshd reads wins, so this file overrides the defaults below it.
-  cat >/etc/ssh/sshd_config.d/10-investigator.conf <<EOF
-# Written by investigator provision.sh. See docs/design.md,
-# "What the investigator CLI configures".
+  cat >/etc/ssh/sshd_config.d/10-mono-jig.conf <<EOF
+# Written by mono-jig provision.sh. See docs/design.md,
+# "What the mono-jig CLI configures".
 AllowUsers $SANDBOX_USER
 PermitRootLogin no
 PubkeyAuthentication yes
@@ -143,8 +143,8 @@ if want git; then
   # No credential helper and no prompts: the broker injects credentials.
   git config --system credential.helper ""
   git config --system core.askPass ""
-  client_env 80-investigator-git GIT_TERMINAL_PROMPT=0
-  echo 'unset GIT_ASKPASS SSH_ASKPASS' >>/etc/profile.d/80-investigator-git.sh
+  client_env 80-mono-jig-git GIT_TERMINAL_PROMPT=0
+  echo 'unset GIT_ASKPASS SSH_ASKPASS' >>/etc/profile.d/80-mono-jig-git.sh
 fi
 
 # --- broker: every git, gh and glab call to a managed provider goes to it ---
@@ -172,7 +172,7 @@ if want broker || want broker-env; then
   # every tool sends the session token instead.
   tok="${BROKER_SESSION_TOKEN:-placeholder}"
   if [[ -n "$BROKER_SESSION_TOKEN" && -n "$BROKER_GITLAB_URL" ]]; then
-    git config --system "http.$BROKER_GITLAB_URL/.extraHeader" "X-Investigator-Session: $BROKER_SESSION_TOKEN"
+    git config --system "http.$BROKER_GITLAB_URL/.extraHeader" "X-Jig-Session: $BROKER_SESSION_TOKEN"
   fi
   # The tools treat the broker as a self-hosted GitLab and GitHub Enterprise
   # Server. The broker injects the real tokens.
@@ -180,7 +180,7 @@ if want broker || want broker-env; then
   gh=()
   [[ -n $BROKER_GITLAB_URL ]] && gl=("GITLAB_HOST=$gl_host" "GITLAB_TOKEN=$tok" "GITLAB_API_PROTOCOL=$gl_proto")
   [[ -n $BROKER_GITHUB_URL ]] && gh=("GH_HOST=$gh_host" "GH_ENTERPRISE_TOKEN=$tok")
-  client_env 81-investigator-broker "${gl[@]}" "${gh[@]}"
+  client_env 81-mono-jig-broker "${gl[@]}" "${gh[@]}"
   # glab's own config too: auth status and clone read it, not GITLAB_HOST.
   # Only the broker's host: glab checks every host listed (its default
   # gitlab.com fails with the placeholder), and https, since glab repo clone
@@ -188,7 +188,7 @@ if want broker || want broker-env; then
   # every start, like the rest; removed (if ours) when there's no GitLab.
   home="$(getent passwd "$SANDBOX_USER" | cut -d: -f6)"
   glab_cfg="$home/.config/glab-cli/config.yml"
-  glab_mark="# Written by investigator provision.sh; rewritten on every start."
+  glab_mark="# Written by mono-jig provision.sh; rewritten on every start."
   if [[ -n $BROKER_GITLAB_URL ]]; then
     install -d -m 0700 -o "$SANDBOX_USER" -g "$SANDBOX_USER" "$home/.config" "$home/.config/glab-cli"
     cat >"$glab_cfg" <<EOF
@@ -209,10 +209,10 @@ EOF
 fi
 if want broker; then
   if [[ -n "$BROKER_CA_FILE" ]]; then
-    install -m 0644 "$BROKER_CA_FILE" /usr/local/share/ca-certificates/investigator-broker.crt
+    install -m 0644 "$BROKER_CA_FILE" /usr/local/share/ca-certificates/mono-jig-broker.crt
     update-ca-certificates >/dev/null
     # Node-based tools (Claude Code's MCP client) don't read the system store.
-    client_env 82-investigator-node-ca NODE_EXTRA_CA_CERTS=/etc/ssl/certs/ca-certificates.crt
+    client_env 82-mono-jig-node-ca NODE_EXTRA_CA_CERTS=/etc/ssl/certs/ca-certificates.crt
   fi
 fi
 
@@ -230,7 +230,7 @@ fi
 # broker, which swaps in the user's token.
 if want claude || want claude-env; then
   if [[ -n "$BROKER_ANTHROPIC_URL" ]]; then
-    client_env 83-investigator-claude \
+    client_env 83-mono-jig-claude \
       "ANTHROPIC_BASE_URL=$BROKER_ANTHROPIC_URL" CLAUDE_CODE_OAUTH_TOKEN=placeholder
     # Until onboarding is done, interactive claude checks api.anthropic.com
     # directly, ignoring ANTHROPIC_BASE_URL, and the sandbox can't resolve
@@ -244,7 +244,7 @@ if want claude || want claude-env; then
     chown "$SANDBOX_USER:$SANDBOX_USER" "$cj"
     chmod 0600 "$cj"
   else
-    client_env 83-investigator-claude
+    client_env 83-mono-jig-claude
   fi
 fi
 
@@ -260,7 +260,7 @@ if want claude; then
   # with one credential fewer (docs/prototype-plan.md, step 6).
   su - "$SANDBOX_USER" -c "~/.local/bin/claude mcp remove --scope user gitlab >/dev/null 2>&1" || true
   if [[ "$BROKER_GITLAB_MCP" == 1 && -n "$BROKER_GITLAB_URL" ]]; then
-    su - "$SANDBOX_USER" -c "~/.local/bin/claude mcp add --scope user --transport http gitlab '$BROKER_GITLAB_URL/api/v4/mcp' ${BROKER_SESSION_TOKEN:+--header 'X-Investigator-Session: $BROKER_SESSION_TOKEN'}" >/dev/null
+    su - "$SANDBOX_USER" -c "~/.local/bin/claude mcp add --scope user --transport http gitlab '$BROKER_GITLAB_URL/api/v4/mcp' ${BROKER_SESSION_TOKEN:+--header 'X-Jig-Session: $BROKER_SESSION_TOKEN'}" >/dev/null
   fi
 fi
 
@@ -277,10 +277,10 @@ if want aws-env; then
     fi
     chmod 0755 "$MCPCLI_DIR" "$MCPCLI_DIR/mcpcli" "$MCPCLI_DIR/mcpcli.py"
     ln -sfn "$MCPCLI_DIR/mcpcli" /usr/local/bin/mcpcli
-    client_env 84-investigator-aws "MCP_GATEWAY_URL=$BROKER_AWS_URL"
+    client_env 84-mono-jig-aws "MCP_GATEWAY_URL=$BROKER_AWS_URL"
   else
     rm -f /usr/local/bin/mcpcli
-    client_env 84-investigator-aws
+    client_env 84-mono-jig-aws
   fi
 fi
 
@@ -290,7 +290,7 @@ fi
 if want claude || want claude-env; then
   home="$(getent passwd "$SANDBOX_USER" | cut -d: -f6)"
   md="$home/.claude/CLAUDE.md"
-  marker="<!-- Written by investigator provision.sh; edits are lost on reprovisioning. -->"
+  marker="<!-- Written by mono-jig provision.sh; edits are lost on reprovisioning. -->"
   if [[ -e $md ]] && [[ "$(head -n1 "$md")" != "$marker" ]]; then
     log "$md exists and isn't ours: left alone"
   elif [[ -z "$BROKER_GITLAB_USER" && -z "$BROKER_GITHUB_USER" && -z "$BROKER_AWS_URL" ]]; then
@@ -300,11 +300,11 @@ if want claude || want claude-env; then
     {
       cat <<EOF
 $marker
-# Working in the investigator sandbox
+# Working in the mono-jig sandbox
 
-The investigator broker, on the user's Mac, holds the credentials for the
+The mono-jig broker, on the user's Mac, holds the credentials for the
 services below and enforces their rules. Its refusals come from
-"investigator broker" and say why. Don't log in, and don't ask for tokens.
+"mono-jig broker" and say why. Don't log in, and don't ask for tokens.
 Other hosts go through a domain filter; if one is blocked, ask the user to
 allow it rather than working around it.
 EOF

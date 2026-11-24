@@ -16,7 +16,7 @@ type Server struct {
 // credentialHeaders are dropped from every incoming request, and again
 // from every outgoing one: the sandbox holds only placeholders, and an
 // Upstream's Auth sets the real credential.
-var credentialHeaders = []string{"Authorization", "Proxy-Authorization", "Private-Token", "Job-Token", "Cookie", "X-Investigator-Session", "X-Api-Key"}
+var credentialHeaders = []string{"Authorization", "Proxy-Authorization", "Private-Token", "Job-Token", "Cookie", "X-Jig-Session", "X-Api-Key"}
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Absolute-form request targets would let a client name another host.

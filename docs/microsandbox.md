@@ -6,7 +6,7 @@ microsandbox 0.7.16, released 2026-11-18 and installed through Homebrew
 marks what's still open.
 
 **Verdict:** it works as the VM layer, and replaced Lima plus
-`investigator-net`'s netstack and filter on 2026-11-22. `investigator up`,
+`investigator-net`'s netstack and filter on 2026-11-22. `mono-jig up`,
 below, runs it end to end, and the broker fits behind it unchanged. The
 broker lives in the same process that owns the VM: the coupling we wanted,
 without Lima's fail-open problems.
@@ -65,7 +65,7 @@ Two of its features don't fit, and we wouldn't use them:
 
 ```
 Mac                                          guest
-~/.investigator/<name>/broker.sock  <-vsock-  127.0.0.1:443  <- git, glab, claude
+~/.mono-jig/<name>/broker.sock  <-vsock-  127.0.0.1:443  <- git, glab, claude
    ^ broker (TLS, *.broker.internal)            ^ socat (root)
                                                 /etc/hosts: gitlab|github|anthropic.broker.internal -> 127.0.0.1
 ```
@@ -107,17 +107,17 @@ creates the sandbox *owns* its VM:
 So the broker and the VM owner can be one process: a Go program that serves
 the broker on the socket and holds the sandbox through the SDK.
 
-**Shape:** `investigator run <name>` is one process per sandbox, started in
-the background by `investigator up <name>` with its log in the state
+**Shape:** `mono-jig run <name>` is one process per sandbox, started in
+the background by `mono-jig up <name>` with its log in the state
 directory. It:
 
-1. loads the CA and serves the broker on `~/.investigator/<name>/broker.sock`;
+1. loads the CA and serves the broker on `~/.mono-jig/<name>/broker.sock`;
 2. creates or starts the named sandbox through the SDK, attached (not
    `StartSandboxDetached`), with the vsock route, the egress rules, the user
    and the image;
 3. waits:
    - the sandbox stops: close the broker, remove the socket, exit;
-   - SIGTERM (`investigator down`): `Stop` the sandbox, then the broker, exit;
+   - SIGTERM (`mono-jig down`): `Stop` the sandbox, then the broker, exit;
    - the process dies: the VM goes with it (parent watch), and the socket
      is cleaned up on the next `up`.
 
@@ -125,8 +125,8 @@ A broker that breaks while the process lives can be restarted in place: the
 guest's route reconnects to a new listener at the same path (checked).
 
 **What users would run:**
-- `investigator up <name>`, `investigator down <name>`;
-- `investigator shell <name>`, i.e. `msb exec -t -u agent <name> -- bash -l`;
+- `mono-jig up <name>`, `mono-jig down <name>`;
+- `mono-jig shell <name>`, i.e. `msb exec -t -u agent <name> -- bash -l`;
 - VS Code through the SSH config we already generate, with
   `ProxyCommand msb ssh serve <name> --stdio`.
 
@@ -138,7 +138,7 @@ compiled allowlist.
 
 Run by the agent on 2026-11-22, with the user's go-ahead. Sandboxes
 `alpine/curl`, `debian:bookworm` and `alpine`. The broker was
-`investigator-net broker` with the user's glab token and `inv-claude`
+`investigator-net broker` with the user's glab token and `mono-jig-claude`
 Keychain item.
 
 | Check | Result |
@@ -167,16 +167,16 @@ Found on the way, not microsandbox's:
   "request not recognized". GitLab accepts both, and this happens on Lima
   too. Worth fixing in `broker/`.
 
-## The supervisor, built: `investigator up`
+## The supervisor, built: `mono-jig up`
 
 Built 2026-11-22 as `cmd/investigator-msb`, about 450 lines, and folded into
-the `investigator` CLI the same day (`cmd/investigator/sandbox.go`), once
-microsandbox replaced Lima. The commands below are `investigator <cmd>`;
+the `mono-jig` CLI the same day (`cmd/mono-jig/sandbox.go`), once
+microsandbox replaced Lima. The commands below are `mono-jig <cmd>`;
 `code <name>` opens VS Code on the sandbox with the harness's settings.
 The broker setup it shares with `investigator-net` lives in `brokerd/`.
 
 - `up <name>` starts `run <name>` in the background (setsid, log in
-  `~/.investigator/<name>/run.log`) and waits for it to be ready.
+  `~/.mono-jig/<name>/run.log`) and waits for it to be ready.
 - `run` takes a lock, then does the following in order:
   1. serves the broker on `broker.sock`;
   2. creates the sandbox the first time (`ubuntu:26.04`, 4 GiB, 4 vCPUs);
@@ -185,7 +185,7 @@ The broker setup it shares with `investigator-net` lives in `brokerd/`.
   5. waits.
 
   It creates the sandbox through the SDK, attached, with:
-  - the allowlist compiled from `filter/lists` (`INV_PROFILE`, `INV_LAYERS`);
+  - the allowlist compiled from `filter/lists` (`INV_PROFILE`, `JIG_LAYERS`);
   - strict mode off;
   - the vsock route;
   - the CA written in as a patch.
@@ -201,12 +201,12 @@ The broker setup it shares with `investigator-net` lives in `brokerd/`.
 - `shell` is `msb exec -t -u agent`.
 - `ssh-config` prints a Host block with `ProxyCommand msb ssh serve`.
 - `rm` is `down` plus removing the sandbox.
-- Configuration comes from `investigator login` (since 2026-11-23, `login.go`), under the `INV_*` variables (the header of `sandbox.go`); before that, only the variables:
-  - `INV_GITLAB_USER`;
+- Configuration comes from `mono-jig login` (since 2026-11-23, `login.go`), under the `JIG_*` variables (the header of `sandbox.go`); before that, only the variables:
+  - `JIG_GITLAB_USER`;
   - glab's login as the GitLab token by default;
-  - the `inv-claude` Keychain item for Claude.
+  - the `mono-jig-claude` Keychain item for Claude.
 
-Checked on the Mac with `INV_GITLAB_USER=<user> investigator-msb up inv2` (now `investigator up inv2`):
+Checked on the Mac with `JIG_GITLAB_USER=<user> investigator-msb up inv2` (now `mono-jig up inv2`):
 
 | Check | Result |
 |---|---|
@@ -239,8 +239,8 @@ iptables). The fix is an ext4 disk of the sandbox's own at
 `/var/lib/docker` (`Mount.Owned`, kind disk; removed with the sandbox).
 
 - The supervisor creates the sandbox with a 32 GiB root disk
-  (`INV_DISK`; the default was 4 GiB) and a 64 GiB Docker disk
-  (`INV_DOCKER_DISK`, 0 for none). Both are sparse: 121 MB on the Mac after
+  (`JIG_DISK`; the default was 4 GiB) and a 64 GiB Docker disk
+  (`JIG_DOCKER_DISK`, 0 for none). Both are sparse: 121 MB on the Mac after
   pulling a few images.
 - `provision.sh`'s `docker` component installs `docker.io`, `docker-buildx`
   and `docker-compose-v2`, and adds the agent to the `docker` group.
@@ -287,7 +287,7 @@ variable set at create (`-e`) reaches both SSH and exec sessions.
 
 Checked on `inv2` (recreated): a non-login SSH command gets all of them,
 and `glab api user` and `claude -p` work in it. Restarted with
-`INV_CLAUDE_TOKEN_COMMAND=` the Claude variables are gone, and back on the
+`JIG_CLAUDE_TOKEN_COMMAND=` the Claude variables are gone, and back on the
 next normal `up`. Login shells follow too: on every start after the
 first, the supervisor writes the current `provision.sh` into the guest and
 runs only its `claude-env` component, which rewrites (or removes) the
@@ -300,7 +300,7 @@ Claude profile.d file and `/etc/environment` block. Checked both ways on
   resolve. The runtime records denied names only at debug level, which is
   too noisy to keep as is (above).
   - The supervisor creates sandboxes at debug level and follows
-    `runtime.log` (`cmd/investigator/denials.go`).
+    `runtime.log` (`cmd/mono-jig/denials.go`).
   - It appends each denial to `<state>/denials.jsonl`, in the filter's
     `Denial` format (method `dns` or `connect`), and logs it in `run.log`.
   - Once `runtime.log` passes 16 MB, the supervisor truncates it. The runtime
@@ -310,7 +310,7 @@ Claude profile.d file and `/etc/environment` block. Checked both ways on
     agent, and `evil.example.net` from a Docker container, were all
     recorded. So were Claude Code's direct calls to `api.anthropic.com`
     during provisioning.
-  - Not recorded: a connect to a bare IP. `investigator denied <name>`
+  - Not recorded: a connect to a bare IP. `mono-jig denied <name>`
     lists the hosts, most recent first.
   - **Upstream (checked 2026-11-22):** #691, "Capture & expose network
     policy deny events", is open and asks for exactly this: a public API

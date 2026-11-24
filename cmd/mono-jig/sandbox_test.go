@@ -13,8 +13,8 @@ import (
 
 	m "github.com/superradcompany/microsandbox/sdk/go"
 
-	"mcp-restrict/allowlist"
-	"mcp-restrict/guest"
+	"mono-jig/allowlist"
+	"mono-jig/guest"
 )
 
 func TestEgressRules(t *testing.T) {

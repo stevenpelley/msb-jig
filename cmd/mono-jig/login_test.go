@@ -8,11 +8,11 @@ import (
 	"testing"
 )
 
-// login's settings configure the broker; the INV_* variables override them.
+// login's settings configure the broker; the JIG_* variables override them.
 func TestLoadConfigSettings(t *testing.T) {
-	t.Setenv("INV_STATE", t.TempDir())
-	t.Setenv("INV_CLAUDE_TOKEN_COMMAND", "")
-	for _, k := range []string{"INV_GITLAB_USER", "INV_GITLAB_URL", "INV_GITLAB_TOKEN_COMMAND", "INV_AWS_PROFILES"} {
+	t.Setenv("JIG_STATE", t.TempDir())
+	t.Setenv("JIG_CLAUDE_TOKEN_COMMAND", "")
+	for _, k := range []string{"JIG_GITLAB_USER", "JIG_GITLAB_URL", "JIG_GITLAB_TOKEN_COMMAND", "JIG_AWS_PROFILES"} {
 		os.Unsetenv(k)
 	}
 	c := loadConfig("t", "")
@@ -35,8 +35,8 @@ func TestLoadConfigSettings(t *testing.T) {
 		t.Fatalf("glab: %q", c.broker.GitLabTokenCmd)
 	}
 
-	t.Setenv("INV_GITLAB_USER", "")
-	t.Setenv("INV_AWS_PROFILES", "c")
+	t.Setenv("JIG_GITLAB_USER", "")
+	t.Setenv("JIG_AWS_PROFILES", "c")
 	if c = loadConfig("t", ""); c.broker.GitLabUser != "" || !slices.Equal(c.broker.AWSProfiles, []string{"c"}) {
 		t.Fatalf("env over settings: %+v", c.broker)
 	}
@@ -52,14 +52,14 @@ func TestPruneAuthorizedKeys(t *testing.T) {
 		t.Fatalf("no file: %v", err)
 	}
 	os.MkdirAll(filepath.Dir(p), 0o700)
-	os.WriteFile(p, []byte("ssh-ed25519 AAA investigator-a\nssh-ed25519 BBB me@mac\nssh-ed25519 CCC investigator-b\n"), 0o600)
+	os.WriteFile(p, []byte("ssh-ed25519 AAA mono-jig-a\nssh-ed25519 BBB me@mac\nssh-ed25519 CCC mono-jig-b\n"), 0o600)
 	if err := pruneAuthorizedKeys(func(c string) bool { return c == sshHost("a") }); err != nil {
 		t.Fatal(err)
 	}
-	if b, _ := os.ReadFile(p); string(b) != "ssh-ed25519 BBB me@mac\nssh-ed25519 CCC investigator-b\n" {
+	if b, _ := os.ReadFile(p); string(b) != "ssh-ed25519 BBB me@mac\nssh-ed25519 CCC mono-jig-b\n" {
 		t.Fatalf("one: %q", b)
 	}
-	pruneAuthorizedKeys(func(c string) bool { return strings.HasPrefix(c, "investigator-") })
+	pruneAuthorizedKeys(func(c string) bool { return strings.HasPrefix(c, "mono-jig-") })
 	if b, _ := os.ReadFile(p); string(b) != "ssh-ed25519 BBB me@mac\n" {
 		t.Fatalf("all: %q", b)
 	}

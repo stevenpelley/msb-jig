@@ -1,11 +1,11 @@
 package github
 
 import (
-	"mcp-restrict/broker"
-	"mcp-restrict/broker/gitproto"
+	"mono-jig/broker"
+	"mono-jig/broker/gitproto"
 )
 
-// Config is what the provider needs from investigator login.
+// Config is what the provider needs from mono-jig login.
 type Config struct {
 	User  string       // the GitHub user the agent acts for
 	Token broker.Token // the user's token (gh's login, or the Keychain)

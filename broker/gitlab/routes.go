@@ -1,11 +1,11 @@
 package gitlab
 
 import (
-	"mcp-restrict/broker"
-	"mcp-restrict/broker/gitproto"
+	"mono-jig/broker"
+	"mono-jig/broker/gitproto"
 )
 
-// Config is what the provider needs from investigator login.
+// Config is what the provider needs from mono-jig login.
 type Config struct {
 	User     string       // the GitLab user the agent acts for
 	URL      string       // https://gitlab.com

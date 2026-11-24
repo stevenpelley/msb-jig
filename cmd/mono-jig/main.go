@@ -1,28 +1,28 @@
-// Command investigator is the harness CLI. A sandbox is a microsandbox VM
+// Command mono-jig is the harness CLI. A sandbox is a microsandbox VM
 // owned by a supervisor process that also serves the broker
 // (docs/microsandbox.md); the commands taking a <name> manage one.
 //
-//	investigator setup              check the Mac, write the harness's VS Code profile, build the base image
-//	investigator login [provider]   record GitLab, GitHub, Claude and AWS for the broker (login.go); alone: what's recorded
-//	investigator logout [provider]  forget them, and remove their Keychain items
-//	investigator image build        your own sandbox image, from a Dockerfile (image.go)
-//	investigator open <name> [dir]  start the sandbox if needed (creating it the first time), then VS Code on dir
-//	investigator stop <name>        stop it
-//	investigator cp <src> <dst>     copy files between the Mac and a sandbox (mounts.go: host folders)
-//	investigator uninstall          remove every sandbox, the state directory and the Keychain items
+//	mono-jig setup              check the Mac, write the harness's VS Code profile, build the base image
+//	mono-jig login [provider]   record GitLab, GitHub, Claude and AWS for the broker (login.go); alone: what's recorded
+//	mono-jig logout [provider]  forget them, and remove their Keychain items
+//	mono-jig image build        your own sandbox image, from a Dockerfile (image.go)
+//	mono-jig open <name> [dir]  start the sandbox if needed (creating it the first time), then VS Code on dir
+//	mono-jig stop <name>        stop it
+//	mono-jig cp <src> <dst>     copy files between the Mac and a sandbox (mounts.go: host folders)
+//	mono-jig uninstall          remove every sandbox, the state directory and the Keychain items
 //
 // And beneath them, for the checks:
 //
-//	investigator up <name>          start the supervisor in the background (creates and provisions the sandbox once)
-//	investigator run <name>         the supervisor, in the foreground
-//	investigator down <name>        stop the supervisor, and with it the sandbox
-//	investigator shell <name>       a login shell as the agent user
-//	investigator code <name> [dir]  VS Code on the sandbox, with the harness's settings
-//	investigator ssh-config <name>  write and print the sandbox's OpenSSH Host block
-//	investigator denied <name>      the hosts its egress policy refused (denials.jsonl)
-//	investigator rm <name>          down, then remove the sandbox and its disks (the state directory stays)
-//	investigator allowlist          the hosts a new sandbox may reach
-//	investigator ssh-setup          SSH keys and config for an sshd-based sandbox (sbx, checks/step1-docker.sh)
+//	mono-jig up <name>          start the supervisor in the background (creates and provisions the sandbox once)
+//	mono-jig run <name>         the supervisor, in the foreground
+//	mono-jig down <name>        stop the supervisor, and with it the sandbox
+//	mono-jig shell <name>       a login shell as the agent user
+//	mono-jig code <name> [dir]  VS Code on the sandbox, with the harness's settings
+//	mono-jig ssh-config <name>  write and print the sandbox's OpenSSH Host block
+//	mono-jig denied <name>      the hosts its egress policy refused (denials.jsonl)
+//	mono-jig rm <name>          down, then remove the sandbox and its disks (the state directory stays)
+//	mono-jig allowlist          the hosts a new sandbox may reach
+//	mono-jig ssh-setup          SSH keys and config for an sshd-based sandbox (sbx, checks/step1-docker.sh)
 package main
 
 import (
@@ -31,12 +31,12 @@ import (
 	"os"
 	"path/filepath"
 
-	"mcp-restrict/allowlist"
-	"mcp-restrict/editor"
+	"mono-jig/allowlist"
+	"mono-jig/editor"
 )
 
 func usage() {
-	fmt.Fprintln(os.Stderr, `usage: investigator <command> ...
+	fmt.Fprintln(os.Stderr, `usage: mono-jig <command> ...
 
   setup                   check what's needed, set up the harness's VS Code, build the base image
   login                   show what the broker uses for GitLab, GitHub, Claude and AWS
@@ -56,7 +56,7 @@ func usage() {
   open <name> [dir] --mount host[:guest][:ro] ...
                           when creating it, also mount these Mac folders (guest path under
                           /mnt; default /mnt/<folder name>). Every sandbox has
-                          ~/.investigator/<name>/share at /mnt/host (and ~/host)
+                          ~/.mono-jig/<name>/share at /mnt/host (and ~/host)
   cp <src> <dst>          copy between the Mac and a sandbox; a sandbox path is
                           <name>:<path>, relative to the agent's home unless absolute
   stop <name>             stop it
@@ -78,7 +78,7 @@ sandboxes, beneath open and stop:
   rm <name>          stop and remove it, with its disks
 
 other:
-  allowlist [-format list|sbx]  the hosts a new sandbox may reach (base, INV_LAYERS, ~/.investigator/allowlist.yaml)
+  allowlist [-format list|sbx]  the hosts a new sandbox may reach (base, JIG_LAYERS, ~/.mono-jig/allowlist.yaml)
   ssh-setup [flags]  SSH keys and config for an sshd-based sandbox (sbx, checks/step1-docker.sh)`)
 	os.Exit(2)
 }
@@ -128,11 +128,11 @@ func main() {
 }
 
 func defaultState() string {
-	if d := os.Getenv("INVESTIGATOR_STATE"); d != "" {
+	if d := os.Getenv("JIG_STATE"); d != "" {
 		return d
 	}
 	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".local", "state", "investigator")
+	return filepath.Join(home, ".local", "state", "mono-jig")
 }
 
 func sshSetup(args []string) {
@@ -169,7 +169,7 @@ func sshSetup(args []string) {
 }
 
 // allowlistCmd prints the hosts a new sandbox would reach: the base, the
-// INV_LAYERS files and the user's layer, less the hosts of the providers
+// JIG_LAYERS files and the user's layer, less the hosts of the providers
 // you're logged in to (allowed).
 func allowlistCmd(args []string) {
 	fs := flag.NewFlagSet("allowlist", flag.ExitOnError)

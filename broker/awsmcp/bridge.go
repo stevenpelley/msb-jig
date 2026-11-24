@@ -19,8 +19,8 @@ import (
 	"syscall"
 	"time"
 
-	"mcp-restrict/broker"
-	"mcp-restrict/broker/mcp"
+	"mono-jig/broker"
+	"mono-jig/broker/mcp"
 )
 
 // Bridge is the plumbing between HTTP and AWS's stdio proxy.
@@ -169,7 +169,7 @@ func (a *Bridge) runChild(ctx context.Context) error {
 func (a *Bridge) initialize(ctx context.Context, c *awsChild) error {
 	params, _ := json.Marshal(map[string]any{
 		"protocolVersion": awsProtocolVersion, "capabilities": map[string]any{},
-		"clientInfo": map[string]string{"name": "investigator-broker", "version": "0"},
+		"clientInfo": map[string]string{"name": "mono-jig-broker", "version": "0"},
 	})
 	ictx, cancel := context.WithTimeout(ctx, 2*time.Minute) // uv may resolve the first time
 	defer cancel()
@@ -276,7 +276,7 @@ func (c *awsChild) dispatch(line []byte, log *slog.Logger) {
 		_ = c.write(map[string]any{"jsonrpc": "2.0", "id": m.ID, "result": map[string]any{}})
 	case m.Method != "" && len(m.ID) > 0:
 		_ = c.write(map[string]any{"jsonrpc": "2.0", "id": m.ID,
-			"error": map[string]any{"code": -32601, "message": "the investigator broker answers no server requests"}})
+			"error": map[string]any{"code": -32601, "message": "the mono-jig broker answers no server requests"}})
 	case m.Method != "":
 		// A notification (progress, logging): nobody to send it to.
 	default:
@@ -298,7 +298,7 @@ func (a *Bridge) Serve(w http.ResponseWriter, c *broker.Call) {
 	r := c.R
 	var m mcp.Message
 	if err := json.NewDecoder(c.Body).Decode(&m); err != nil {
-		mcp.RPCError(w, nil, -32700, "investigator broker: not a JSON-RPC 2.0 message")
+		mcp.RPCError(w, nil, -32700, "mono-jig broker: not a JSON-RPC 2.0 message")
 		return
 	}
 	if len(m.ID) == 0 {
@@ -313,7 +313,7 @@ func (a *Bridge) Serve(w http.ResponseWriter, c *broker.Call) {
 	}
 	child, err := a.child(r.Context(), 2*time.Minute)
 	if err != nil {
-		mcp.RPCError(w, m.ID, -32603, "investigator broker: the AWS MCP proxy isn't running: "+err.Error())
+		mcp.RPCError(w, m.ID, -32603, "mono-jig broker: the AWS MCP proxy isn't running: "+err.Error())
 		return
 	}
 	if m.Method == "initialize" {
@@ -322,12 +322,12 @@ func (a *Bridge) Serve(w http.ResponseWriter, c *broker.Call) {
 	}
 	res, err := child.call(r.Context(), a.nextID.Add(1), m.Method, m.Params)
 	if err != nil {
-		mcp.RPCError(w, m.ID, -32603, "investigator broker: "+err.Error())
+		mcp.RPCError(w, m.ID, -32603, "mono-jig broker: "+err.Error())
 		return
 	}
 	var out map[string]json.RawMessage
 	if err := json.Unmarshal(res, &out); err != nil {
-		mcp.RPCError(w, m.ID, -32603, "investigator broker: bad response from the AWS MCP proxy")
+		mcp.RPCError(w, m.ID, -32603, "mono-jig broker: bad response from the AWS MCP proxy")
 		return
 	}
 	out["id"] = m.ID

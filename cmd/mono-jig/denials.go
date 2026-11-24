@@ -202,6 +202,6 @@ func denied(state string) {
 		fmt.Printf("%s  %-40s %4d×%s\n", a.last.Local().Format("2006-01-02 15:04:05"), a.host, a.n, port)
 	}
 	if len(list) > 0 {
-		fmt.Println("\nTo allow a host: add it to a layer file, pass it in INV_LAYERS, then investigator rm and up (rules are fixed at create).")
+		fmt.Println("\nTo allow a host: add it to a layer file, pass it in JIG_LAYERS, then mono-jig rm and up (rules are fixed at create).")
 	}
 }

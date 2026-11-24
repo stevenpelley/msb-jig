@@ -6,8 +6,8 @@ import (
 	"net/url"
 	"testing"
 
-	"mcp-restrict/broker"
-	"mcp-restrict/broker/providers"
+	"mono-jig/broker"
+	"mono-jig/broker/providers"
 )
 
 // sbx mode: plain HTTP, Host host.docker.internal:<port>, a session

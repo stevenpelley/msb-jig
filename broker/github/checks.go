@@ -6,8 +6,8 @@ import (
 	"regexp"
 	"strings"
 
-	"mcp-restrict/broker"
-	"mcp-restrict/broker/gitproto"
+	"mono-jig/broker"
+	"mono-jig/broker/gitproto"
 )
 
 // The checks on the GitHub routes (routes.go).

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # install-keys.sh: install the per-sandbox SSH host key and the user's
-# authorized key, generated on the Mac by `investigator`.
+# authorized key, generated on the Mac by `mono-jig`.
 #
 # Reads a tar stream on stdin with two files:
 #   ssh_host_ed25519_key   the host's private key (its public half is pinned

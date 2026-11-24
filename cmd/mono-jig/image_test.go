@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"mcp-restrict/guest"
+	"mono-jig/guest"
 )
 
 func TestParseImageFile(t *testing.T) {
@@ -33,7 +33,7 @@ func TestImageComponents(t *testing.T) {
 			t.Errorf("image.Dockerfile lacks %q", s)
 		}
 	}
-	if baseTag() != baseTag() || !strings.HasPrefix(baseTag(), "localhost/investigator-base:") {
+	if baseTag() != baseTag() || !strings.HasPrefix(baseTag(), "localhost/mono-jig-base:") {
 		t.Errorf("baseTag %q", baseTag())
 	}
 }

@@ -22,7 +22,7 @@ var (
 )
 
 func fail(f string, a ...any) {
-	fmt.Fprintf(os.Stderr, "investigator: "+f+"\n", a...)
+	fmt.Fprintf(os.Stderr, "mono-jig: "+f+"\n", a...)
 	os.Exit(1)
 }
 
@@ -157,7 +157,7 @@ func up(name, state string) {
 			fail("not ready after 20 minutes; see %s", logPath)
 		case <-tick.C:
 			if _, err := os.Stat(ready); err == nil {
-				fmt.Printf("%s is up (supervisor pid %d)\n  shell:   investigator shell %[3]s\n  VS Code: investigator code %[3]s\n  down:    investigator down %[3]s\n", name, c.Process.Pid, name)
+				fmt.Printf("%s is up (supervisor pid %d)\n  shell:   mono-jig shell %[3]s\n  VS Code: mono-jig code %[3]s\n  down:    mono-jig down %[3]s\n", name, c.Process.Pid, name)
 				return
 			}
 		}

@@ -6,12 +6,12 @@
 # itself), with an optional port: 443 by default, or 80.
 #
 # A group with a provider leaves the allowlist when the broker serves that
-# provider (the user ran investigator login for it): the sandbox reaches it
+# provider (the user ran mono-jig login for it): the sandbox reaches it
 # only through the broker then. Without the login it is reached directly,
 # anonymously.
 #
 # Hosts marked "unverified" were written from what we knew, not checked
-# against a tool's real traffic; investigator denied <name> shows what's
+# against a tool's real traffic; mono-jig denied <name> shows what's
 # missing.
 groups:
   claude-code:

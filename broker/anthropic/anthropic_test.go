@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"mcp-restrict/broker"
-	"mcp-restrict/broker/providers"
+	"mono-jig/broker"
+	"mono-jig/broker/providers"
 )
 
 const anthropicHost = "anthropic.broker.internal"

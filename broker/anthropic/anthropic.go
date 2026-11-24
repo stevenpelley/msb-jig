@@ -10,7 +10,7 @@ import (
 	"net/http"
 	"strings"
 
-	"mcp-restrict/broker"
+	"mono-jig/broker"
 )
 
 // Routes is every request the Anthropic provider serves: its upstream,
@@ -24,7 +24,7 @@ func Routes(up broker.Upstreams, c Config) []broker.Route {
 	}
 }
 
-// Config is what the provider needs from investigator login.
+// Config is what the provider needs from mono-jig login.
 type Config struct {
 	Token  broker.Token // the user's credential (the Keychain)
 	APIURL string       // tests: the API, if not https://api.anthropic.com

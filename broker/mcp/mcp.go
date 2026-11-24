@@ -12,7 +12,7 @@ import (
 	"net/http"
 	"strings"
 
-	"mcp-restrict/broker"
+	"mono-jig/broker"
 )
 
 // Message is one JSON-RPC message.
@@ -36,7 +36,7 @@ var Methods = map[string]bool{
 func Read(c *broker.Call) (*Message, broker.Decision) {
 	var id json.RawMessage
 	code := -32600
-	c.DenyWith(func(w http.ResponseWriter, reason string) { RPCError(w, id, code, "investigator broker: "+reason) })
+	c.DenyWith(func(w http.ResponseWriter, reason string) { RPCError(w, id, code, "mono-jig broker: "+reason) })
 	body, err := c.ReadBody()
 	if err != nil {
 		return nil, broker.Deny("%v", err)
@@ -75,7 +75,7 @@ func DenyAsTool(c *broker.Call, id json.RawMessage, tool string) {
 		w.WriteHeader(http.StatusOK)
 		_ = json.NewEncoder(w).Encode(map[string]any{"jsonrpc": "2.0", "id": id, "result": map[string]any{
 			"isError": true,
-			"content": []map[string]string{{"type": "text", "text": fmt.Sprintf("investigator broker denied %s: %s", tool, reason)}},
+			"content": []map[string]string{{"type": "text", "text": fmt.Sprintf("mono-jig broker denied %s: %s", tool, reason)}},
 		}})
 	})
 }

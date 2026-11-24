@@ -18,12 +18,12 @@ import (
 // Host folders in the sandbox. Every sandbox has an exchange folder,
 // <state>/share on the Mac, at /mnt/host in the guest (and ~/host, a link
 // to it). More folders are mounted with --mount host[:guest][:ro] when the
-// sandbox is created (investigator up or open): microsandbox can't change
+// sandbox is created (mono-jig up or open): microsandbox can't change
 // a sandbox's mounts afterwards, so the list is saved in
 // <state>/mounts.json, the supervisor applies it at create, and a sandbox
-// that exists refuses a new one (investigator rm first). Guest paths are
+// that exists refuses a new one (mono-jig rm first). Guest paths are
 // under /mnt: the agent's home is made at the first start, and a mount
-// there before it would leave it root's. investigator cp copies single
+// there before it would leave it root's. mono-jig cp copies single
 // files either way without a mount.
 
 const (
@@ -110,7 +110,7 @@ func saveMounts(name, state string, specs []string) {
 		ms = append(ms, mt)
 	}
 	if _, err := m.GetSandbox(context.Background(), name); err == nil {
-		fail("%s exists, and its mounts were fixed when it was made: investigator rm %s, then again with --mount", name, name)
+		fail("%s exists, and its mounts were fixed when it was made: mono-jig rm %s, then again with --mount", name, name)
 	} else if !m.IsKind(err, m.ErrSandboxNotFound) {
 		fail("%v", err)
 	}

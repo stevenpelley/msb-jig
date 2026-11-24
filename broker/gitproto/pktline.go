@@ -118,7 +118,7 @@ func rejectPush(p *pushRequest, reason string) []byte {
 		return status.Bytes()
 	}
 	var out bytes.Buffer
-	out.Write(pkt("\x02investigator broker: " + reason + "\n"))
+	out.Write(pkt("\x02mono-jig broker: " + reason + "\n"))
 	b := status.Bytes()
 	for len(b) > 0 {
 		n := min(len(b), 900)

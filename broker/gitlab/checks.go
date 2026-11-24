@@ -11,8 +11,8 @@ import (
 	"github.com/vektah/gqlparser/v2/ast"
 	"github.com/vektah/gqlparser/v2/parser"
 
-	"mcp-restrict/broker"
-	"mcp-restrict/broker/gitproto"
+	"mono-jig/broker"
+	"mono-jig/broker/gitproto"
 )
 
 // The checks on the GitLab routes (routes.go).

@@ -1,4 +1,4 @@
-# Investigator in a box: design notes
+# mono-jig: design notes
 
 The goal is a packaged sandbox that coworkers can run with one command. It contains kiro-cli, every tool our projects need to run tests, and managed access to GitHub, AWS, Datadog and Wiz using each developer's own credentials. A developer hands it a Datadog alert link or a Wiz issue, and the agent investigates. The same setup should later serve as the foundation for headless, automated agents.
 
@@ -23,7 +23,7 @@ The goal is a packaged sandbox that coworkers can run with one command. It conta
 
 The parts that don't carry over are small: one provider adapter, the agent profile and the editor settings.
 
-Both tracks also serve as a **general dev sandbox**: the egress allowlist has an `investigator` profile and a broader `dev` profile with documentation and tool-download hosts (see [Egress filtering](#egress-filtering-a-separate-policy-from-the-brokers)).
+Both tracks also serve as a **general dev sandbox**: the egress allowlist has an `mono-jig` profile and a broader `dev` profile with documentation and tool-download hosts (see [Egress filtering](#egress-filtering-a-separate-policy-from-the-brokers)).
 
 These notes compare building it on **Docker Sandboxes (sbx)** and on **NVIDIA OpenShell**. The research was done on 2026-11-21 with OpenShell 0.1.9 and sbx v0.54.0 on macOS. Items marked *unverified* haven't been tested.
 
@@ -84,7 +84,7 @@ In both editors, files, terminals and the agent run in the sandbox. Only the edi
   - The extension is Microsoft's and licensed only for Microsoft's VS Code, which is presumably why Kiro built its own.
 - **The CLI can own the SSH configuration.** `remote.SSH.configFile` points VS Code at the CLI's own file, so `~/.ssh/config` stays untouched.
 - **No Microsoft egress needed from the sandbox.** With `remote.SSH.localServerDownload: "always"`, the Mac downloads the VS Code server and copies it over SSH. The exact values of that setting are *unverified*.
-- **Opening the window.** `code --remote ssh-remote+<host> /workspace` opens it directly, so `investigator open` can launch it.
+- **Opening the window.** `code --remote ssh-remote+<host> /workspace` opens it directly, so `mono-jig open` can launch it.
 - **A separate VS Code instance for the harness:**
   - Launch with `code --user-data-dir <state>/vscode --extensions-dir <state>/vscode-ext`.
   - That instance has its own settings, extensions and signed-in accounts, so the developer's everyday VS Code accounts (GitHub, Microsoft) and Settings Sync never reach the sandbox.
@@ -94,7 +94,7 @@ In both editors, files, terminals and the agent run in the sandbox. Only the edi
 - **Extensions:** set `extensions.allowed` to our short list and ignore workspace extension recommendations, so a repo can't pull new extensions into the harness instance.
 - **Dev Containers** (`ms-vscode-remote.remote-containers`) can build a container on the SSH host, using the host's Docker. That gives "Reopen in Container" in [Dev containers](#dev-containers-only-inside-the-vm).
 
-### What the `investigator` CLI configures
+### What the `mono-jig` CLI configures
 
 - **sshd in the sandbox image:** key-only authentication, one user, no passwords. It also refuses forwarding on the server side: `AllowAgentForwarding no`, `X11Forwarding no`, `PermitTunnel no`, `AllowStreamLocalForwarding no`, and `AllowTcpForwarding local`, because the editors reach their server through local forwards but nothing needs remote ones. Then the SSH bridges stay closed even if the editor's settings are wrong. Whether VS Code and Kiro work with these settings is *unverified*. Lima's own user and key must keep working: Lima waits for SSH at boot and runs its checks over it.
   - **This is a guard against mistakes, not against the agent.** The agent may be root in the VM (and Docker access makes it root anyway), and it runs as the same user as the editor's server, so it can change `sshd_config` or `~/.vscode-server`. Only settings enforced on the Mac (the client SSH config, the harness instance's settings) count as controls.
@@ -108,7 +108,7 @@ In both editors, files, terminals and the agent run in the sandbox. Only the edi
   - The `ProxyCommand` route is better, because it leaves no listening port that any process on the Mac could reach. Both editors accept a `ProxyCommand` on the first hop.
   - **OpenShell** already sets up SSH (`sandbox connect --editor vscode`). Whether it writes a plain SSH config that Kiro accepts is *unverified*.
 - **Editor settings**, written into the harness's own VS Code instance or Kiro's settings: the ones in the next section that close the credential bridges.
-- **`investigator open`** starts `investigator-net` and the sandbox, then opens the editor on the remote folder.
+- **`mono-jig open`** starts `investigator-net` and the sandbox, then opens the editor on the remote folder.
 
 ### The new trust boundary: the IDE connection
 
@@ -124,7 +124,7 @@ SSH and the editor's remote channel form a second path between the sandbox and t
 | Port forwarding toward the Mac | Lima forwards every guest port bound on `127.0.0.1` or `0.0.0.0` to the Mac's `127.0.0.1` by default, and VS Code auto-forwards ports it sees. The agent could take the port of a login callback, or pose as one of the user's local dev servers. | A Lima `portForwards` rule with `ignore: true` for all ports and protocols; `remote.autoForwardPorts: false`; keep `remote.localPortHost` at `localhost`. Forward a port only when the user asks. |
 | Opening URLs on the Mac | `$BROWSER` and `code --openExternal` in a remote terminal open a URL in the Mac's browser, with the user's cookies and outside the filter | Remove `$BROWSER` in the remote environment and test whether `openExternal` can be refused (*unverified*); `checks/bridges.sh` probes it |
 
-**The agent's own sign-in token lives in the sandbox.** That's intended, since the agent needs model access there. It's one more reason to keep sandbox state in a volume that `investigator logout` wipes.
+**The agent's own sign-in token lives in the sandbox.** That's intended, since the agent needs model access there. It's one more reason to keep sandbox state in a volume that `mono-jig logout` wipes.
 
 This adds a component to the trust table in `enforcement.md`: we rely on the editor not to pass credentials into the sandbox, and we control that only through the settings we ship.
 
@@ -328,7 +328,7 @@ Keep the current pattern:
 
 ### Datadog
 
-`investigator login` runs the OAuth login on the Mac, and the broker holds the token. Otherwise, the broker holds a read-only API key plus application key.
+`mono-jig login` runs the OAuth login on the Mac, and the broker holds the token. Otherwise, the broker holds a read-only API key plus application key.
 
 ### Wiz
 
@@ -342,11 +342,11 @@ Keep the current pattern:
 - **the runtime's own policy where it has one** (sbx, OpenShell);
 - on Lima, **an embedded explicit proxy** with a hostname ACL: our own, in `filter/` (about 400 lines). Stripe's smokescreen was the first choice, but it always resolves the destination itself and checks the address it gets, including when it dials an upstream proxy, so it can't chain to a proxy with a private address or run where external names don't resolve (both true in sbx and behind corporate proxies; decided 2026-11-22). It runs inside `investigator-net`, the same process as the network stack and the broker, but as its own component with its own ACL (see [Packaging: one process per sandbox](#packaging-one-process-per-sandbox)).
 
-**The same harness serves as a general dev sandbox.** The investigator is one configuration of the allowlist. A broader one adds documentation sites for common tools and services, and the hosts that serve development and production tools (package registries, release downloads, container registries). It becomes the everyday sandbox for developers.
+**The same harness serves as a general dev sandbox.** The mono-jig is one configuration of the allowlist. A broader one adds documentation sites for common tools and services, and the hosts that serve development and production tools (package registries, release downloads, container registries). It becomes the everyday sandbox for developers.
 
 **The allowlist comes in layers:**
 - **Base:** what every sandbox needs (the agent's own hosts, the OS package mirror, the broker).
-- **Profile:** `investigator` (narrow: what tests need and a short documentation list) or `dev` (broad documentation and tool-download lists).
+- **Profile:** `mono-jig` (narrow: what tests need and a short documentation list) or `dev` (broad documentation and tool-download lists).
 - **Org:** our additions, shipped with the CLI.
 - **User:** personal additions.
 
@@ -358,7 +358,7 @@ Lists are grouped by tool or service, such as "Go toolchain", "Node", "Terraform
 - **Exfiltration.** Every allowed host that accepts writes (an issue tracker, a paste site) is a channel for code or data, and a broad `dev` list can't close them all. A domain filter also has the usual leaks: shared CDN addresses, domain fronting, DNS queries. The filter's logs show what the agent reached.
 - **Supply chain.** More download hosts mean more places untrusted code can come from.
 
-The `investigator` profile stays narrow because it runs unattended on alerts. A user who picks `dev` trades some of this for convenience.
+The `mono-jig` profile stays narrow because it runs unattended on alerts. A user who picks `dev` trades some of this for convenience.
 
 **What we do close, because it's cheap and accidents happen:**
 - **The Mac's other local services.** Otherwise the agent reaches dev servers, MCP gateways, or a Docker or Podman API listening on TCP. On Lima, the netstack closes this by construction: the broker and the proxy listen on the VM's virtual network, not on the Mac, and the netstack forwards nothing ([why](#why-the-broker-and-the-filter-listen-on-the-netstack)). But **the filter dials from the Mac**, so it must refuse the Mac's own addresses itself:
@@ -378,11 +378,11 @@ MCP tool calls put the whole response into the agent's context. For large result
 
 ### Starting an investigation
 
-The CLI's commands are in [Install and uninstall](#install-and-uninstall): `investigator login` runs the provider logins on the Mac, then the agent signs in inside the VM. An investigation is one more command on top, `investigator run <alert link or Wiz issue>`, which opens the sandbox and starts the agent with the link as its prompt: Claude Code with `claude -p`, or kiro-cli with its non-interactive flags (`--no-interactive`, `--trust-all-tools`, *unverified*). The same command covers headless runs.
+The CLI's commands are in [Install and uninstall](#install-and-uninstall): `mono-jig login` runs the provider logins on the Mac, then the agent signs in inside the VM. An investigation is one more command on top, `mono-jig run <alert link or Wiz issue>`, which opens the sandbox and starts the agent with the link as its prompt: Claude Code with `claude -p`, or kiro-cli with its non-interactive flags (`--no-interactive`, `--trust-all-tools`, *unverified*). The same command covers headless runs.
 
 ## Packaging: one process per sandbox
 
-*Since 2026-11-22 the one process is the `investigator` supervisor, which holds the microsandbox VM and serves the broker (`microsandbox.md`). The Lima form below is kept as the record.*
+*Since 2026-11-22 the one process is the `mono-jig` supervisor, which holds the microsandbox VM and serves the broker (`microsandbox.md`). The Lima form below is kept as the record.*
 
 *Rewritten 2026-11-22. The earlier plan, a broker container stack under Podman with `docker/mcp-gateway`, is dropped: on a Mac without Docker Desktop a container means another VM (Podman machine), and whether a Lima VM could reach a port Podman forwards was unknown. Nothing runs under `launchd` either.*
 
@@ -390,7 +390,7 @@ The CLI's commands are in [Install and uninstall](#install-and-uninstall): `inve
 
 ```
 Mac
-  investigator CLI ──starts, checks, stops──▶ the two processes below
+  mono-jig CLI ──starts, checks, stops──▶ the two processes below
   investigator-net <sandbox>      (ours; one per sandbox; runs only while the VM runs)
     gvisor-tap-vsock netstack ── the VM's only NIC (a Lima user-v2 network)
       ├─ gateway:53    DNS: answers only proxy.internal and *.broker.internal
@@ -409,7 +409,7 @@ Mac
 
 | Piece | Ours or stock | Role |
 |---|---|---|
-| `investigator` CLI | Ours | `setup`, `login`, `open`, `stop`, `allow`, `denied`, `logout`, `uninstall`. Generates the ACL, the policy settings (user name, allowed repos), the SSH config and the editor settings. Starts `investigator-net`, then the VM, and cleans up on delete. |
+| `mono-jig` CLI | Ours | `setup`, `login`, `open`, `stop`, `allow`, `denied`, `logout`, `uninstall`. Generates the ACL, the policy settings (user name, allowed repos), the SSH config and the editor settings. Starts `investigator-net`, then the VM, and cleans up on delete. |
 | `investigator-net` | Ours, built on gvisor-tap-vsock | The VM's network, the domain filter and the broker, in one Go binary with separate packages for each |
 | VM image | Ours (`sandbox/provision.sh`) on a stock Ubuntu cloud image | Everything the agent and the tests need. `HTTPS_PROXY` points at `proxy.internal`; git `insteadOf`, `gh`, `glab` and the MCP client point at the `*.broker.internal` hosts. |
 | Lima | Stock | Boots and runs the VM: disks, cloud-init, vsock SSH, the guest agent |
@@ -429,7 +429,7 @@ They're served on the VM network's gateway address, inside the process, the way 
 
 ### Lifecycle
 
-- **Now:** `investigator open` starts `investigator-net`, writes its PID into Lima's `usernet_<name>.pid`, checks it, then runs `limactl start`. On `investigator stop`, Lima stops the VM and kills the pidfile's process, which is ours.
+- **Now:** `mono-jig open` starts `investigator-net`, writes its PID into Lima's `usernet_<name>.pid`, checks it, then runs `limactl start`. On `mono-jig stop`, Lima stops the VM and kills the pidfile's process, which is ours.
 - **The pidfile check alone isn't race-free.** Lima only checks that the pidfile's process is alive, then starts its own unfiltered daemon if not. That leaves gaps: `investigator-net` dying between the check and the boot; a start that skips the CLI (`limactl start` typed by hand, a GUI); or a user's `_config/default.yaml` or `override.yaml` merging in `vzNAT` or another network, which Lima adds as an extra, unfiltered NIC. So the CLI also:
   - **uses its own `LIMA_HOME`,** so the user's Lima defaults and overrides never apply, and the harness's VMs don't show up in the user's `limactl list`;
   - **defines the network only while `investigator-net` runs:** the CLI writes the `networks.yaml` entry just before boot and removes it on stop, so a stray start fails with "network not found";
@@ -445,8 +445,8 @@ They're served on the VM network's gateway address, inside the process, the way 
 ### Credentials and logins
 
 - `investigator-net` runs as the user on the Mac, so it can use **macOS Keychain** for GitLab, GitHub, Datadog and Wiz tokens. That's better than the old plan's unencrypted volume.
-- **AWS:** `AWS_CONFIG_FILE` and `AWS_SHARED_CREDENTIALS_FILE` point into the CLI's own directory, so the real `~/.aws` is never read or written. `investigator login` runs the SSO or `okta-aws-cli` device login.
-- **GitLab and GitHub:** a device-code login, or a token the user pastes into `investigator login`, stored in Keychain.
+- **AWS:** `AWS_CONFIG_FILE` and `AWS_SHARED_CREDENTIALS_FILE` point into the CLI's own directory, so the real `~/.aws` is never read or written. `mono-jig login` runs the SSO or `okta-aws-cli` device login.
+- **GitLab and GitHub:** a device-code login, or a token the user pastes into `mono-jig login`, stored in Keychain.
 - **Datadog and Wiz:** browser OAuth with a redirect to `127.0.0.1`, handled by the CLI during `login`, not by the long-running process. Use a random port and PKCE, so a process that takes the port can't use the code. The VM can't take it anyway, since Lima forwards no guest ports.
 - **Hosted MCP servers** (GitLab, Datadog, Wiz, AWS) are remote, so the broker proxies them itself and filters their tool calls ([Hosted MCP servers](#hosted-mcp-servers-filter-tool-calls)). No MCP gateway containers.
 
@@ -467,15 +467,15 @@ sbx owns the VM's network, so `investigator-net` runs without its netstack, and 
 
 ### Install and uninstall
 
-Ship a small Homebrew tap that installs `investigator` and `investigator-net`, with Lima as a dependency.
+Ship a small Homebrew tap that installs `mono-jig` and `investigator-net`, with Lima as a dependency.
 
 ```
-investigator setup      # build or pull the VM image, write the Lima template and the allowlist layers
-investigator login      # GitLab or GitHub, AWS, Datadog, Wiz; then the agent's own sign-in inside the VM
-investigator open       # start investigator-net and the VM, then the editor over SSH
-investigator stop       # stop the VM; investigator-net stops with it
-investigator logout     # remove tokens from Keychain and revoke where the provider supports it
-investigator uninstall  # delete the VMs, their networks and the CLI's directory, then: brew uninstall investigator
+mono-jig setup      # build or pull the VM image, write the Lima template and the allowlist layers
+mono-jig login      # GitLab or GitHub, AWS, Datadog, Wiz; then the agent's own sign-in inside the VM
+mono-jig open       # start investigator-net and the VM, then the editor over SSH
+mono-jig stop       # stop the VM; investigator-net stops with it
+mono-jig logout     # remove tokens from Keychain and revoke where the provider supports it
+mono-jig uninstall  # delete the VMs, their networks and the CLI's directory, then: brew uninstall mono-jig
 ```
 
 For headless agents in CI or Kubernetes, the broker package runs as a plain sidecar with workload credentials, without the netstack.
@@ -500,7 +500,7 @@ For headless agents in CI or Kubernetes, the broker package runs as a plain side
 2. Point the agent's MCP client at the broker's MCP endpoint. Don't use sbx's own MCP gateway or `sbx mcp auth` for the harness: Lima has neither, so the prototype must not depend on them.
 3. Don't give sbx a GitHub secret. Route `git` and `gh` through the broker instead.
 4. Add network policy with `sbx policy allow` for package registries and Kiro's endpoints.
-5. Write the `investigator` wrapper around `sbx run`, including the SSH config, the pinned host key and the editor launch (VS Code first, then Kiro).
+5. Write the `mono-jig` wrapper around `sbx run`, including the SSH config, the pinned host key and the editor launch (VS Code first, then Kiro).
 
 ### OpenShell build outline
 
@@ -544,7 +544,7 @@ Unknown hosts: sbx has an approval queue, which the CLI shows the user. Where th
 | Our image as the sandbox | **One provisioning script, two packagings.** `sandbox/provision.sh` installs everything (sshd settings, git, Docker, the agent, toolchains). The sbx image's Dockerfile runs it, and so does the Lima template's `provision` step on a stock Ubuntu cloud image. Later, `devcontainer build` output can feed both. |
 | Docker inside | `dockerd` installed by the provisioning script, as in Lima's Docker template |
 | SSH for the editor | Built in. `limactl show-ssh` (or the VM's `ssh.config`) gives the host entry, which the CLI copies into its own SSH config with our settings. Our sshd settings keep Lima's own user and key working. |
-| Domain allowlist and approvals | Our filter (`filter/`), in `investigator-net` and served on the VM's network, with a hostname ACL generated from our layers. Unknown hosts are denied and logged. `investigator denied` lists recent denials, and `investigator allow <host>` adds one to the user layer. That's simpler than sbx's queue and good enough. |
+| Domain allowlist and approvals | Our filter (`filter/`), in `investigator-net` and served on the VM's network, with a hostname ACL generated from our layers. Unknown hosts are denied and logged. `mono-jig denied` lists recent denials, and `mono-jig allow <host>` adds one to the user layer. That's simpler than sbx's queue and good enough. |
 | Forcing traffic through the filter | sbx: its user-mode network stack does it ([How sbx enforces egress](#how-sbx-enforces-egress-observed-2026-11-22)). Lima: `investigator-net` serving a `user-v2` network, the VM's only NIC ([Option C on Lima](#option-c-on-lima-the-answers-researched-2026-11-22)). |
 | Credential injection, MCP gateway | Not needed from the runtime: the broker does both |
 | Clone mode (no host mounts) | The CLI clones repos inside the VM, through the broker. Lima's default host mounts are turned off (`mounts: []`). |
@@ -583,9 +583,9 @@ sbx policy ls                                      # after `sbx rm`: are --sandb
 |---|---|---|---|
 | 1 | **Agent kits:** the agent binary, session volumes and hooks, and **the agent's model credential injected by the proxy**, so not even the model token is in the VM | The agent signs in inside the VM, so its model token lives there. `enforcement.md` assumes the broker adds the model credential instead. | **Yes, the biggest.** The broker could proxy the model API too, but Kiro's sign-in may not allow it. |
 | 2 | **TLS interception with its own CA:** credentials and rules on any host, with no client configuration | Explicit broker endpoints; the domain filter sees host names only | Deliberate. Every tool must be pointed at the broker. |
-| 3 | **Approvals with options, and a policy log** | `investigator denied` and `allow`, no live prompt | Small |
+| 3 | **Approvals with options, and a policy log** | `mono-jig denied` and `allow`, no live prompt | Small |
 | 4 | **Central org governance,** updated from Docker's side without reinstalling | An org layer shipped in the CLI, editable by the user | Deliberate ("not air-tight") |
-| 5 | **Host-side MCP servers:** stdio servers run on the Mac (this repo's `simsrv`), OAuth for remote ones, one gateway | Only hosted MCP servers, through the broker | For a general dev sandbox, not the investigator |
+| 5 | **Host-side MCP servers:** stdio servers run on the Mac (this repo's `simsrv`), OAuth for remote ones, one gateway | Only hosted MCP servers, through the broker | For a general dev sandbox, not the mono-jig |
 | 6 | **Git plumbing:** host remotes copied in without credentials; in clone mode a git daemon for `git fetch sandbox-<name>`, and the host repo mounted read-only | Work leaves only by pushing through the broker to `agent/<user>/` branches | For everyday development |
 | 7 | **A supervising daemon:** many sandboxes, agent sessions restarted after a crash, background processes, declarative `sbx env`, `sbx ports` | We turn Lima's automatic port forwarding off; nothing restarts the agent | For everyday development |
 | 8 | **Fast start from a prebuilt OCI image** | `provision.sh` at first boot takes minutes | Yes, once it's used daily: build and ship a disk image ahead of time |
@@ -638,7 +638,7 @@ Upstream filtering is coming too, but not soon enough to wait for: gvisor-tap-vs
 **What the spike still has to check on a Mac:**
 1. With our daemon (start with plain `limactl usernet` run by hand, to see the plumbing, then `investigator-net`), does the VM boot with exactly one NIC, reach the filter and the broker, and fail to reach anything else by IP or by name? A SYN to `1.1.1.1:443` and to the gateway's other ports must get a reset.
 2. Does SSH work over vsock with a systemd 256+ guest, with no port forward on the daemon?
-3. With the daemon stopped, does `investigator open` refuse? With the network entry removed, does a hand-typed `limactl start` fail? With lima#5818 built from its branch, does `limactl start` fail?
+3. With the daemon stopped, does `mono-jig open` refuse? With the network entry removed, does a hand-typed `limactl start` fail? With lima#5818 built from its branch, does `limactl start` fail?
 4. Does the post-boot check catch an extra NIC, added through an override file in our `LIMA_HOME`?
 5. Do guest ports stay unforwarded with the ignore-all `portForwards` rule?
 6. After delete: `ifconfig`, `pfctl`, `networks.yaml` and `$LIMA_HOME/_networks/` are back as they were.
@@ -739,7 +739,7 @@ The spec doesn't need a runtime that understands it:
 
 *Revised 2026-11-22.*
 
-1. **Build the broker first,** for the managed providers only, with an `investigator` CLI (see [Packaging: one process per sandbox](#packaging-one-process-per-sandbox)). It's the hard part, it doesn't depend on the sandbox tool, and it carries over to headless agents.
+1. **Build the broker first,** for the managed providers only, with an `mono-jig` CLI (see [Packaging: one process per sandbox](#packaging-one-process-per-sandbox)). It's the hard part, it doesn't depend on the sandbox tool, and it carries over to headless agents.
 2. **Personal track first** (GitLab, AWS, Claude Code, VS Code; see [Two tracks](#two-tracks-personal-first-then-work)), then the work track. The steps are in `prototype-plan.md`.
 3. **Prototype on sbx, then move to Lima before the work track.** Assume work won't allow Docker accounts. Use only the sbx features Lima can replace, and don't call the design done until it runs on Lima ([Leaving sbx](#leaving-sbx-lima)). If work does allow Docker accounts, sbx stays an option for those who want its polish.
 4. **Interactive use is an editor over SSH into the sandbox, VS Code first, then Kiro.** Bake the toolchain into the sandbox image ("toolchain in the image" in [Dev containers](#dev-containers-only-inside-the-vm)). Close the editor's credential bridges before anyone uses it.

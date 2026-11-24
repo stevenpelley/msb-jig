@@ -1,12 +1,12 @@
 # Enforcing the harness: what we have to trust
 
-The harness in `investigator-design.md` is elective: a developer can still run an agent outside it, with their own credentials. These notes ask what could make the harness *required*, and what each enforcement point makes us trust. Written 2026-11-22 from reasoning, not experiments. Items marked *unverified* haven't been checked against a source or tested.
+The harness in `design.md` is elective: a developer can still run an agent outside it, with their own credentials. These notes ask what could make the harness *required*, and what each enforcement point makes us trust. Written 2026-11-22 from reasoning, not experiments. Items marked *unverified* haven't been checked against a source or tested.
 
 ## Threats
 
 | | Threat | Who stops it |
 |---|---|---|
-| T1 | An agent inside the harness goes past its rules (prompt injection, bad judgement) | Sandbox and broker. This is what the investigator design already does. |
+| T1 | An agent inside the harness goes past its rules (prompt injection, bad judgement) | Sandbox and broker. This is what the mono-jig design already does. |
 | T2 | A user runs an agent **outside** the harness with their own credentials, because it's easier | Needs a chokepoint the user can't route around (below) |
 | T3 | A user hands a credential (a PAT, a pasted token, a file holding one) to an agent **inside** the harness | Out of scope, like T4. It's deliberate, and we don't try to stop it (decided 2026-11-22). |
 | T4 | A deliberate insider writes a script with a PAT | Out of scope. It isn't an agent problem; existing insider controls and audit cover it. |
@@ -46,7 +46,7 @@ sandbox       ──egress only via──▶ broker (model + provider proxies) a
 - **A personal model subscription or a local model, used with corporate credentials.** Corporate SASE can block model APIs except through the gateway, but in the end it's a policy question. That's acceptable: it's a deliberate act.
 - **Agents whose vendor runs the backend.** Kiro authenticates to AWS's service, not to a gateway of ours, so we can't add attestation checks there. The options are routing its backend traffic through a central egress proxy and IP-restricting the vendor or IdP side, or relying on the vendor's enterprise controls. **Research this first:** it decides whether "require the harness" is possible with the editor work provides.
   - **Lead (2026-11-22):** Kiro's service APIs can be reached through an AWS PrivateLink interface endpoint in our VPC (`com.amazonaws.us-east-1.q`, which with private DNS also serves `runtime.`, `management.` and `telemetry.us-east-1.kiro.dev`). Kiro's docs also mention AWS data perimeters. If our Kiro profile could be made to *require* that endpoint (for example an `aws:SourceVpce` condition), then a central egress that only attested brokers can use becomes the org-controlled model path. Whether such a condition is possible is *unverified*; the docs only describe reaching Kiro privately, not restricting it.
-  - **Since Kiro 1.5 the agent runs inside the sandbox** when the IDE connects over SSH (`investigator-design.md`). The model traffic to gate therefore leaves from the sandbox, through the broker, which is the shape the chain above needs. The IDE connection is a new component we rely on not to pass credentials into the sandbox.
+  - **Since Kiro 1.5 the agent runs inside the sandbox** when the IDE connects over SSH (`design.md`). The model traffic to gate therefore leaves from the sandbox, through the broker, which is the shape the chain above needs. The IDE connection is a new component we rely on not to pass credentials into the sandbox.
 - **Copying the session token out of a sandbox.** Short lifetimes plus binding the token to the broker's key (DPoP-style) make a copied token useless.
 
 ## Network-level enforcement

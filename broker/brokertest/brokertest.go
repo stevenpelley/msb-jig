@@ -21,7 +21,7 @@ import (
 	"sync"
 	"testing"
 
-	"mcp-restrict/broker"
+	"mono-jig/broker"
 )
 
 const (

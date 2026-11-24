@@ -18,8 +18,8 @@ import (
 	"os/exec"
 	"path/filepath"
 
-	"mcp-restrict/broker"
-	"mcp-restrict/broker/mcp"
+	"mono-jig/broker"
+	"mono-jig/broker/mcp"
 )
 
 // Path is the endpoint.

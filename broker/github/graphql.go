@@ -7,7 +7,7 @@ import (
 	"github.com/vektah/gqlparser/v2/ast"
 	"github.com/vektah/gqlparser/v2/parser"
 
-	"mcp-restrict/broker"
+	"mono-jig/broker"
 )
 
 // mutationCheck decides one mutation from its input argument.

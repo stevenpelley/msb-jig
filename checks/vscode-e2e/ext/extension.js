@@ -2,9 +2,9 @@
 // on the remote), never installed. In the sandbox's extension host it waits
 // for the other extensions (git adds its askpass settings to terminals),
 // opens an integrated terminal, runs bridges.sh there, saves the output,
-// and quits VS Code. Everything lives in /tmp/inv-e2e in the guest.
+// and quits VS Code. Everything lives in /tmp/jig-e2e in the guest.
 //
-// Optional, by file in /tmp/inv-e2e (run.sh writes them):
+// Optional, by file in /tmp/jig-e2e (run.sh writes them):
 //   extra.sh     run in the terminal first (output: extra.txt)
 //   install.txt  extension ids to try installing, one per line (install-result.txt)
 //   claude       Claude Code's extension: activate it and run its own binary
@@ -16,7 +16,7 @@ const vscode = require("vscode");
 const fs = require("fs");
 const cp = require("child_process");
 
-const dir = "/tmp/inv-e2e";
+const dir = "/tmp/jig-e2e";
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const has = (f) => fs.existsSync(`${dir}/${f}`);
 const kinds = { 1: "ui", 2: "workspace" };

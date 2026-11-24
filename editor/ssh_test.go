@@ -17,7 +17,7 @@ func TestGenerateKeysPinsHostKey(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.HasPrefix(string(kh), "investigator-demo ssh-ed25519 ") {
+	if !strings.HasPrefix(string(kh), "mono-jig-demo ssh-ed25519 ") {
 		t.Fatalf("known_hosts = %q", kh)
 	}
 	// The pinned key is the public half of the key the sandbox receives.
@@ -57,7 +57,7 @@ func TestWriteConfig(t *testing.T) {
 	}
 	b, _ := os.ReadFile(p.Config)
 	cfg := string(b)
-	for _, want := range []string{"Host investigator-demo", "ForwardAgent no", "IdentitiesOnly yes", "IdentityAgent none", "StrictHostKeyChecking yes", "ProxyCommand docker exec"} {
+	for _, want := range []string{"Host mono-jig-demo", "ForwardAgent no", "IdentitiesOnly yes", "IdentityAgent none", "StrictHostKeyChecking yes", "ProxyCommand docker exec"} {
 		if !strings.Contains(cfg, want) {
 			t.Errorf("config lacks %q:\n%s", want, cfg)
 		}

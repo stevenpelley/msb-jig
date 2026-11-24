@@ -16,9 +16,9 @@ import (
 
 	"log/slog"
 
-	"mcp-restrict/broker"
-	"mcp-restrict/broker/awsmcp"
-	"mcp-restrict/broker/providers"
+	"mono-jig/broker"
+	"mono-jig/broker/awsmcp"
+	"mono-jig/broker/providers"
 )
 
 // awsProtocolVersion is what the broker asks the proxy for (bridge.go).

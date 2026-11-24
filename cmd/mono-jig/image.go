@@ -14,36 +14,36 @@ import (
 	"strconv"
 	"time"
 
-	"mcp-restrict/guest"
+	"mono-jig/guest"
 )
 
-// Sandbox images. investigator image build builds, with Docker or Podman
+// Sandbox images. mono-jig image build builds, with Docker or Podman
 // on the Mac:
 //
-//   - the base image, localhost/investigator-base:<hash>, from the
+//   - the base image, localhost/mono-jig-base:<hash>, from the
 //     Dockerfile and provision.sh embedded in this binary
 //     (guest/image.Dockerfile): Ubuntu with provision.sh's parts that depend
 //     only on the image (imageComponents: packages, the agent user, git,
 //     gh, glab, Docker, Claude Code). The engine caches it, so it's rebuilt
 //     only when provision.sh changes;
 //   - then, with -f, your Dockerfile on top of it (FROM
-//     $INVESTIGATOR_BASE, passed as a build argument).
+//     $JIG_BASE, passed as a build argument).
 //
 // It loads the result into microsandbox's image cache (msb load) and
 // records it in settings.json; new sandboxes start from it. Their first
 // start runs only what the image doesn't have (firstComponents): the
 // broker's CA and settings, and Claude's and AWS's. A plain image
-// (INV_IMAGE=ubuntu:26.04) still works, with everything installed at the
-// first start. A sandbox keeps the image it was created from: investigator
+// (JIG_IMAGE=ubuntu:26.04) still works, with everything installed at the
+// first start. A sandbox keeps the image it was created from: mono-jig
 // rm, then open, to move one to a new image.
 
 const defaultImage = "ubuntu:26.04"
 
-// sandboxImage is the image new sandboxes start from: INV_IMAGE, else the
-// last image investigator image build made, else plain Ubuntu. local is
+// sandboxImage is the image new sandboxes start from: JIG_IMAGE, else the
+// last image mono-jig image build made, else plain Ubuntu. local is
 // true for a built image, which msb can't pull.
 func sandboxImage() (ref string, local bool) {
-	if v := os.Getenv("INV_IMAGE"); v != "" {
+	if v := os.Getenv("JIG_IMAGE"); v != "" {
 		return v, false
 	}
 	if s := loadSettings(); s.Image != "" {
@@ -52,13 +52,13 @@ func sandboxImage() (ref string, local bool) {
 	return defaultImage, false
 }
 
-const starterDockerfile = `# Your sandbox image, on top of investigator's base: Ubuntu with the agent
+const starterDockerfile = `# Your sandbox image, on top of mono-jig's base: Ubuntu with the agent
 # user, git, gh, glab, Docker and Claude Code. Build it with
-#   investigator image build -f <this file>
+#   mono-jig image build -f <this file>
 # which builds the base first and passes it in. Hosts your tools need at
-# run time go in ~/.investigator/allowlist.yaml.
-ARG INVESTIGATOR_BASE
-FROM ${INVESTIGATOR_BASE}
+# run time go in ~/.mono-jig/allowlist.yaml.
+ARG JIG_BASE
+FROM ${JIG_BASE}
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
       ripgrep \
@@ -110,12 +110,12 @@ func imageInit(args []string) {
 	if err := f.Close(); err != nil {
 		fail("%v", err)
 	}
-	fmt.Printf("wrote %s; add your tools, then: investigator image build -f %s\n", path, path)
+	fmt.Printf("wrote %s; add your tools, then: mono-jig image build -f %s\n", path, path)
 }
 
 func imageBuild(args []string) {
 	fs := flag.NewFlagSet("image build", flag.ExitOnError)
-	file := fs.String("f", "", "your Dockerfile, FROM $INVESTIGATOR_BASE (default: the base image alone)")
+	file := fs.String("f", "", "your Dockerfile, FROM $JIG_BASE (default: the base image alone)")
 	engine := fs.String("engine", "", "docker or podman (default: whichever is installed, docker first)")
 	_ = fs.Parse(args)
 	ctxDir := filepath.Dir(*file)
@@ -130,7 +130,7 @@ func imageBuild(args []string) {
 		fail("neither docker nor podman is installed")
 	}
 	tag := buildImage(e, *file, ctxDir)
-	fmt.Printf("new sandboxes start from %s\n(an existing sandbox keeps its image: investigator rm <name>, then open, to move it)\n", tag)
+	fmt.Printf("new sandboxes start from %s\n(an existing sandbox keeps its image: mono-jig rm <name>, then open, to move it)\n", tag)
 }
 
 // imageEngine is the engine to build with: the one named, else docker or
@@ -157,9 +157,9 @@ func buildImage(engine, file, ctxDir string) string {
 	tag := buildBase(engine)
 	if file != "" {
 		// A new tag each build: sandboxes made from an earlier build keep it.
-		tag = "localhost/investigator:" + time.Now().Format("20060102-150405")
+		tag = "localhost/mono-jig:" + time.Now().Format("20060102-150405")
 		runCmd(engine, "build", "--platform", "linux/"+runtime.GOARCH,
-			"--build-arg", "INVESTIGATOR_BASE="+baseTag(),
+			"--build-arg", "JIG_BASE="+baseTag(),
 			"-t", tag, "-f", file, ctxDir)
 	}
 	if exec.Command("msb", "image", "inspect", tag).Run() == nil {
@@ -192,13 +192,13 @@ func baseTag() string {
 	for _, s := range append([]string{guest.ImageDockerfile, guest.ProvisionScript}, baseArgs()...) {
 		fmt.Fprintf(h, "%d:%s", len(s), s)
 	}
-	return "localhost/investigator-base:" + hex.EncodeToString(h.Sum(nil)[:6])
+	return "localhost/mono-jig-base:" + hex.EncodeToString(h.Sum(nil)[:6])
 }
 
 // buildBase builds the base image from the embedded Dockerfile and
 // provision.sh, in a temporary context directory.
 func buildBase(engine string) string {
-	dir, err := os.MkdirTemp("", "investigator-base-")
+	dir, err := os.MkdirTemp("", "mono-jig-base-")
 	if err != nil {
 		fail("%v", err)
 	}

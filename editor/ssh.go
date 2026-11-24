@@ -44,7 +44,7 @@ func PathsFor(sandboxState string) SSHPaths {
 }
 
 // HostAlias is the SSH host name the editor opens: ssh-remote+<alias>.
-func HostAlias(sandbox string) string { return "investigator-" + sandbox }
+func HostAlias(sandbox string) string { return "mono-jig-" + sandbox }
 
 // GenerateKeys creates the client keypair and the host keypair for a
 // sandbox, unless they already exist. The host's public key is pinned in
@@ -65,7 +65,7 @@ func GenerateKeys(p SSHPaths, sandbox string) error {
 		return err
 	}
 
-	clientPub, err := writeKey(p.ClientKey, "investigator-client-"+sandbox)
+	clientPub, err := writeKey(p.ClientKey, "mono-jig-client-"+sandbox)
 	if err != nil {
 		return err
 	}
@@ -76,7 +76,7 @@ func GenerateKeys(p SSHPaths, sandbox string) error {
 		return err
 	}
 
-	hostPub, err := writeKey(p.HostKeyPriv, "investigator-host-"+sandbox)
+	hostPub, err := writeKey(p.HostKeyPriv, "mono-jig-host-"+sandbox)
 	if err != nil {
 		return err
 	}
@@ -109,7 +109,7 @@ type HostEntry struct {
 	Paths        SSHPaths
 }
 
-var configTmpl = template.Must(template.New("cfg").Parse(`# Written by investigator. Don't edit: regenerated on every open.
+var configTmpl = template.Must(template.New("cfg").Parse(`# Written by mono-jig. Don't edit: regenerated on every open.
 # Read by VS Code through remote.SSH.configFile; ~/.ssh/config is untouched.
 Host {{.Alias}}
   User {{.User}}

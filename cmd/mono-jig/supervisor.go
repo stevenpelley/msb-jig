@@ -19,14 +19,14 @@ import (
 
 	m "github.com/superradcompany/microsandbox/sdk/go"
 
-	"mcp-restrict/allowlist"
-	"mcp-restrict/broker"
-	"mcp-restrict/broker/awsmcp"
-	"mcp-restrict/broker/providers"
-	"mcp-restrict/guest"
+	"mono-jig/allowlist"
+	"mono-jig/broker"
+	"mono-jig/broker/awsmcp"
+	"mono-jig/broker/providers"
+	"mono-jig/guest"
 )
 
-// The supervisor (investigator run): one process per sandbox that serves
+// The supervisor (mono-jig run): one process per sandbox that serves
 // the broker and owns the VM (docs/microsandbox.md, "Tying the broker's
 // lifecycle to the sandbox's").
 //
@@ -37,39 +37,39 @@ import (
 // the allowlist. Network rules, mounts and the vsock route are set when
 // the sandbox is created; rm and open again to change them.
 //
-// The providers come from investigator login (settings.json and the
-// Keychain, login.go); the INV_* variables below override them.
+// The providers come from mono-jig login (settings.json and the
+// Keychain, login.go); the JIG_* variables below override them.
 //
 // Environment:
 //
-//	INV_STATE                 state directories (default ~/.investigator)
-//	INV_IMAGE                 the OCI image (default: the one investigator image build made, else ubuntu:26.04)
-//	INV_MEMORY                MiB (default 4096)
-//	INV_CPUS                  vCPUs (default 4)
-//	INV_DISK                  root disk, GiB (default 32; sparse)
-//	INV_DOCKER_DISK           the ext4 disk for /var/lib/docker, GiB (default 64; sparse); 0: no Docker
-//	INV_LAYERS                more allowlist layer files (an org's), before the user's (<state root>/allowlist.yaml)
-//	INV_GITLAB_USER           the GitLab user the agent acts for; empty: no GitLab provider
-//	INV_GITLAB_URL            default https://gitlab.com
-//	INV_GITLAB_TOKEN_COMMAND  default: glab's own login, or the Keychain item inv-gitlab
-//	INV_GITHUB_USER           the GitHub user the agent acts for (github.com); empty: no GitHub provider
-//	INV_GITHUB_TOKEN_COMMAND  default: gh's own login, or the Keychain item inv-github
-//	INV_CLAUDE_TOKEN_COMMAND  default: the Keychain item inv-claude, if it exists
-//	INV_AWS_PROFILES          AWS profiles for the AWS MCP proxy, the first the default, space-separated; empty: no AWS
-//	INV_AWS_MCP_COMMAND       default: the embedded aws-mcp-proxy wrapper under uv
+//	JIG_STATE                 state directories (default ~/.mono-jig)
+//	JIG_IMAGE                 the OCI image (default: the one mono-jig image build made, else ubuntu:26.04)
+//	JIG_MEMORY                MiB (default 4096)
+//	JIG_CPUS                  vCPUs (default 4)
+//	JIG_DISK                  root disk, GiB (default 32; sparse)
+//	JIG_DOCKER_DISK           the ext4 disk for /var/lib/docker, GiB (default 64; sparse); 0: no Docker
+//	JIG_LAYERS                more allowlist layer files (an org's), before the user's (<state root>/allowlist.yaml)
+//	JIG_GITLAB_USER           the GitLab user the agent acts for; empty: no GitLab provider
+//	JIG_GITLAB_URL            default https://gitlab.com
+//	JIG_GITLAB_TOKEN_COMMAND  default: glab's own login, or the Keychain item mono-jig-gitlab
+//	JIG_GITHUB_USER           the GitHub user the agent acts for (github.com); empty: no GitHub provider
+//	JIG_GITHUB_TOKEN_COMMAND  default: gh's own login, or the Keychain item mono-jig-github
+//	JIG_CLAUDE_TOKEN_COMMAND  default: the Keychain item mono-jig-claude, if it exists
+//	JIG_AWS_PROFILES          AWS profiles for the AWS MCP proxy, the first the default, space-separated; empty: no AWS
+//	JIG_AWS_MCP_COMMAND       default: the embedded aws-mcp-proxy wrapper under uv
 
 const (
 	guestUser   = "agent"
 	brokerPort  = 443 // the vsock port, and the guest's loopback port
-	guestCA     = "/usr/local/share/ca-certificates/investigator-broker-src.crt"
-	provisioned = "/var/lib/investigator/provisioned"
+	guestCA     = "/usr/local/share/ca-certificates/mono-jig-broker-src.crt"
+	provisioned = "/var/lib/mono-jig/provisioned"
 	// dockerDir is on its own ext4 disk: the root is overlayfs, and Docker's
 	// overlay snapshots can't sit on overlayfs ("invalid argument").
 	dockerDir = "/var/lib/docker"
 	// brokerNames are pointed at the guest's bridge.
 	brokerNames = providers.GitLabHost + " " + providers.GitHubHost + " " + providers.AnthropicHost + " " + providers.AWSHost
 	// mcpcliDir is where the supervisor writes mcpcli, on every start.
-	mcpcliDir = "/usr/local/lib/investigator/mcpcli"
+	mcpcliDir = "/usr/local/lib/mono-jig/mcpcli"
 )
 
 type config struct {
@@ -87,22 +87,22 @@ type config struct {
 func loadConfig(name, state string) config {
 	c := config{name: name, state: state}
 	c.image, _ = sandboxImage()
-	mem, err := strconv.ParseUint(env("INV_MEMORY", "4096"), 10, 32)
+	mem, err := strconv.ParseUint(env("JIG_MEMORY", "4096"), 10, 32)
 	if err != nil {
-		fail("INV_MEMORY: %v", err)
+		fail("JIG_MEMORY: %v", err)
 	}
-	cpus, err := strconv.ParseUint(env("INV_CPUS", "4"), 10, 8)
+	cpus, err := strconv.ParseUint(env("JIG_CPUS", "4"), 10, 8)
 	if err != nil {
-		fail("INV_CPUS: %v", err)
+		fail("JIG_CPUS: %v", err)
 	}
 	c.memory, c.cpus = uint32(mem), uint8(cpus)
-	disk, err := strconv.ParseUint(env("INV_DISK", "32"), 10, 16)
+	disk, err := strconv.ParseUint(env("JIG_DISK", "32"), 10, 16)
 	if err != nil || disk < 8 {
-		fail("INV_DISK: want GiB, at least 8")
+		fail("JIG_DISK: want GiB, at least 8")
 	}
-	docker, err := strconv.ParseUint(env("INV_DOCKER_DISK", "64"), 10, 16)
+	docker, err := strconv.ParseUint(env("JIG_DOCKER_DISK", "64"), 10, 16)
 	if err != nil {
-		fail("INV_DOCKER_DISK: %v", err)
+		fail("JIG_DOCKER_DISK: %v", err)
 	}
 	c.diskGiB, c.dockerGiB = uint32(disk), uint32(docker)
 	c.broker = brokerConfig()
@@ -117,8 +117,8 @@ func loadConfig(name, state string) config {
 	return c
 }
 
-// brokerConfig is the providers investigator login recorded, under the
-// INV_* variables.
+// brokerConfig is the providers mono-jig login recorded, under the
+// JIG_* variables.
 func brokerConfig() providers.Config {
 	var b providers.Config
 	s := loadSettings()
@@ -126,31 +126,31 @@ func brokerConfig() providers.Config {
 	if s.GitLab != nil {
 		gl = *s.GitLab
 	}
-	user := env("INV_GITLAB_USER", gl.User)
+	user := env("JIG_GITLAB_USER", gl.User)
 	if user != "" && !gitlabUserRE.MatchString(user) {
 		fail("the GitLab user %q isn't a GitLab username", user)
 	}
 	b.GitLabUser = user
-	b.GitLabURL = env("INV_GITLAB_URL", gl.URL)
+	b.GitLabURL = env("JIG_GITLAB_URL", gl.URL)
 	if user != "" {
 		u, err := url.Parse(b.GitLabURL)
 		if err != nil || u.Scheme != "https" || u.Host == "" {
 			fail("the GitLab URL %q: want https://host", b.GitLabURL)
 		}
-		b.GitLabTokenCmd = env("INV_GITLAB_TOKEN_COMMAND", gitlabTokenCommand(gl, u.Host))
+		b.GitLabTokenCmd = env("JIG_GITLAB_TOKEN_COMMAND", gitlabTokenCommand(gl, u.Host))
 	}
 	gh := githubSettings{Token: "gh"}
 	if s.GitHub != nil {
 		gh = *s.GitHub
 	}
-	b.GitHubUser = env("INV_GITHUB_USER", gh.User)
+	b.GitHubUser = env("JIG_GITHUB_USER", gh.User)
 	if b.GitHubUser != "" {
 		if !githubUserRE.MatchString(b.GitHubUser) {
 			fail("the GitHub user %q isn't a GitHub username", b.GitHubUser)
 		}
-		b.GitHubTokenCmd = env("INV_GITHUB_TOKEN_COMMAND", githubTokenCommand(gh))
+		b.GitHubTokenCmd = env("JIG_GITHUB_TOKEN_COMMAND", githubTokenCommand(gh))
 	}
-	claude, set := os.LookupEnv("INV_CLAUDE_TOKEN_COMMAND")
+	claude, set := os.LookupEnv("JIG_CLAUDE_TOKEN_COMMAND")
 	if !set && keychainHas(keychainClaude) {
 		claude = "security find-generic-password -s " + keychainClaude + " -w"
 	}
@@ -159,8 +159,8 @@ func brokerConfig() providers.Config {
 	if s.AWS != nil {
 		profiles = s.AWS.Profiles
 	}
-	b.AWSProfiles = strings.Fields(env("INV_AWS_PROFILES", strings.Join(profiles, " ")))
-	b.AWSMCPCommand = env("INV_AWS_MCP_COMMAND", "")
+	b.AWSProfiles = strings.Fields(env("JIG_AWS_PROFILES", strings.Join(profiles, " ")))
+	b.AWSMCPCommand = env("JIG_AWS_MCP_COMMAND", "")
 	return b
 }
 
@@ -168,11 +168,11 @@ func brokerConfig() providers.Config {
 // base (allowlist/lists/base.yaml), in the layer format.
 func userAllowlist() string { return filepath.Join(stateRoot(), "allowlist.yaml") }
 
-// allowed compiles the allowlist: the base, the INV_LAYERS files, then the
+// allowed compiles the allowlist: the base, the JIG_LAYERS files, then the
 // user's own layer if there is one. The hosts of the providers the broker
 // serves are left out.
 func allowed(b providers.Config) ([]allowlist.Entry, error) {
-	files := strings.Fields(env("INV_LAYERS", ""))
+	files := strings.Fields(env("JIG_LAYERS", ""))
 	if _, err := os.Stat(userAllowlist()); err == nil {
 		files = append(files, userAllowlist())
 	}
@@ -235,7 +235,7 @@ func run(name, state string) {
 	}
 	defer os.Remove(sock)
 	if len(providers) == 0 {
-		log.Warn("no broker provider configured (investigator login): the broker answers 404")
+		log.Warn("no broker provider configured (mono-jig login): the broker answers 404")
 	}
 	srv, err := broker.ServeTLS(l, providers, state, name, log)
 	if err != nil {
@@ -517,12 +517,12 @@ func components(c config) string {
 	return "base git broker claude aws-env"
 }
 
-// imageComponents are the parts of provision.sh investigator image build
+// imageComponents are the parts of provision.sh mono-jig image build
 // puts in the base image: those that depend only on the image.
 const imageComponents = "base git docker claude"
 
 // imageFile is where the base image records its parts and provision.sh.
-const imageFile = "/etc/investigator/image"
+const imageFile = "/etc/mono-jig/image"
 
 // firstComponents are the parts of provision.sh a sandbox's first start
 // runs: those its image doesn't have (all, from a plain image), and the
@@ -533,7 +533,7 @@ func firstComponents(ctx context.Context, sb *m.Sandbox, c config, log *slog.Log
 		baked, hash = parseImageFile(s)
 	}
 	if hash != "" && hash != guest.ProvisionHash() {
-		log.Warn("the image was built from another provision.sh; to bring it up to date: investigator image build, then rm and open",
+		log.Warn("the image was built from another provision.sh; to bring it up to date: mono-jig image build, then rm and open",
 			"image", hash, "binary", guest.ProvisionHash())
 	}
 	var comps []string

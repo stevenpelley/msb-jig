@@ -126,7 +126,7 @@ func (u *Upstream) Do(c *Call) (*http.Response, error) {
 	if err := u.Auth(out.Header); err != nil {
 		msg := u.NoCredential
 		if msg == "" {
-			msg = "no credential: run investigator login"
+			msg = "no credential: run mono-jig login"
 		}
 		return nil, upstreamError{http.StatusServiceUnavailable, msg}
 	}
@@ -226,5 +226,5 @@ func (f FlushWriter) Write(p []byte) (int, error) {
 func HTTPError(w http.ResponseWriter, code int, msg string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
-	_ = json.NewEncoder(w).Encode(map[string]string{"message": "investigator broker: " + msg})
+	_ = json.NewEncoder(w).Encode(map[string]string{"message": "mono-jig broker: " + msg})
 }

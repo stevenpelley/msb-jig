@@ -21,12 +21,12 @@ import (
 
 	m "github.com/superradcompany/microsandbox/sdk/go"
 
-	"mcp-restrict/editor"
+	"mono-jig/editor"
 )
 
 // --- setup ---
 
-// setup checks the Mac for what investigator needs, writes the harness's
+// setup checks the Mac for what mono-jig needs, writes the harness's
 // VS Code profile (settings, and the Remote-SSH extension in its own
 // extensions directory) and builds the base image (image.go), or pulls
 // plain Ubuntu without Docker or Podman.
@@ -79,8 +79,8 @@ func setup() {
 		}
 	}
 	image, local := sandboxImage()
-	if e := imageEngine(""); ok && image == defaultImage && os.Getenv("INV_IMAGE") == "" && e != "" {
-		fmt.Println("building the base image with", e, "(investigator image build)")
+	if e := imageEngine(""); ok && image == defaultImage && os.Getenv("JIG_IMAGE") == "" && e != "" {
+		fmt.Println("building the base image with", e, "(mono-jig image build)")
 		image, local = buildImage(e, "", ""), true
 	} else if ok && image == defaultImage {
 		fmt.Println("no docker or podman: sandboxes start from plain Ubuntu and install everything at their first start")
@@ -96,7 +96,7 @@ func setup() {
 	if !ok {
 		fail("setup isn't complete: fix the missing pieces above and run it again")
 	}
-	fmt.Printf("set up in %s\nnext: investigator login all, then investigator open <name>\n", root)
+	fmt.Printf("set up in %s\nnext: mono-jig login all, then mono-jig open <name>\n", root)
 }
 
 // --- login, logout ---
@@ -123,7 +123,7 @@ func login(args []string) {
 	default:
 		usage()
 	}
-	fmt.Println("sandboxes pick this up when they next start (investigator stop, then open)")
+	fmt.Println("sandboxes pick this up when they next start (mono-jig stop, then open)")
 }
 
 // loginAll asks about each provider in turn and logs in to those you
@@ -164,22 +164,22 @@ func loginStatus() {
 	if s.GitLab != nil {
 		fmt.Printf("gitlab  %s on %s, token from %s\n", s.GitLab.User, s.GitLab.URL, tokenSource(*s.GitLab))
 	} else {
-		fmt.Println("gitlab  not logged in (investigator login gitlab)")
+		fmt.Println("gitlab  not logged in (mono-jig login gitlab)")
 	}
 	if s.GitHub != nil {
 		fmt.Printf("github  %s on github.com, token from %s\n", s.GitHub.User, githubTokenSource(*s.GitHub))
 	} else {
-		fmt.Println("github  not logged in (investigator login github)")
+		fmt.Println("github  not logged in (mono-jig login github)")
 	}
 	if keychainHas(keychainClaude) {
 		fmt.Printf("claude  token in the Keychain (%s)\n", keychainClaude)
 	} else {
-		fmt.Println("claude  not logged in (investigator login claude): the agent signs in inside the sandbox")
+		fmt.Println("claude  not logged in (mono-jig login claude): the agent signs in inside the sandbox")
 	}
 	if s.AWS != nil && len(s.AWS.Profiles) > 0 {
 		fmt.Printf("aws     profiles %s (the first is the default)\n", strings.Join(s.AWS.Profiles, " "))
 	} else {
-		fmt.Println("aws     not logged in (investigator login aws)")
+		fmt.Println("aws     not logged in (mono-jig login aws)")
 	}
 }
 
@@ -379,7 +379,7 @@ func loginClaude(args []string) {
 	if !strings.HasPrefix(tok, "sk-ant-") {
 		fail("that isn't a Claude token (sk-ant-…)")
 	}
-	keychainStore(keychainClaude, "investigator", tok)
+	keychainStore(keychainClaude, "mono-jig", tok)
 	fmt.Println("claude: token stored in the Keychain as", keychainClaude)
 }
 
@@ -575,7 +575,7 @@ func uninstall(args []string) {
 		}
 		fmt.Println("removed", n)
 	}
-	if err := pruneAuthorizedKeys(func(c string) bool { return strings.HasPrefix(c, "investigator-") }); err != nil {
+	if err := pruneAuthorizedKeys(func(c string) bool { return strings.HasPrefix(c, "mono-jig-") }); err != nil {
 		fail("%v", err)
 	}
 	keychainDelete(keychainGitLab)
@@ -585,7 +585,7 @@ func uninstall(args []string) {
 		fail("%v", err)
 	}
 	fmt.Println("removed", root, "and the Keychain items")
-	fmt.Println("to finish: brew uninstall investigator (and microsandbox, if nothing else uses it)")
+	fmt.Println("to finish: brew uninstall mono-jig (and microsandbox, if nothing else uses it)")
 }
 
 // sandboxNames are the sandboxes with a state directory under root.

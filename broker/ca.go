@@ -41,7 +41,7 @@ func NewCA(sandbox string) (*CA, error) {
 	}
 	tmpl := &x509.Certificate{
 		SerialNumber:                serial(),
-		Subject:                     pkix.Name{CommonName: "investigator broker CA (" + sandbox + ")"},
+		Subject:                     pkix.Name{CommonName: "mono-jig broker CA (" + sandbox + ")"},
 		NotBefore:                   time.Now().Add(-time.Hour),
 		NotAfter:                    time.Now().AddDate(5, 0, 0),
 		IsCA:                        true,
