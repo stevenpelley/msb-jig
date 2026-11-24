@@ -59,18 +59,17 @@ func (g *Checks) CreatePR(c *broker.Call) broker.Decision {
 			head = branch
 		}
 	}
-	return broker.All(broker.AgentBranch(g.User, head), broker.TaggedTitle(g.User, str(p, "title"), true))
+	return broker.AgentBranch(g.User, head)
 }
 
-// UpdatePR: only a pull request from an agent branch; a new title must be
-// tagged.
+// UpdatePR: only a pull request from an agent branch.
 func (g *Checks) UpdatePR(c *broker.Call) broker.Decision {
 	g.note(c)
-	p, d := body(c)
+	_, d := body(c) // still read: a body the provider would read differently is denied
 	if !d.Allow {
 		return d
 	}
-	return broker.All(broker.ExistingFromAgentBranch(g.User, g.prHead(c)), broker.TaggedTitle(g.User, str(p, "title"), false))
+	return broker.ExistingFromAgentBranch(g.User, g.prHead(c))
 }
 
 // ExistingPR: reviewers and comments, only on a pull request from an

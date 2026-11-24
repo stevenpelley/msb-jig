@@ -146,14 +146,14 @@ func (g *Checks) saveMergeRequest(c *broker.Call, a *toolArgs) broker.Decision {
 		if a.SourceBranch != nil {
 			src = *a.SourceBranch
 		}
-		return broker.All(broker.AgentBranch(g.User, src), broker.TaggedTitle(g.User, a.Title, true))
+		return broker.AgentBranch(g.User, src)
 	}
 	pid := rawString(a.ProjectID)
 	var source *string
 	if pid != "" {
 		source = g.mrSource(c, pid, iid)
 	}
-	return broker.All(broker.ExistingFromAgentBranch(g.User, source), broker.TaggedTitle(g.User, a.Title, false))
+	return broker.ExistingFromAgentBranch(g.User, source)
 }
 
 // saveNote comments on or reviews a merge request from an agent branch;

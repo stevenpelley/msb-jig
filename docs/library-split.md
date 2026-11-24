@@ -126,9 +126,8 @@ to the providers; the agent says only where the file goes.
   (`microsandbox.md`). `supervisor.go` mixes the SDK, the broker's start
   and provisioning; the [backend interface](design.md#the-sandbox-backend-interface)
   was never built.
-- **The agent's namespace.** `broker/policy.go` fixes `agent/<user>/` and
-  the title tag `[agent/<user>]`. The title tag also ends up in a
-  squash-merged commit's subject; see [the PR marker](#the-pr-marker).
+- **The agent's namespace.** `broker/policy.go` fixes `agent/<user>/`.
+  (The title tag is gone; see [the PR marker](#the-pr-marker).)
 - **The name.** `mono-jig` is in `~/.mono-jig`, the Keychain items, the
   SSH host prefix, the CA's subject, image tags, `/etc/mono-jig` and the
   refusal text. One constant lets a work build have its own and coexist.
@@ -244,7 +243,8 @@ history unless someone edits it out.
 | Author | No | No: the agent acts as the developer |
 
 Recommendation: keep the branch as the only authority and drop the title
-tag requirement. If a visible flag is wanted beyond the branch name the
+tag requirement. *Done 2026-11-24: the broker no longer checks titles,
+and the agent's instructions no longer ask for the tag.* If a visible flag is wanted beyond the branch name the
 provider already shows, have the agent add a label (`agent`) when it
 opens the PR, treated as a hint only. Labels on GitHub's
 `POST /repos/{o}/{r}/issues/{n}/labels` create a missing label, which

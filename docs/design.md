@@ -203,7 +203,7 @@ GitHub is where the broker matters most at work.
 
 **The requirements:**
 - Allowed: clone, fetch and pull; search; push only to branches named `agent/<username>/...`.
-- Allowed: create, update and delete PRs whose title contains `[agent/<username>]`; manage stacks; change draft status; read CI status and logs; comment on and resolve review threads.
+- Allowed: create, update and delete PRs whose title contains `[agent/<username>]` (*2026-11-24: the title tag was dropped; the source branch decides, [library-split.md](library-split.md#the-pr-marker)*); manage stacks; change draft status; read CI status and logs; comment on and resolve review threads.
 - Forbidden: merging.
 
 **What a network proxy can enforce:**
@@ -232,7 +232,7 @@ GitHub is where the broker matters most at work.
 | Push rule | The same git smart-HTTP protocol (`.../<project>.git/git-receive-pack`), with the same ref updates to parse | **Identical**, apart from path parsing: groups nest arbitrarily, so the repo path is `group/sub/.../project` |
 | API | REST `/api/v4` plus GraphQL `/api/graphql`. A project is addressed by numeric ID *or* URL-encoded path, so the adapter normalizes both. | Same idea, different routes |
 | Merging | Deny `PUT /projects/:id/merge_requests/:iid/merge` and the GraphQL merge mutation (probably `mergeRequestAccept`, *unverified*), and the auto-merge settings. Approving (`POST .../approve`) is a separate action, also denied by default. | The same deny-by-default |
-| Title rule | Draft status is a `Draft:` title prefix, so the rule accepts `Draft: [agent/<user>] ...` | A small difference |
+| Title rule | Draft status is a `Draft:` title prefix, so the rule accepts `Draft: [agent/<user>] ...` (*the title rule was dropped 2026-11-24*) | A small difference |
 | Auth | Git takes HTTP Basic with any username and the token as password. The API takes `PRIVATE-TOKEN` or `Authorization: Bearer`. | The broker picks the right form per path |
 | Writes outside receive-pack | The commits API (`POST /projects/:id/repository/commits` takes a `branch`), files, branches, tags, `cherry_pick` and `revert` all write refs. Denied unless listed, and the ref rule applies to any that are. | GitHub has the same kind of routes |
 | Token endpoints | `POST /personal_access_tokens/self/rotate` would hand the agent a new token and revoke the broker's. Every token, key and user-settings endpoint stays denied. | The same for GitHub's |
@@ -244,7 +244,7 @@ What this fixes in this repo today:
 
 ### Policy in code, not Cedar (for now)
 
-*Decided 2026-11-22.* Cedar was attractive while existing products might enforce it (OpenShell, provider-side hooks). Now the broker is the only enforcement point, and most of its work is code no policy language does: parsing receive-pack commands, GraphQL documents, REST routes and MCP arguments into facts. What's left after parsing is small. Per provider, it's an allowlist of operations (the reads, and a short list of writes; everything else is denied, including merge and approve) and three predicates: the ref is under `agent/<user>/`, the title carries `[agent/<user>]` (after an optional `Draft:`), and the source branch is in the namespace.
+*Decided 2026-11-22.* Cedar was attractive while existing products might enforce it (OpenShell, provider-side hooks). Now the broker is the only enforcement point, and most of its work is code no policy language does: parsing receive-pack commands, GraphQL documents, REST routes and MCP arguments into facts. What's left after parsing is small. Per provider, it's an allowlist of operations (the reads, and a short list of writes; everything else is denied, including merge and approve) and three predicates: the ref is under `agent/<user>/`, the title carries `[agent/<user>]` (after an optional `Draft:`), and the source branch is in the namespace. *(2026-11-24: the title predicate was dropped: it authorized nothing beyond the source branch, and a squash merge put it in the target branch's history.)*
 
 Cedar could express those predicates: its `like` operator handles `"refs/heads/agent/<user>/*"`. So it's not that Cedar can't, but that it would add a schema, an entity model and a second language for about a dozen rules. `cedar-go` also lacks the policy analysis tools of the Rust implementation, which were one of Cedar's main selling points.
 
@@ -279,7 +279,7 @@ Cedar could express those predicates: its `like` operator handles `"refs/heads/a
 4. `POST /acme/api.git/git-receive-pack`. The body starts with one command line per ref (`<old> <new> refs/heads/agent/<user>/fix-timeout`) before the pack data. The broker reads those lines and checks each ref against the policy: the user, the push operation, the repo, the ref, and whether it's a create, update or delete. Ref names are checked with git's `check-ref-format` rules before the prefix match. Allowed: it streams the body upstream, streams the answer back, and logs it. Push options and request encodings are handled as in [Broker hardening](#broker-hardening-what-the-review-found).
    - **Force pushes and deletes inside the namespace are allowed,** because rebasing a stack needs them. Tags and every other branch are denied.
 5. **A denied push** (`git push origin main`) gets a proper receive-pack status line from the broker, so git prints a clear reason: `! [remote rejected] main -> main (pushes are allowed only under agent/<user>/)`. That's better than a bare HTTP 403.
-6. `gh pr create --head agent/<user>/fix-timeout --title "[agent/<user>] Fix timeout"`. This is a GraphQL `createPullRequest` mutation. The broker **parses the GraphQL document** rather than trusting operation names, since `gh api graphql` can send anything. It checks the head branch and the title tag, then forwards to `api.github.com/graphql` with the user's token.
+6. `gh pr create --head agent/<user>/fix-timeout --title "[agent/<user>] Fix timeout"`. This is a GraphQL `createPullRequest` mutation. The broker **parses the GraphQL document** rather than trusting operation names, since `gh api graphql` can send anything. It checks the head branch (and, until 2026-11-24, the title tag), then forwards to `api.github.com/graphql` with the user's token.
 7. `gh pr merge` is a REST `PUT .../merge` or a GraphQL `mergePullRequest`, which the broker denies with a message. Fetching, `gh pr view`, `gh run view --log` and other reads pass through.
 
 **GitLab is the same shape:** `glab mr create` is a REST `POST /projects/:id/merge_requests`, with the `Draft:` prefix allowed before the tag. Merging is `PUT .../merge`.

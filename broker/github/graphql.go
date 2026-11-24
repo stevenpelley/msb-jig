@@ -47,18 +47,17 @@ func onPR(field string) mutationCheck {
 	}
 }
 
-// createPRMutation: from an agent branch of the same repository, with a
-// tagged title.
+// createPRMutation: from an agent branch of the same repository.
 func (g *Checks) createPRMutation(_ *broker.Call, in map[string]any) broker.Decision {
 	head := val(str(in, "headRefName"))
 	if strings.Contains(head, ":") || (in["headRepositoryId"] != nil && in["headRepositoryId"] != in["repositoryId"]) {
 		return broker.Deny("pull requests from another repository aren't allowed")
 	}
-	return broker.All(broker.AgentBranch(g.User, head), broker.TaggedTitle(g.User, str(in, "title"), true))
+	return broker.AgentBranch(g.User, head)
 }
 
 func (g *Checks) updatePRMutation(c *broker.Call, in map[string]any) broker.Decision {
-	return broker.All(onPR("pullRequestId")(g, c, in), broker.TaggedTitle(g.User, str(in, "title"), false))
+	return onPR("pullRequestId")(g, c, in)
 }
 
 // reviewMutation: a review comment, never an approval.

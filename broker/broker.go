@@ -8,8 +8,8 @@
 // the provider's package), which defines the provider's upstreams with
 // their credentials and then every request it serves, the check run on
 // it and where it goes. A request that matches no route is denied. The
-// checks are next to Routes; the ones providers share (branch namespace,
-// title tag) are in policy.go.
+// checks are next to Routes; the ones providers share (the branch
+// namespace) are in policy.go.
 //
 // A request's way through: Server (server.go) picks the provider by
 // hostname and drops any credential the sandbox sent; Provider.ServeHTTP

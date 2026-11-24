@@ -167,10 +167,10 @@ func TestGitHubAPI(t *testing.T) {
 		{"POST", "/api/v3/repos/octo/dotfiles/pulls", `{"title":"[agent/alice] Fix","head":"agent/alice/x","base":"main"}`, true},
 		{"POST", "/api/v3/repos/octo/dotfiles/pulls", `{"title":"[agent/alice] Fix","head":"octo:agent/alice/x","base":"main"}`, true},
 		{"POST", "/api/v3/repos/octo/dotfiles/pulls", `{"title":"[agent/alice] Fix","head":"mallory:agent/alice/x","base":"main"}`, false},
-		{"POST", "/api/v3/repos/octo/dotfiles/pulls", `{"title":"Fix","head":"agent/alice/x","base":"main"}`, false},
+		{"POST", "/api/v3/repos/octo/dotfiles/pulls", `{"title":"Fix","head":"agent/alice/x","base":"main"}`, true}, // no title tag needed
 		{"POST", "/api/v3/repos/octo/dotfiles/pulls", `{"title":"[agent/alice] Fix","head":"feature","base":"main"}`, false},
 		{"PATCH", "/api/v3/repos/octo/dotfiles/pulls/1", `{"body":"more","base":"agent/alice/y"}`, true},
-		{"PATCH", "/api/v3/repos/octo/dotfiles/pulls/1", `{"title":"untagged"}`, false},
+		{"PATCH", "/api/v3/repos/octo/dotfiles/pulls/1", `{"title":"untagged"}`, true},
 		{"PATCH", "/api/v3/repos/octo/dotfiles/pulls/2", `{"title":"[agent/alice] mine now"}`, false},
 		{"PATCH", "/api/v3/repos/octo/dotfiles/pulls/3", `{"state":"closed"}`, false},
 		{"PUT", "/api/v3/repos/octo/dotfiles/pulls/1/merge", `{}`, false},
@@ -194,7 +194,7 @@ func TestGitHubAPI(t *testing.T) {
 		// GraphQL
 		{"POST", "/api/graphql", gql(`query { viewer { login } }`, ""), true},
 		{"POST", "/api/graphql", gql(create, `{"input":{"repositoryId":"R","baseRefName":"main","headRefName":"agent/alice/x","title":"[agent/alice] Fix"}}`), true},
-		{"POST", "/api/graphql", gql(create, `{"input":{"repositoryId":"R","baseRefName":"main","headRefName":"agent/alice/x","title":"Fix"}}`), false},
+		{"POST", "/api/graphql", gql(create, `{"input":{"repositoryId":"R","baseRefName":"main","headRefName":"agent/alice/x","title":"Fix"}}`), true},
 		{"POST", "/api/graphql", gql(create, `{"input":{"repositoryId":"R","baseRefName":"main","headRefName":"feature","title":"[agent/alice] Fix"}}`), false},
 		{"POST", "/api/graphql", gql(create, `{"input":{"repositoryId":"R","baseRefName":"main","headRefName":"agent/alice/x","headRepositoryId":"F","title":"[agent/alice] Fix"}}`), false},
 		// A key twice, ignoring case: Go would read the second, GitHub the first.

@@ -9,8 +9,7 @@ import (
 // and only inside that user's agent namespace:
 //
 //   - it pushes, and deletes branches, only under refs/heads/agent/<user>/;
-//   - it opens merge or pull requests only from those branches, with
-//     titles starting "[agent/<user>]" (after an optional "Draft:");
+//   - it opens merge or pull requests only from those branches;
 //   - it changes or comments on only the ones whose source branch is
 //     already one of those (looked up from the provider, never trusted
 //     from the request; a fork's branch never counts);
@@ -41,9 +40,6 @@ const (
 
 // Namespace is the branch prefix the agent may write under.
 func Namespace(user string) string { return "agent/" + user + "/" }
-
-// TitleTag starts every title the agent sets.
-func TitleTag(user string) string { return "[agent/" + user + "]" }
 
 func validUser(user string) bool {
 	return user != "" && !strings.ContainsAny(user, "/ \t\n")
@@ -82,30 +78,6 @@ func ExistingFromAgentBranch(user string, source *string) Decision {
 	}
 	if !AgentBranch(user, *source).Allow {
 		return Deny("only merge requests from %s branches can be changed (this one is from %q)", Namespace(user), *source)
-	}
-	return Allow()
-}
-
-// TaggedTitle requires the tag at the start of a title, after an optional
-// draft marker: "[agent/u] Fix x" or "Draft: [agent/u] Fix x". A nil
-// title (the request doesn't set one) passes unless required.
-func TaggedTitle(user string, title *string, required bool) Decision {
-	if title == nil {
-		if required {
-			return Deny("merge request without a title")
-		}
-		return Allow()
-	}
-	t := strings.TrimSpace(*title)
-	lower := strings.ToLower(t)
-	for _, p := range []string{"draft:", "[draft]", "(draft)"} {
-		if strings.HasPrefix(lower, p) {
-			t = strings.TrimSpace(t[len(p):])
-			break
-		}
-	}
-	if !strings.HasPrefix(t, TitleTag(user)) {
-		return Deny("titles must start with %s (after an optional \"Draft:\")", TitleTag(user))
 	}
 	return Allow()
 }

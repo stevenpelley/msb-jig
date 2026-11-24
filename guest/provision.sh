@@ -333,8 +333,7 @@ EOF
   \`glab\` is already configured.
 - Push only to branches under \`agent/$u/\`, e.g. \`agent/$u/fix-timeout\`.
   Pushes to any other branch, and push options (\`git push -o\`), are refused.
-- Merge request titles must start with \`[agent/$u]\`, after an optional
-  \`Draft:\`. Only merge requests from \`agent/$u/\` branches can be edited
+- Only merge requests from \`agent/$u/\` branches can be opened, edited
   or commented on.
 - Never merge, approve or set auto-merge: a human does that.
 - Run \`glab\` non-interactively: pass \`--yes\`, titles and descriptions as
@@ -355,9 +354,8 @@ EOF
 - Push only to branches under \`agent/$u/\`, e.g. \`agent/$u/fix-timeout\`.
   Pushes to any other branch, and push options, are refused. Then open a
   pull request: \`gh pr create --head agent/$u/<branch> --base <target>\`.
-- Pull request titles must start with \`[agent/$u]\`. Only pull requests
-  from \`agent/$u/\` branches can be edited, closed or commented on; for a
-  stack, target the branch below.
+- Only pull requests from \`agent/$u/\` branches can be edited, closed or
+  commented on; for a stack, target the branch below.
 - Never merge, approve or set auto-merge: a human does that.
 - Run \`gh\` non-interactively: pass \`--title\` and \`--body\` (or
   \`--fill\`), and \`-R <owner>/<repo>\` when outside a clone.

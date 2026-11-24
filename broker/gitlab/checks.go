@@ -36,12 +36,11 @@ func (g *Checks) MRCreate(c *broker.Call) broker.Decision {
 		noAutoMerge(ps),
 		noQuickActions(ps),
 		broker.AgentBranch(g.User, source),
-		broker.TaggedTitle(g.User, opt(ps, "title"), true),
 	)
 }
 
-// MRUpdate: only a merge request from an agent branch; a new title must
-// be tagged; no merge arranged, no quick action.
+// MRUpdate: only a merge request from an agent branch; no merge
+// arranged, no quick action.
 func (g *Checks) MRUpdate(c *broker.Call) broker.Decision {
 	ps, err := params(c)
 	if err != nil {
@@ -50,10 +49,7 @@ func (g *Checks) MRUpdate(c *broker.Call) broker.Decision {
 	if d := broker.All(noAutoMerge(ps), noQuickActions(ps)); !d.Allow {
 		return d
 	}
-	return broker.All(
-		g.existing(c),
-		broker.TaggedTitle(g.User, opt(ps, "title"), false),
-	)
+	return g.existing(c)
 }
 
 // MRNote: notes, discussions and resolving them, only on a merge request
