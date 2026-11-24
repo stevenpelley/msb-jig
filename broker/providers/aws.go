@@ -2,7 +2,6 @@ package providers
 
 import (
 	"context"
-	"maps"
 	"net/http"
 	"slices"
 	"strings"
@@ -41,16 +40,10 @@ func (a AWS) Handlers(ctx context.Context, b *Builder) (map[string]http.Handler,
 // never as native MCP tools, so it chooses what enters its context.
 func (a AWS) Guest(bool) guest.Config {
 	p := slices.Concat(a.Profiles, []string{""})
-	g := guest.Config{
-		Env:      map[string]string{"MCP_GATEWAY_URL": AWSURL},
-		Packages: []string{"python3", "python3-venv"},
-		Files:    []guest.File{{Path: "/usr/local/bin/mcpcli", Link: MCPCLIDir + "/mcpcli"}},
-		Instructions: []string{guest.Instructions("aws", map[string]string{
-			"URL": AWSURL, "Profile": or(p[0], "?"), "Others": strings.TrimSpace(strings.Join(p[1:], " ")),
-		})},
-	}
-	for _, name := range slices.Sorted(maps.Keys(guest.MCPCLI)) {
-		g.Files = append(g.Files, guest.File{Path: MCPCLIDir + "/" + name, Mode: "0755", Content: guest.MCPCLI[name]})
-	}
+	g := mcpcliGuest()
+	g.Env = map[string]string{"MCP_GATEWAY_URL": AWSURL}
+	g.Instructions = []string{guest.Instructions("aws", map[string]string{
+		"URL": AWSURL, "Profile": or(p[0], "?"), "Others": strings.TrimSpace(strings.Join(p[1:], " ")),
+	})}
 	return g
 }

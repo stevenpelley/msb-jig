@@ -175,6 +175,54 @@ group with `provider: npm`. In server mode a project's `.npmrc` naming a
 registry's real URL for a scope bypasses the guest's settings; proxy
 mode doesn't have that gap (`Track.BrokerMode: "proxy"`).
 
+`providers.MCPServer` serves a vendor's hosted MCP server (streamable
+HTTP, a Bearer token) with the agent limited to a list of tools, which
+`tools/list` is filtered to (`broker/hostedmcp`). Tools are decided by
+name alone, so list only those that read. A track makes one per server,
+with its own `ProviderCLI`, whose token command is the vendor's CLI (an
+OAuth access token it refreshes) or a Keychain item:
+
+```go
+providers.MCPServer{
+    ID:       "example",                        // login example; no allowlist group needed
+    Title:    "Example",                        // in the agent's instructions
+    URL:      "https://mcp.example.org/v1/mcp",
+    Tools:    []string{"search_items", "get_item"},
+    TokenCmd: "example-cli auth token",
+}
+```
+
+The guest gets the URL as the sandbox reaches it in `$EXAMPLE_MCP_URL`
+(`example.mcp.broker.internal` in server mode, the real host in proxy
+mode) and mcpcli, with instructions to call it as
+`MCP_GATEWAY_URL=$EXAMPLE_MCP_URL mcpcli …`. Only the endpoint's POST,
+GET and DELETE are served, without URL parameters; OAuth discovery
+isn't.
+
+`providers.MCPServer` serves a vendor's hosted MCP server (streamable
+HTTP, a Bearer token) with the agent limited to a list of tools, which
+`tools/list` is filtered to (`broker/hostedmcp`). The tools are decided
+by name alone, so list only those that read. A track makes one per
+server, with its own `ProviderCLI`, whose token command is the vendor's
+CLI (an OAuth access token it refreshes) or a Keychain item:
+
+```go
+providers.MCPServer{
+    ID:       "example",                         // login example; no allowlist group needed
+    Title:    "Example",                         // in the agent's instructions
+    URL:      "https://mcp.example.org/v1/mcp",
+    Tools:    []string{"search_items", "get_item"},
+    TokenCmd: "example-cli auth token",
+}
+```
+
+The guest gets the URL as the sandbox reaches it in `$EXAMPLE_MCP_URL`
+(`example.mcp.broker.internal` in server mode, the real host in proxy
+mode) and mcpcli, with instructions to call it as
+`MCP_GATEWAY_URL=$EXAMPLE_MCP_URL mcpcli …`. Only the endpoint's POST,
+GET and DELETE are served, without URL parameters; OAuth discovery
+isn't.
+
 ### The login half: `jig.ProviderCLI`
 
 ```go
