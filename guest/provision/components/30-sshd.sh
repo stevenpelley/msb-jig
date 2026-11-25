@@ -5,7 +5,13 @@
 # bind the agent, which can be root in the VM; the Mac-side settings do.
 if want sshd; then
   log "sshd"
-  apt-get install -y -qq --no-install-recommends openssh-server >/dev/null
+  # At a first start on an image built without sshd, base hasn't run and
+  # the image keeps no apt lists (apt-cache's stale cache can still name
+  # the package, so update whenever it's missing).
+  if ! dpkg -s openssh-server >/dev/null 2>&1; then
+    apt-get update -qq
+    apt-get install -y -qq --no-install-recommends openssh-server >/dev/null
+  fi
   install -d -m 0755 /etc/ssh/sshd_config.d /run/sshd
   # Ubuntu's sshd_config includes sshd_config.d/*.conf first, and the first
   # value sshd reads wins, so this file overrides the defaults below it.
@@ -30,5 +36,9 @@ PermitUserEnvironment no
 PermitUserRC no
 HostKey /etc/ssh/ssh_host_ed25519_key
 EOF
-  sshd -t
+  # No host keys in the image: openssh-server's install makes some, and
+  # every sandbox from the image would share them. Each sandbox gets its
+  # own (install-keys.sh on sbx; the supervisor on microsandbox), and
+  # sshd -t runs then.
+  rm -f /etc/ssh/ssh_host_*_key /etc/ssh/ssh_host_*_key.pub
 fi

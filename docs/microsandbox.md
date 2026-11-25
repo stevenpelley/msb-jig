@@ -5,6 +5,12 @@ microsandbox 0.7.16, released 2026-11-18 and installed through Homebrew
 (`superradcompany/tap`). The results are under "What we checked". "Verify"
 marks what's still open.
 
+Update (2026-11-25): the Go SDK is at v0.8.2, for Homebrew's msb 0.8.2.
+SDK v0.7.16 refused that runtime at start (`no tested sandbox launch
+contract for runtime 0.8.2`); the SDK's and msb's versions have to match.
+The only API change we use: `Sandbox.Status` takes a context and returns
+an error. The checks below are from 0.7.16.
+
 **Verdict:** it works as the VM layer, and replaced Lima plus
 `investigator-net`'s netstack and filter on 2026-11-22. `mono-jig up`,
 below, runs it end to end, and the broker fits behind it unchanged. The

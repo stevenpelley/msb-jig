@@ -30,6 +30,7 @@
 package jig
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"os"
@@ -74,9 +75,9 @@ func usage() {
                           /mnt; default /mnt/<folder name>). Every sandbox has
                           ~/.mono-jig/<name>/share at /mnt/host (and ~/host)
   open <name> [dir] --broker server|proxy
-                          when creating it, how the guest reaches the broker: server (the
-                          default; broker.internal names) or proxy (microsandbox's outbound
-                          proxy; gitlab.com, github.com, api.anthropic.com by their own names)
+                          when creating it, how the guest reaches the broker: server
+                          (broker.internal names) or proxy (microsandbox's outbound proxy;
+                          the providers' hosts by their own names); default `+track.BrokerMode+`
   cp <src> <dst>          copy between the Mac and a sandbox; a sandbox path is
                           <name>:<path>, relative to the agent's home unless absolute
   stop <name>             stop it
@@ -142,6 +143,12 @@ func Main(t Track) {
 		}
 		if (len(specs) > 0 || mode != "") && cmd != "up" && cmd != "open" {
 			usage()
+		}
+		if mode == "" && (cmd == "up" || cmd == "open") && track.BrokerMode != modeServer {
+			setRuntimePaths()
+			if ok, err := track.Backend.Exists(context.Background(), args[0]); err == nil && !ok {
+				mode = track.BrokerMode // a new sandbox: the track's default
+			}
 		}
 		if mode != "" {
 			setRuntimePaths()

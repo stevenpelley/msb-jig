@@ -4,6 +4,10 @@ github.com/stretchr/testify v1.12.1 h1:EuwCh5fleGS7H32xRwO3wRGT7DxrDhLAT6FF8MpWD
 github.com/stretchr/testify v1.12.1/go.mod h1:MDEgiDPPsNp5cuIrHPPCyornHKgEVbtFUmoNlxoYthg=
 github.com/superradcompany/microsandbox/sdk/go v0.7.16 h1:ujf05lY5EF1pmq9A0eOGFfnWJ8Rh7hmkkQV2t0r9lQo=
 github.com/superradcompany/microsandbox/sdk/go v0.7.16/go.mod h1:p7Tm/p9zkO7sHO3N8A1fiTVeLB2w/fQoKdYlpN/5neA=
+github.com/superradcompany/microsandbox/sdk/go v0.8.2 h1:sDAQJb9Ixy/hntANfEy52VjuuUmAoMMHuZmTZias/DM=
+github.com/superradcompany/microsandbox/sdk/go v0.8.2/go.mod h1:X8aWIvh2MFWo8j/CJGZpFFhDeurWLO8HwszaxoTEfFQ=
+github.com/superradcompany/microsandbox/sdk/go/core v0.8.2 h1:LsmpeIOrUbiqs4hYxLDgE80CjW4GkJnWCCo+DWUcIUo=
+github.com/superradcompany/microsandbox/sdk/go/core v0.8.2/go.mod h1:UqeGW1GYxxMR/M2b+R+C54jkloA5/JiV6A8PPMUcuE4=
 github.com/vektah/gqlparser/v2 v2.5.64 h1:N32yM6hQ6Kd5RdjCCEJsUrbCebVoA9yLLMOIa88Mkk0=
 github.com/vektah/gqlparser/v2 v2.5.64/go.mod h1:nILRSUbsWDTuf8hSmAgFxuYh0SaMZdkvl6JSEbkJX8g=
 go.yaml.in/yaml/v3 v3.0.5 h1:N6y/pJk8buWs9NY5ERU2HSMfm+IuD/OtfdAnq6kESPw=

@@ -171,6 +171,33 @@ func KeychainCommand(service string) string {
 	return "security find-generic-password -s " + service + " -w"
 }
 
+// secretRE is what keychainUpdate takes: a token's characters, which
+// security's command reader can't misread, up to 16 KiB.
+var secretRE = regexp.MustCompile(`^[A-Za-z0-9._~+/=-]+$`)
+
+// keychainUpdate writes service's password in place (-U), for a token
+// rotated while the broker runs: readers never see the item missing. It
+// returns an error rather than failing, as the broker calls it.
+func keychainUpdate(service, secret string) error {
+	if len(secret) < 8 || len(secret) > 16384 || !secretRE.MatchString(secret) {
+		return fmt.Errorf("the token for %s has characters the Keychain helper doesn't take", service)
+	}
+	c := exec.Command("security", "-i")
+	c.Stdin = strings.NewReader(fmt.Sprintf("add-generic-password -U -s %s -a mono-jig -l %s -w %s\n", service, service, secret))
+	out, err := c.CombinedOutput()
+	back, rerr := keychainRead(service)
+	if err != nil || rerr != nil || back != secret {
+		return fmt.Errorf("storing %s in the Keychain failed: %v %s", service, err, out)
+	}
+	return nil
+}
+
+// keychainRead is service's password.
+func keychainRead(service string) (string, error) {
+	out, err := exec.Command("security", "find-generic-password", "-s", service, "-w").Output()
+	return strings.TrimSpace(string(out)), err
+}
+
 // KeychainDelete removes every generic password for service.
 func KeychainDelete(service string) {
 	for KeychainHas(service) {

@@ -162,9 +162,9 @@ func buildImage(engine, file, ctxDir string) string {
 	if file != "" {
 		// A new tag each build: sandboxes made from an earlier build keep it.
 		tag = "localhost/mono-jig:" + time.Now().Format("20060102-150405")
-		runCmd(engine, "build", "--platform", "linux/"+runtime.GOARCH,
+		runCmd(engine, append(buildVerb(engine), "--platform", "linux/"+runtime.GOARCH,
 			"--build-arg", "JIG_BASE="+baseTag(),
-			"-t", tag, "-f", file, ctxDir)
+			"-t", tag, "-f", file, ctxDir)...)
 	}
 	if exec.Command("msb", "image", "inspect", tag).Run() == nil {
 		fmt.Println(tag, "is already in microsandbox's cache")
@@ -225,12 +225,25 @@ func buildBase(engine string) string {
 		}
 	}
 	tag := baseTag()
-	a := []string{"build", "--platform", "linux/" + runtime.GOARCH, "-t", tag}
+	a := append(buildVerb(engine), "--platform", "linux/"+runtime.GOARCH, "-t", tag)
 	for _, b := range baseArgs() {
 		a = append(a, "--build-arg", b)
 	}
 	runCmd(engine, append(a, dir)...)
 	return tag
+}
+
+// buildVerb starts an image build. Docker's gets --load: with a buildx
+// builder on the docker-container driver (Docker Desktop can make it the
+// default) the result otherwise stays in the build cache, and docker save
+// can't find it (seen 2026-11-25). With the docker driver --load is the
+// default anyway. A Dockerfile FROM the base image (image build -f) still
+// can't see it on the docker-container driver, which reads only registries.
+func buildVerb(engine string) []string {
+	if engine == "docker" {
+		return []string{"build", "--load"}
+	}
+	return []string{"build"}
 }
 
 // runCmd runs a command with our output, and fails if it does.

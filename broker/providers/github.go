@@ -3,6 +3,7 @@ package providers
 import (
 	"context"
 	"net/http"
+	"strings"
 
 	"github.com/stevenpelley/msb-jig/broker/github"
 	"github.com/stevenpelley/msb-jig/guest"
@@ -20,8 +21,11 @@ import (
 type GitHub struct {
 	User     string // the GitHub user the agent acts for
 	TokenCmd string // prints the user's token
-	WebHost  string // github.com
-	APIHost  string // api.github.com
+	// Owners, if set, are the only users and organizations whose
+	// repositories get the credential (github.Config.Owners).
+	Owners  []string
+	WebHost string // github.com
+	APIHost string // api.github.com
 
 	// Tests: the upstreams, if not https://<WebHost> and https://<APIHost>.
 	GitURL, APIURL string
@@ -44,7 +48,7 @@ func (g GitHub) Hosts(proxy bool) []string {
 
 func (g GitHub) Handlers(_ context.Context, b *Builder) (map[string]http.Handler, error) {
 	up := b.Upstreams(GitHubHost, "github")
-	gc := github.Config{User: g.User, Token: Token(g.TokenCmd),
+	gc := github.Config{User: g.User, Token: Token(g.TokenCmd), Owners: g.Owners,
 		GitURL: or(g.GitURL, "https://"+g.Web()), APIURL: or(g.APIURL, "https://"+g.API())}
 	if b.Proxy {
 		web, api := github.ProxyRoutes(up, gc)
@@ -56,7 +60,7 @@ func (g GitHub) Handlers(_ context.Context, b *Builder) (map[string]http.Handler
 // Guest: gh and git call the broker as a GitHub Enterprise Server (in
 // proxy mode, the real host, which the broker terminates).
 func (g GitHub) Guest(proxy bool) guest.Config {
-	c := guest.Config{Instructions: []string{guest.Instructions("github", map[string]string{"User": g.User, "Host": g.Web()})}}
+	c := guest.Config{Instructions: []string{guest.Instructions("github", map[string]string{"User": g.User, "Host": g.Web(), "Owners": strings.Join(g.Owners, ", ")})}}
 	switch {
 	case proxy && g.Web() == "github.com":
 		c.Env = map[string]string{"GH_TOKEN": "placeholder"}

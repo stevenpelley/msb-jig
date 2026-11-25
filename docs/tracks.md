@@ -1,8 +1,10 @@
 # Writing a track
 
-*2026-11-24, at msb-jig after 16c1ad9 (Go 1.26, msb 0.7.16). The
-personal track is the only one built; everything below about another
-track is* unverified *until one is.*
+*2026-11-24, at msb-jig after 16c1ad9 (Go 1.26, msb 0.7.16); updated the
+same day for a work track (branch work-track-support): GitHub owners,
+the npm provider, kiro-cli, `Track.BrokerMode`. The personal track is
+the only one run in a sandbox; a work track is built and unit-tested,
+and everything below about running one is* unverified.*
 
 A **track** is one harness command built on this library: its providers,
 agent, editor, VM runtime, base image, built-in allowlist, and its own
@@ -52,6 +54,7 @@ type Track struct {
     Allowlist  []allowlist.Layer    // built-in layers; default allowlist.Base() alone
     Components map[string]string    // provision files added or replaced
     Guest      guest.Config         // the track's own guest settings, every start
+    BrokerMode string               // "server" (default) or "proxy": a new sandbox's mode without --broker
 }
 ```
 
@@ -60,8 +63,8 @@ scratch. The library's pieces are all exported for reuse:
 
 | Axis | Interface | Library's own |
 |---|---|---|
-| Providers | `providers.Provider` (broker) + `jig.ProviderCLI` (login) | `jig.GitLab`, `jig.GitHub`, `jig.Claude`, `jig.AWS` |
-| Agent | `agent.Agent` | `agent.ClaudeCode{}` |
+| Providers | `providers.Provider` (broker) + `jig.ProviderCLI` (login) | `jig.GitLab`, `jig.GitHub`, `jig.Claude`, `jig.AWS`, `jig.NPM` |
+| Agent | `agent.Agent` | `agent.ClaudeCode{}`, `agent.KiroCLI{}` |
 | Editor | `editor.Editor` | `editor.VSCode{}` |
 | VM runtime | `sandbox.Backend`, `sandbox.Guest` | `sandbox.Microsandbox{}` |
 | Allowlist | YAML layers | `allowlist.Base()` |
@@ -144,6 +147,97 @@ The library's providers may serve a work track as they are:
 shape, *unverified*), and `providers.GitLab` a URL. GitHub Enterprise
 Server (API under `/api/v3` on the web host) doesn't fit yet.
 
+`providers.GitHub.Owners` limits the user's credential to some owners'
+repositories (an organisation's): other owners' are read without it and
+never written (`broker/github/owners.go`, which lists what counts, and
+the limit of GraphQL's check). A track sets it by wrapping
+`jig.GitHub.Broker`:
+
+```go
+gh := jig.GitHub
+gh.Broker = func(s jig.Settings) providers.Provider {
+    p := jig.GitHub.Broker(s)
+    if p == nil {
+        return nil
+    }
+    g := p.(providers.GitHub)
+    g.Owners = []string{"example-org"}
+    return g
+}
+```
+
+`providers.NPM` serves npm registries read-only, each with its own token
+command and scopes (`broker/npm`); `jig.NPM` logs in to
+registry.npmjs.org with a granular token in the Keychain (`npm login`'s
+last two hours). A track adds a registry (another host, for `@scope`) the
+same way, wrapping `jig.NPM.Broker`, and defines its host's allowlist
+group with `provider: npm`. In server mode a project's `.npmrc` naming a
+registry's real URL for a scope bypasses the guest's settings; proxy
+mode doesn't have that gap (`Track.BrokerMode: "proxy"`).
+
+`providers.MCPServer` serves a vendor's hosted MCP server (streamable
+HTTP, a Bearer token) with the agent limited to a list of tools, which
+`tools/list` is filtered to (`broker/hostedmcp`). Tools are decided by
+name alone, so list only those that read. A track makes one per server,
+with its own `ProviderCLI`, whose token command is the vendor's CLI (an
+OAuth access token it refreshes) or a Keychain item:
+
+```go
+providers.MCPServer{
+    ID:       "example",                        // login example; no allowlist group needed
+    Title:    "Example",                        // in the agent's instructions
+    URL:      "https://mcp.example.org/v1/mcp",
+    Tools:    []string{"search_items", "get_item"},
+    TokenCmd: "example-cli auth token",
+}
+```
+
+The guest gets the URL as the sandbox reaches it in `$EXAMPLE_MCP_URL`
+(`example.mcp.broker.internal` in server mode, the real host in proxy
+mode) and mcpcli, with instructions to call it as
+`MCP_GATEWAY_URL=$EXAMPLE_MCP_URL mcpcli …`. Only the endpoint's POST,
+GET and DELETE are served, without URL parameters; OAuth discovery
+isn't.
+
+`providers.Jira` serves one Jira Cloud site's REST API read-only
+(`broker/jira`): GETs under `/rest/api/2|3/` and `/rest/agile/1.0/`, and
+the POSTs that only read (searches, bulk fetches, JQL and expression
+checks). The sandbox calls it as the site (`$JIRA_URL`:
+`jira.broker.internal`, or the site's host in proxy mode); the broker
+sends each call to Atlassian's gateway (`api.atlassian.com/ex/jira/<cloudId>`),
+where scoped API tokens work, with Basic `email:token`. `jig.Jira` is
+its login: the site, its cloud ID (from the site's public
+`/_edge/tenant_info`), the account's email, and a scoped read-only token
+in the Keychain (`mono-jig-jira`), checked with `GET /rest/api/3/myself`
+before it's stored.
+
+`jig.OAuthMCP` is a hosted MCP server's login for a server no vendor CLI
+holds a token for: the harness is the OAuth client (`oauth/`). `login
+<id>` finds the authorization server from the server's 401 (RFC 9728,
+RFC 8414), registers a public client once (RFC 7591, a loopback
+redirect on a port kept for later logins), signs in in the Mac's browser
+(authorization code, PKCE S256, `resource`), keeps the refresh token in
+the Keychain (`mono-jig-<id>`) and the client in `settings.json`, then
+lists the server's tools against the track's list. Its broker provider
+is a `providers.MCPServer` whose token is an `oauth.Source`: the access
+token in memory until a minute before it expires, then refreshed, a
+rotated refresh token written back in place, with a file lock so two
+sandboxes' brokers never spend one refresh token twice.
+
+```go
+jig.OAuthMCP{
+    ID:     "example",
+    Title:  "Example",
+    URL:    "https://mcp.example.org/",
+    Scopes: []string{"read:all", "offline_access"}, // read scopes, and a refresh token
+    Tools:  []string{"search_items", "get_item"},
+}.CLI()
+```
+
+Servers that make confidential clients (a client secret) aren't
+supported. Logout removes the refresh token; the registered client stays
+at the authorization server.
+
 ### The login half: `jig.ProviderCLI`
 
 ```go
@@ -194,9 +288,17 @@ type Agent interface {
   where the agent reads them. Claude Code's go in `~/.claude/CLAUDE.md`.
 - Its hosts (installer, sign-in) go in the track's allowlist.
 
-Another agent (kiro-cli, say) is a new type. Where it reads its
-instructions and how it signs in through the broker are *unverified*.
-If its API needs a credential, that's a provider too, like `anthropic`.
+`agent.KiroCLI` is kiro-cli (`agent/70-kiro.sh`: a pinned release,
+checked by SHA-256, in `/usr/local/bin`): its instructions in
+`~/.kiro/steering/mono-jig.md`, every capability allowed in
+`~/.kiro/settings/permissions.yaml`, self-update off. It signs in inside
+the sandbox (`kiro-cli login --use-device-flow`), so its credential is
+the sandbox's; holding it in the broker, like `anthropic` for Claude
+Code, is *unverified*. Its hosts (`cli.kiro.dev`,
+`prod.download.cli.kiro.dev`, `app.kiro.dev`, `*.us-east-1.kiro.dev`,
+`q.us-east-1.amazonaws.com`, and the sign-in's) go in the track's
+allowlist. That kiro-cli always includes a steering file without front
+matter is *unverified*.
 
 ## Editor
 
@@ -214,8 +316,22 @@ The editor runs on the Mac as its own instance (settings and extensions
 under the state directory) and reaches the sandbox over SSH, with the
 SSH config and host names in `Profile`. `editor.VSCodeSettings` holds
 the settings that close the editor's credential bridges
-(`docs/design.md`); an editor forked from VS Code may reuse them. Kiro's
-remote-SSH setting names and command-line flags are *unverified*.
+(`docs/design.md`); an editor forked from VS Code may reuse them.
+`editor.Kiro` is Kiro IDE 1.5 with its built-in Remote SSH (remote
+authority `kiro-ssh`): `kiroRemote.sshConfigFile` points it at a
+flattened copy of the SSH config (`editor.FlattenSSHConfig`), and
+`editor.KiroSettings` holds the VS Code settings Kiro has. Kiro
+downloads its server from the guest, so a track using it allows Kiro
+IDE's download and sign-in hosts. The settings and flags were read from
+Kiro 1.5.11's app bundle and code (2026-11-25); `--remote` with
+`editor.KiroAuthority` (`kiro-ssh+config-<alias in hex>`) opens a
+configured host.
+An editor that implements `editor.GuestSSHD` (Kiro) gets OpenSSH's sshd
+in the image and every sandbox (`jig/sshd.go`): its Host block reaches
+the guest's sshd with `ssh -W 127.0.0.1:22` through a second block for
+msb's SSH (`<state>/msb_ssh_config`, which the editor's config doesn't
+include), because Kiro needs Unix-socket forwards and `msb ssh serve`
+refuses them.
 
 ## VM runtime
 
@@ -310,6 +426,11 @@ balanced groups and the personal providers' and Claude Code's. The
 groups in `allowlist/lists/` stay available either way. `mono-jig
 allowlist` prints the result; `mono-jig denied <name>` shows what was
 refused.
+
+A provider's group's hosts leave the allowlist while the broker serves
+it, from every group and layer that lists them exactly; a wildcard
+elsewhere stays (the `aws` group's `*.amazonaws.com` leaves, but a layer's
+exact `q.us-east-1.amazonaws.com` doesn't).
 
 ## Corporate CA
 

@@ -60,6 +60,11 @@ groups:
     description: gitlab.com's git and API; with a GitLab login they go through gitlab.broker.internal
     hosts:
       - gitlab.com
+  npm:
+    provider: npm
+    description: The npm registry; with an npm login it goes through the broker, read-only (also listed in sbx-package-managers)
+    hosts:
+      - registry.npmjs.org
   aws:
     provider: aws
     description: AWS endpoints; with AWS profiles the agent reaches AWS through aws.broker.internal (the AWS MCP Server)

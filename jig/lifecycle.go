@@ -72,6 +72,8 @@ func sandboxCmd(cmd, name string, args []string) {
 		// The next sandbox of this name has a new host key, and gets a new
 		// key of ours, authorized again (sshConfig).
 		_ = os.Remove(filepath.Join(state, "known_hosts"))
+		_ = os.Remove(sshFilesFor(state).sshdKnown)
+		_ = os.Remove(sshFilesFor(state).msbConfig)
 		if err := pruneAuthorizedKeys(func(c string) bool { return c == sshHost(name) }); err != nil {
 			fail("%v", err)
 		}

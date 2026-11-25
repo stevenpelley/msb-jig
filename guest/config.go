@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"maps"
+	"reflect"
 	"slices"
 	"strings"
 	"text/template"
@@ -54,7 +55,8 @@ type File struct {
 const ConfigFile = "/root/guest.json"
 
 // Add merges o into c: o's environment and git keys win, and its files,
-// packages and instructions follow c's.
+// packages and instructions follow c's. A file c already has, exactly
+// the same (mcpcli, which several providers add), is kept once.
 func (c *Config) Add(o Config) {
 	if c.Env == nil {
 		c.Env = map[string]string{}
@@ -65,7 +67,11 @@ func (c *Config) Add(o Config) {
 	}
 	maps.Copy(c.Git, o.Git)
 	c.GitClear = append(c.GitClear, o.GitClear...)
-	c.Files = append(c.Files, o.Files...)
+	for _, f := range o.Files {
+		if !slices.ContainsFunc(c.Files, func(g File) bool { return reflect.DeepEqual(f, g) }) {
+			c.Files = append(c.Files, f)
+		}
+	}
 	c.Packages = append(c.Packages, o.Packages...)
 	c.Instructions = append(c.Instructions, o.Instructions...)
 }

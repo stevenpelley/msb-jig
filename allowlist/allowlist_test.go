@@ -92,11 +92,11 @@ func TestBase(t *testing.T) {
 	}
 
 	// With every provider brokered, their hosts leave; downloads stay.
-	brokered, err := Compile(ls, "anthropic", "github", "gitlab", "aws")
+	brokered, err := Compile(ls, "anthropic", "github", "gitlab", "aws", "npm")
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, h := range []string{"api.anthropic.com", "github.com", "api.github.com", "uploads.github.com", "gitlab.com", "s3.us-east-1.amazonaws.com"} {
+	for _, h := range []string{"api.anthropic.com", "github.com", "api.github.com", "uploads.github.com", "gitlab.com", "s3.us-east-1.amazonaws.com", "registry.npmjs.org"} {
 		if e, ok := allows(brokered, h, 443); ok {
 			t.Errorf("brokered, %s is still allowed by %s/%s", h, e.Layer, e.Group)
 		}
@@ -140,6 +140,36 @@ func TestLayerFiles(t *testing.T) {
 		}
 		if err == nil {
 			t.Errorf("layer %q accepted", body)
+		}
+	}
+}
+
+// A provider's group can broker a host another group also lists: it
+// leaves the allowlist from both.
+func TestBrokeredHostListedTwice(t *testing.T) {
+	org := MustParseLayer("org", []byte("groups: [example-registry]\nhosts: [registry.example.org, other.example.org]\ndefine:\n  example-registry:\n    provider: example\n    hosts: [registry.npmjs.org, registry.example.org]\n"))
+	ls := []Layer{Base(), org}
+	es, err := Compile(ls)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, h := range []string{"registry.npmjs.org", "registry.example.org"} {
+		if _, ok := allows(es, h, 443); !ok {
+			t.Errorf("unbrokered, %s isn't allowed", h)
+		}
+	}
+	es, err = Compile(ls, "example")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, h := range []string{"registry.npmjs.org", "registry.example.org"} {
+		if e, ok := allows(es, h, 443); ok {
+			t.Errorf("brokered, %s is still allowed by %s/%s", h, e.Layer, e.Group)
+		}
+	}
+	for _, h := range []string{"other.example.org", "npmjs.org", "pypi.org"} {
+		if _, ok := allows(es, h, 443); !ok {
+			t.Errorf("brokered, %s isn't allowed", h)
 		}
 	}
 }

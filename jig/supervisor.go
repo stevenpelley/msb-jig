@@ -217,6 +217,13 @@ func run(name, state string) {
 		jobs["dockerd"] = "command -v dockerd >/dev/null || exec sleep infinity\n" +
 			"rm -f /var/run/docker.pid; exec dockerd >>/var/log/dockerd.log 2>&1"
 	}
+	if guestSSHD() {
+		// The editor's sshd (jig/sshd.go): set up before it starts.
+		if err := sshdSetup(ctx, sb, name, state); err != nil {
+			log.Warn("the editor's sshd isn't set up; the editor can't connect", "err", err)
+		}
+		jobs["sshd"] = sshdJob
+	}
 	var jobsDone sync.WaitGroup
 	jobsDone.Add(1)
 	go func() { defer jobsDone.Done(); followDenials(ctx, name, state, logStart, log, stopped) }()

@@ -36,10 +36,11 @@ const TokenCmd = "echo " + Token
 func Public(host string) *url.URL { return &url.URL{Scheme: "https", Host: host} }
 
 // Serve serves p as host over TLS with a fresh CA, as the supervisor
-// would. It returns the address and the CA file.
+// would (host may be a real name, as in proxy mode). It returns the
+// address and the CA file.
 func Serve(t *testing.T, host string, p http.Handler) (addr, caFile string) {
 	t.Helper()
-	ca, err := broker.NewCA("test")
+	ca, err := broker.NewCA("test", host)
 	if err != nil {
 		t.Fatal(err)
 	}
