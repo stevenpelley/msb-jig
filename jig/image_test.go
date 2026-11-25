@@ -37,3 +37,15 @@ func TestImageComponents(t *testing.T) {
 		t.Errorf("baseTag %q", baseTag())
 	}
 }
+
+// Docker's builds load the result into its image store (a buildx
+// docker-container builder otherwise keeps it only in the build cache);
+// Podman's don't take the flag.
+func TestBuildVerb(t *testing.T) {
+	if got := buildVerb("docker"); len(got) != 2 || got[1] != "--load" {
+		t.Errorf("docker: %v", got)
+	}
+	if got := buildVerb("podman"); len(got) != 1 {
+		t.Errorf("podman: %v", got)
+	}
+}
