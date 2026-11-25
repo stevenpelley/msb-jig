@@ -80,3 +80,34 @@ func TestKiroAuthority(t *testing.T) {
 		t.Errorf("got %s", got)
 	}
 }
+
+// The root's Include glob also matches the flattened copy in _kiro; a
+// second Configure, after the sandbox's block changed, must give only the
+// new block (Kiro takes the first Host match, and _kiro sorts first).
+func TestKiroConfigureSkipsItsOwnCopy(t *testing.T) {
+	root := t.TempDir()
+	top := filepath.Join(root, "ssh_config")
+	if err := os.WriteFile(top, []byte("Include "+filepath.Join(root, "*", "ssh_config")+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "work"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	k := Kiro{}
+	for _, cmd := range []string{"old", "new"} {
+		block := "Host mono-jig-work\n  ProxyCommand " + cmd + "\n"
+		if err := os.WriteFile(filepath.Join(root, "work", "ssh_config"), []byte(block), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := k.Configure(root, Profile{SSHConfig: top}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	b, err := os.ReadFile(filepath.Join(root, "_kiro", "ssh_config"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := string(b); strings.Count(got, "Host ") != 1 || !strings.Contains(got, "ProxyCommand new") {
+		t.Errorf("flattened:\n%s", got)
+	}
+}

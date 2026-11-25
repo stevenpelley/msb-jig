@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"syscall"
@@ -78,10 +79,10 @@ func KiroSettings(sshConfig string) map[string]any {
 
 // FlattenSSHConfig returns the SSH config at path with its Include lines
 // replaced by the files they name (absolute globs, one level, in sorted
-// order). Kiro reads SSH configs with its own parser, which doesn't
-// support everything OpenSSH does; whether it follows Include globs is
-// unverified, so it gets one file.
-func FlattenSSHConfig(path string) (string, error) {
+// order), except the files in skip. Kiro reads SSH configs with its own
+// parser, which doesn't support everything OpenSSH does; whether it
+// follows Include globs is unverified, so it gets one file.
+func FlattenSSHConfig(path string, skip ...string) (string, error) {
 	b, err := os.ReadFile(path)
 	if err != nil {
 		return "", err
@@ -103,6 +104,9 @@ func FlattenSSHConfig(path string) (string, error) {
 			}
 			sort.Strings(files)
 			for _, inc := range files {
+				if slices.Contains(skip, inc) {
+					continue
+				}
 				ib, err := os.ReadFile(inc)
 				if err != nil {
 					return "", err
@@ -127,7 +131,10 @@ func (k Kiro) Configure(root string, p Profile) error {
 	cfg := filepath.Join(data, "ssh_config")
 	flat := "# Written by mono-jig: no sandboxes yet.\n"
 	if _, err := os.Stat(p.SSHConfig); err == nil {
-		if flat, err = FlattenSSHConfig(p.SSHConfig); err != nil {
+		// The root's Include glob (<root>/*/ssh_config) matches this
+		// file too, and it's read first (_ sorts before letters): its
+		// old blocks would win over the sandboxes' own.
+		if flat, err = FlattenSSHConfig(p.SSHConfig, cfg); err != nil {
 			return err
 		}
 	}
@@ -142,6 +149,10 @@ func (k Kiro) Configure(root string, p Profile) error {
 }
 
 func (Kiro) Install(string) error { return nil }
+
+// GuestSSHD: Kiro reaches its server through a Unix-socket forward, which
+// msb ssh serve refuses, so it connects to the guest's own sshd.
+func (Kiro) GuestSSHD() bool { return true }
 
 func (k Kiro) Open(root string, p Profile, host, dir string) error {
 	if err := k.Configure(root, p); err != nil {

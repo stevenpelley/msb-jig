@@ -22,3 +22,11 @@ type Profile struct {
 	Hosts      []string // the sandboxes' SSH host names
 	Extensions []string // the agent's, installed on the remote
 }
+
+// GuestSSHD is an Editor that needs OpenSSH's sshd in the guest, reached
+// through the backend's own SSH with ssh -W (a TCP forward). Kiro's Remote
+// SSH reaches its server only through a Unix-socket forward
+// (direct-streamlocal), which msb ssh serve refuses (docs/design.md).
+type GuestSSHD interface {
+	GuestSSHD() bool
+}

@@ -323,8 +323,15 @@ flattened copy of the SSH config (`editor.FlattenSSHConfig`), and
 `editor.KiroSettings` holds the VS Code settings Kiro has. Kiro
 downloads its server from the guest, so a track using it allows Kiro
 IDE's download and sign-in hosts. The settings and flags were read from
-Kiro 1.5.11's app bundle (2026-11-25); that `--remote kiro-ssh+<host>`
-opens the window is *unverified*.
+Kiro 1.5.11's app bundle and code (2026-11-25); `--remote` with
+`editor.KiroAuthority` (`kiro-ssh+config-<alias in hex>`) opens a
+configured host.
+An editor that implements `editor.GuestSSHD` (Kiro) gets OpenSSH's sshd
+in the image and every sandbox (`jig/sshd.go`): its Host block reaches
+the guest's sshd with `ssh -W 127.0.0.1:22` through a second block for
+msb's SSH (`<state>/msb_ssh_config`, which the editor's config doesn't
+include), because Kiro needs Unix-socket forwards and `msb ssh serve`
+refuses them.
 
 ## VM runtime
 
