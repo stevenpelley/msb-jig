@@ -1,5 +1,6 @@
 // Package awsmcp is the broker's AWS provider, served as
-// aws.broker.internal: the AWS MCP Server, as MCP over plain HTTP for curl
+// aws.broker.internal (server mode) or under the AWS MCP Server's own
+// host (proxy mode): the AWS MCP Server, as MCP over plain HTTP for curl
 // and mcpcli (the agent never gets it as a native MCP server). Behind it
 // runs AWS's own stdio proxy (mcp-proxy-for-aws, through the embedded
 // aws-mcp-proxy wrapper) on the Mac, which holds the credentials, signs

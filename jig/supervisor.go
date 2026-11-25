@@ -24,16 +24,18 @@ import (
 // the broker and owns the VM (docs/microsandbox.md, "Tying the broker's
 // lifecycle to the sandbox's").
 //
-// It serves the broker on <state>/broker.sock (brokerhost.go) and holds
-// the sandbox through the backend (Track.Backend; sandbox.Microsandbox, the
-// SDK, attached: if the process dies, the VM stops with it), from the
-// spec in spec.go, then provisions it (provision.go). The guest reaches the broker through a vsock route to
-// that socket. Its other egress is microsandbox's policy, compiled from
-// the allowlist. In proxy mode (brokermode.go) the broker is also
-// microsandbox's outbound proxy, on a loopback port: every connection
-// the policy allows goes through it, and it terminates the providers'
-// real hosts. Network rules, mounts, the vsock route and the proxy are
-// set when the sandbox is created; rm and open again to change them.
+// It serves the broker (brokerhost.go) and holds the sandbox through the
+// backend (Track.Backend; sandbox.Microsandbox, the SDK, attached: if the
+// process dies, the VM stops with it), from the spec in spec.go, then
+// provisions it (provision.go). In server mode the broker is on
+// <state>/broker.sock, which the guest reaches through a vsock route and
+// a socat bridge. In proxy mode (brokermode.go) it is microsandbox's
+// outbound proxy, on a loopback port, instead: every connection the
+// policy allows goes through it, and it terminates the providers' real
+// hosts; the guest has no route or bridge. Other egress is microsandbox's
+// policy, compiled from the allowlist. Network rules, mounts, the vsock
+// route and the proxy are set when the sandbox is created; rm and open
+// again to change them.
 //
 // The providers come from mono-jig login (settings.json and the
 // Keychain; registry.go and login_<provider>.go); the JIG_* variables
@@ -61,7 +63,7 @@ import (
 
 const (
 	guestUser   = "agent"
-	brokerPort  = 443 // the vsock port, and the guest's loopback port
+	brokerPort  = 443 // server mode: the vsock port, and the guest's loopback port
 	guestCA     = "/usr/local/share/ca-certificates/mono-jig-broker-src.crt"
 	provisioned = "/var/lib/mono-jig/provisioned"
 	// provisionDir is where the supervisor writes provision/, every start.
@@ -130,8 +132,8 @@ func userAllowlist() string { return filepath.Join(stateRoot(), "allowlist.yaml"
 // user's own layer if there is one. The hosts of the providers the broker
 // serves are left out. In proxy mode they stay, and the providers' real
 // hosts are added on 443: microsandbox must allow them for their
-// connections to reach the broker, which decides. Only AWS's go, since
-// the agent reaches AWS through the broker's own endpoint.
+// connections to reach the broker, which decides. Only the SelfServed
+// providers' go (AWS's): the agent reaches them through the broker alone.
 func allowed(b providers.Config) ([]allowlist.Entry, error) {
 	files := strings.Fields(env("JIG_LAYERS", ""))
 	if _, err := os.Stat(userAllowlist()); err == nil {
@@ -144,7 +146,7 @@ func allowed(b providers.Config) ([]allowlist.Entry, error) {
 	if !b.Proxy {
 		return allowlist.Compile(layers, b.Brokered()...)
 	}
-	es, err := allowlist.Compile(layers, b.InternalOnly()...)
+	es, err := allowlist.Compile(layers, b.SelfServed()...)
 	if err != nil {
 		return nil, err
 	}
@@ -179,8 +181,9 @@ func run(name, state string) {
 	defer os.Remove(pidFile)
 	defer os.Remove(filepath.Join(state, "ready"))
 
-	// The broker first: the guest's route needs the socket to exist.
-	sock, closeBroker, err := startBroker(ctx, &c, log)
+	// The broker first: the guest's route needs the socket to exist, and
+	// the proxy's address goes in the sandbox's spec.
+	listen, closeBroker, err := startBroker(ctx, &c, log)
 	if err != nil {
 		fail("%v", err)
 	}
@@ -208,10 +211,15 @@ func run(name, state string) {
 		log.Info("sandbox stopped", "result", res, "err", err)
 		close(stopped)
 	}()
-	// The bridge to the broker, and dockerd: root exec jobs, restarted if
-	// they end (there's no systemd; the guest's init is microsandbox's).
-	jobs := map[string]string{"bridge": hostsLine(c) + fmt.Sprintf(
-		"\nexec socat TCP-LISTEN:%d,bind=127.0.0.1,fork,reuseaddr VSOCK-CONNECT:2:%d", brokerPort, brokerPort)}
+	// Server mode's bridge to the broker, and dockerd: root exec jobs,
+	// restarted if they end (there's no systemd; the guest's init is
+	// microsandbox's). Proxy mode needs no bridge: microsandbox sends
+	// the guest's connections to the broker.
+	jobs := map[string]string{}
+	if !c.proxy {
+		jobs["bridge"] = hostsLine(c) + fmt.Sprintf(
+			"\nexec socat TCP-LISTEN:%d,bind=127.0.0.1,fork,reuseaddr VSOCK-CONNECT:2:%d", brokerPort, brokerPort)
+	}
 	if c.dockerGiB > 0 {
 		// A sandbox provisioned before Docker was added has no dockerd.
 		jobs["dockerd"] = "command -v dockerd >/dev/null || exec sleep infinity\n" +
@@ -232,7 +240,7 @@ func run(name, state string) {
 		go func() { defer jobsDone.Done(); keep(ctx, sb, log, stopped, name, cmd) }()
 	}
 	_ = os.WriteFile(filepath.Join(state, "ready"), nil, 0o600)
-	log.Info("ready", "name", name, "socket", sock)
+	log.Info("ready", "name", name, "broker", listen)
 
 	select {
 	case <-stopped:

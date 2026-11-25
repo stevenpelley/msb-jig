@@ -67,6 +67,6 @@ groups:
       - registry.npmjs.org
   aws:
     provider: aws
-    description: AWS endpoints; with AWS profiles the agent reaches AWS through aws.broker.internal (the AWS MCP Server)
+    description: AWS endpoints; with AWS profiles the agent reaches AWS only through the broker's AWS MCP Server (aws.broker.internal, or its own host in proxy mode)
     hosts:
       - "*.amazonaws.com"

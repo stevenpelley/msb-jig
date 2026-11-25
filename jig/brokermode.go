@@ -22,7 +22,8 @@ import (
 //   - proxy: the broker is microsandbox's outbound proxy. The guest calls
 //     gitlab.com, github.com and api.anthropic.com by their real names;
 //     the broker terminates those (its CA is trusted for them alone) and
-//     passes every other connection through. AWS keeps the vsock route.
+//     passes every other connection through. AWS too, at the AWS MCP
+//     Server's own host, which the broker answers itself. No vsock route.
 //
 // microsandbox fixes a sandbox's network at create, so the mode is saved
 // in <state>/broker-mode, like the mounts, and a sandbox that exists

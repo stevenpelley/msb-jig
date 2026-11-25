@@ -28,8 +28,7 @@ import (
 )
 
 // Hostnames the sandbox uses for each provider in server mode. In proxy
-// mode it uses the real ones, except AWSHost: the AWS MCP endpoint is the
-// broker's own, with no real host behind it.
+// mode it uses the real ones.
 const (
 	GitLabHost    = "gitlab.broker.internal"
 	GitHubHost    = "github.broker.internal"
@@ -48,7 +47,9 @@ type Provider interface {
 	Name() string
 	// Hosts are the names it's served under: in server mode under
 	// InternalSuffix; in proxy mode its real hosts, which the broker
-	// terminates, or an internal name for an endpoint with no real host.
+	// terminates. Proxy mode has no route to internal names (the guest
+	// resolves names through microsandbox, which has no records of its
+	// own), so a provider has a real host there; Validate checks.
 	Hosts(proxy bool) []string
 	// Handlers serve it, by host (Hosts(b.Proxy)). Processes they start
 	// stop when ctx ends.
@@ -98,7 +99,7 @@ func (c Config) Hosts() []string {
 }
 
 // Internal are the internal names served in this mode, which the guest
-// points at the broker's bridge.
+// points at the broker's bridge. None in proxy mode (Validate).
 func (c Config) Internal() []string {
 	var out []string
 	for _, p := range c.Providers {
@@ -121,13 +122,35 @@ func (c Config) Brokered() []string {
 	return out
 }
 
-// InternalOnly names the providers with no real host (AWS's): in proxy
-// mode their groups still leave the allowlist, since the guest reaches
-// them through the broker's own name.
-func (c Config) InternalOnly() []string {
+// Validate checks that every provider can be served in this mode: in
+// proxy mode, under real hosts only.
+func (c Config) Validate() error {
+	if !c.Proxy {
+		return nil
+	}
+	for _, p := range c.Providers {
+		if i := slices.IndexFunc(p.Hosts(true), func(h string) bool { return strings.HasSuffix(h, InternalSuffix) }); i >= 0 {
+			return fmt.Errorf("%s: proxy mode serves real hosts only, not %s", p.Name(), p.Hosts(true)[i])
+		}
+	}
+	return nil
+}
+
+// SelfServed is a provider the broker answers itself at its real host,
+// never forwarding there (AWS's MCP endpoint, which AWS's proxy on the
+// Mac serves). Its group leaves the allowlist in proxy mode too: the
+// agent reaches the service only through the broker.
+type SelfServed interface {
+	Provider
+	SelfServed()
+}
+
+// SelfServed names the providers that are SelfServed: their groups leave
+// the allowlist in both modes.
+func (c Config) SelfServed() []string {
 	var out []string
 	for _, p := range c.Providers {
-		if !slices.ContainsFunc(p.Hosts(true), func(h string) bool { return !strings.HasSuffix(h, InternalSuffix) }) {
+		if _, ok := p.(SelfServed); ok {
 			out = append(out, p.Name())
 		}
 	}
@@ -146,6 +169,9 @@ func (c Config) Guest() guest.Config {
 // Build returns the providers' handlers by hostname. Processes they run
 // (the AWS MCP proxy) stop when ctx ends; their files go in state.
 func Build(ctx context.Context, c Config, state string, log *slog.Logger) (map[string]http.Handler, error) {
+	if err := c.Validate(); err != nil {
+		return nil, err
+	}
 	b := &Builder{Proxy: c.Proxy, State: state, Log: log, public: c.Public, client: c.Client}
 	if b.client == nil {
 		b.client = broker.NewUpstreamClient()

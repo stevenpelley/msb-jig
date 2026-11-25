@@ -38,7 +38,8 @@ with credentials, not what it can send.
 - **The broker** (`broker/`) serves each provider under a name the guest
   reaches over vsock (`gitlab.broker.internal`, …). In *proxy mode* it is
   instead the VM's outbound proxy, terminating the providers' real host
-  names. Each provider's route table lists every request it allows and the
+  names (the AWS MCP Server's included), with no vsock route, bridge or
+  `/etc/hosts` names in the guest. Each provider's route table lists every request it allows and the
   check run on it; anything else is denied.
 - **The allowlist** (`allowlist/`) comes in layers: a base, organisation
   layers, then your own. The hosts of brokered providers leave it.

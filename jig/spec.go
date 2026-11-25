@@ -36,9 +36,12 @@ func sandboxSpec(c config) (sandbox.Spec, error) {
 	s := sandbox.Spec{
 		Name: c.name, Image: c.image, MemoryMiB: c.memory, CPUs: c.cpus, DiskGiB: c.diskGiB,
 		Env: env, EnvRemove: staleEnv(c.state, env),
-		Egress:      c.egress,
-		VsockSocket: filepath.Join(c.state, "broker.sock"), VsockPort: brokerPort,
-		Disks: map[string]uint32{},
+		Egress: c.egress,
+		Disks:  map[string]uint32{},
+	}
+	if !c.proxy {
+		// Server mode's route to the broker; proxy mode needs none.
+		s.VsockSocket, s.VsockPort = filepath.Join(c.state, "broker.sock"), brokerPort
 	}
 	for _, mt := range c.mounts {
 		s.Mounts = append(s.Mounts, sandbox.Mount{Host: mt.Host, Guest: mt.Guest, ReadOnly: mt.ReadOnly, UID: guestUID})

@@ -120,7 +120,10 @@ On the user's Mac, against `<user>/test`, these pass:
 - Docker in the guest, on its own ext4 disk;
 - AWS: the agent calls the AWS MCP Server with `mcpcli` or `curl` at
   `aws.broker.internal/mcp`; the broker runs AWS's stdio proxy on the Mac
-  (`docs/prototype-plan.md` step 7).
+  (`docs/prototype-plan.md` step 7). In proxy mode, since 2026-11-25, at
+  the server's own URL (`aws-mcp.us-east-1.api.aws/mcp`), which the
+  broker answers itself; proxy mode has no vsock route (*unverified* on
+  the Mac).
 
 The Lima backend was removed the same day (in git at `695143a`), with its
 netstack and gvisor.
