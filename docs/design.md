@@ -169,6 +169,14 @@ Use dev containers only with the container running inside the sandbox VM, never 
   - `runtime.`, `management.` and `telemetry.us-east-1.kiro.dev`
   - the IAM Identity Center hosts, if we sign in through it
   - Europe variants of the regional hosts, if needed
+- **Read from Kiro 1.5.11's app bundle (2026-11-25), now `editor.Kiro`:**
+  - The built-in `kiro-remote` extension resolves the remote authority `kiro-ssh` (and `kiro-cloud`). Its settings are `kiroRemote.sshConfigFile` (empty means `~/.ssh/config`), `kiroRemote.httpProxy`, `kiroRemote.httpsProxy` and `kiroRemote.serverDownloadUrlTemplate`. It has no agent-forwarding or local-server-download setting.
+  - `kiro --help` lists `--user-data-dir` and `--extensions-dir`, so the harness gets its own instance as with VS Code. `--remote` isn't listed (VS Code doesn't list it either); that `--remote kiro-ssh+<host>` works is *unverified*.
+  - `git.terminalAuthentication`, `git.useIntegratedAskPass` and `github.gitAuthentication` exist, all on by default.
+  - Dev Containers are `kiro-dev-containers` (`kiro-dev-container` authority); its only setting is `kiroDevContainers.dockerPath`, so the copy-gitconfig and credential-forwarding settings above have no Kiro equivalent found.
+  - `--remote kiro-ssh+config-<alias in hex>` opens a configured host (`editor.KiroAuthority`); other spellings are refused.
+  - **Kiro reaches its remote server only through a Unix socket** (`direct-streamlocal@openssh.com`): the server's readiness message must carry a `socketPath`. `msb ssh serve` (0.8.2) refuses that channel ("administratively prohibited") and carries TCP forwards (checked on the Mac, 2026-11-25). So Kiro connects to OpenSSH's sshd in the guest, with `AllowStreamLocalForwarding local`, reached by `ssh -W 127.0.0.1:22` through msb's SSH.
+  - Before connecting, Kiro asks whether to trust the remote host, warning that extensions on it run automatically and can run code on the Mac (opening a local terminal, for example). That is one more bridge from the sandbox to the Mac, still to test.
 - **Cloud sessions.** 1.5 can also open Kiro's own cloud sessions in the IDE. They run in Kiro's cloud, where our broker isn't, so they're out of scope for now. They may matter for headless agents once the broker can run centrally.
 
 ## The piece to build first: the credential broker

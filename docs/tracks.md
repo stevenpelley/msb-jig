@@ -316,8 +316,15 @@ The editor runs on the Mac as its own instance (settings and extensions
 under the state directory) and reaches the sandbox over SSH, with the
 SSH config and host names in `Profile`. `editor.VSCodeSettings` holds
 the settings that close the editor's credential bridges
-(`docs/design.md`); an editor forked from VS Code may reuse them. Kiro's
-remote-SSH setting names and command-line flags are *unverified*.
+(`docs/design.md`); an editor forked from VS Code may reuse them.
+`editor.Kiro` is Kiro IDE 1.5 with its built-in Remote SSH (remote
+authority `kiro-ssh`): `kiroRemote.sshConfigFile` points it at a
+flattened copy of the SSH config (`editor.FlattenSSHConfig`), and
+`editor.KiroSettings` holds the VS Code settings Kiro has. Kiro
+downloads its server from the guest, so a track using it allows Kiro
+IDE's download and sign-in hosts. The settings and flags were read from
+Kiro 1.5.11's app bundle (2026-11-25); that `--remote kiro-ssh+<host>`
+opens the window is *unverified*.
 
 ## VM runtime
 
