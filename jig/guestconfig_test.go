@@ -88,8 +88,13 @@ func TestGuestConfigProxyMode(t *testing.T) {
 	if len(g.Git) != 0 {
 		t.Errorf("git in proxy mode: %v", g.Git)
 	}
-	if h := hostsLine(allOn(true)); !strings.Contains(h, `127.0.0.1 aws.broker.internal\n`) || strings.Contains(h, "gitlab.broker") {
+	// No internal names: AWS is at its own host, and the line only
+	// removes an older sandbox's.
+	if h := hostsLine(allOn(true)); strings.Contains(h, "127.0.0.1") {
 		t.Errorf("hostsLine: %s", h)
+	}
+	if u := g.Env["MCP_GATEWAY_URL"]; u != "https://aws-mcp.us-east-1.api.aws/mcp" {
+		t.Errorf("MCP_GATEWAY_URL %q", u)
 	}
 }
 

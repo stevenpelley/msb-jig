@@ -95,8 +95,13 @@ type Provider interface {
 - **Hosts**: in server mode (the default) a name under
   `providers.InternalSuffix` (`example.broker.internal`); the library maps
   it to the broker in the guest's `/etc/hosts`. In proxy mode
-  (`docs/transparent-broker.md`) the service's real hosts, or the
-  internal name again for an endpoint with no real host (AWS's).
+  (`docs/transparent-broker.md`) the service's real hosts only: the guest
+  resolves names through microsandbox, which has no records of its own,
+  so an internal name can't reach the proxy (`Config.Validate` refuses
+  one). A service the broker answers itself, never forwarding to it,
+  still uses a real host there and implements `providers.SelfServed`, so
+  its group stays out of the allowlist in proxy mode too (AWS: the AWS
+  MCP Server's host, served by AWS's proxy on the Mac; 2026-11-25).
 - **Handlers** builds the route table. `b.Upstreams(host, login)` makes
   upstreams that drop the sandbox's credential headers and set the
   user's; `b.Provider(name, routes)` serves the table, logging each
@@ -378,9 +383,9 @@ it at the next `image build`; sandboxes already created keep theirs
 until removed.
 
 `BaseImage` is what the base image builds on, Debian or Ubuntu unless
-`base` is replaced; the first start also installs `socat` with apt
-before running anything (`jig/provision.go`), so a non-Debian base needs
-that changed too. A user's own image goes on top (`image init`, `image
+`base` is replaced; in server mode the first start also installs `socat`
+with apt before running anything (`jig/provision.go`), so a non-Debian
+base needs that changed too. A user's own image goes on top (`image init`, `image
 build -f`).
 
 ## Guest settings

@@ -44,16 +44,21 @@ func provision(ctx context.Context, sb sandbox.Guest, c config, log *slog.Logger
 	if err := sb.WriteFile(ctx, guestCAFile, []byte(strings.Join(c.cas, ""))); err != nil {
 		return err
 	}
-	first, comps := "", "ca apply"
+	// The hosts line every start: in proxy mode it removes the names an
+	// older proxy-mode sandbox had (aws.broker.internal until 2026-11-25).
+	first, comps := hostsLine(c), "ca apply"
 	if !done {
 		comps = "ca " + firstComponents(ctx, sb, c, log)
 		log.Info("provisioning the guest (first start)", "components", comps)
-		first = `export DEBIAN_FRONTEND=noninteractive
+		if !c.proxy {
+			// Server mode's bridge (supervisor.go), before the components.
+			first = `export DEBIAN_FRONTEND=noninteractive
 if ! command -v socat >/dev/null; then
   apt-get update -qq
   apt-get install -y -qq --no-install-recommends socat >/dev/null
 fi
-` + hostsLine(c)
+` + first
+		}
 	}
 	script := fmt.Sprintf(`set -euo pipefail
 %s
@@ -76,9 +81,9 @@ mkdir -p %[9]s && touch %[10]s
 }
 
 // hostsLine points the broker's internal names (those of the providers
-// that are on, in this mode) at the bridge, replacing an older line, so
-// the names follow the providers. In proxy mode the others are reached by
-// their real names.
+// that are on, in server mode) at the bridge, replacing an older line, so
+// the names follow the providers. In proxy mode there are none: it only
+// removes the line.
 func hostsLine(c config) string {
 	line := ""
 	if names := c.broker.Internal(); len(names) > 0 {

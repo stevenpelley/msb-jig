@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"slices"
+	"strings"
 	"testing"
 )
 
@@ -14,18 +15,21 @@ func TestConfigHelpers(t *testing.T) {
 		Anthropic{TokenCmd: "true"},
 		AWS{Profiles: []string{"p"}},
 	}}
-	if got, want := c.Hosts(), []string{"gitlab.example.org", "octo.ghe.com", "api.octo.ghe.com", AnthropicAPIHost}; !slices.Equal(got, want) {
-		t.Errorf("Hosts %v, want %v", got, want)
-	}
 	if got, want := c.Internal(), []string{GitLabHost, GitHubHost, AnthropicHost, AWSHost}; !slices.Equal(got, want) {
 		t.Errorf("Internal (server) %v, want %v", got, want)
 	}
 	c.Proxy = true
-	if got := c.Internal(); !slices.Equal(got, []string{AWSHost}) {
+	if got := c.Internal(); len(got) != 0 {
 		t.Errorf("Internal (proxy) %v", got)
 	}
-	if got := c.InternalOnly(); !slices.Equal(got, []string{"aws"}) {
-		t.Errorf("InternalOnly %v", got)
+	if got, want := c.Hosts(), []string{"gitlab.example.org", "octo.ghe.com", "api.octo.ghe.com", AnthropicAPIHost, "aws-mcp.us-east-1.api.aws"}; !slices.Equal(got, want) {
+		t.Errorf("Hosts (proxy) %v, want %v", got, want)
+	}
+	if err := c.Validate(); err != nil {
+		t.Errorf("Validate: %v", err)
+	}
+	if got := c.SelfServed(); !slices.Equal(got, []string{"aws"}) {
+		t.Errorf("SelfServed %v", got)
 	}
 	if got := c.Brokered(); !slices.Equal(got, []string{"gitlab", "github", "anthropic", "aws"}) {
 		t.Errorf("Brokered %v", got)
@@ -59,5 +63,27 @@ func TestBuildRefusesTwoProvidersOnOneHost(t *testing.T) {
 	c := Config{Providers: []Provider{Anthropic{TokenCmd: "true"}, Anthropic{TokenCmd: "true"}}}
 	if _, err := Build(context.Background(), c, "", slog.New(slog.DiscardHandler)); err == nil {
 		t.Error("built")
+	}
+}
+
+// internalOnly is a provider with no real host.
+type internalOnly struct{ AWS }
+
+func (internalOnly) Name() string        { return "internal" }
+func (internalOnly) Hosts(bool) []string { return []string{"x" + InternalSuffix} }
+
+// Proxy mode refuses a provider with only an internal name: the guest
+// has no route to it there.
+func TestValidateProxy(t *testing.T) {
+	c := Config{Providers: []Provider{internalOnly{}}}
+	if err := c.Validate(); err != nil {
+		t.Errorf("server mode: %v", err)
+	}
+	c.Proxy = true
+	if err := c.Validate(); err == nil || !strings.Contains(err.Error(), "x.broker.internal") {
+		t.Errorf("proxy mode: %v", err)
+	}
+	if _, err := Build(context.Background(), c, t.TempDir(), slog.Default()); err == nil {
+		t.Error("Build in proxy mode")
 	}
 }

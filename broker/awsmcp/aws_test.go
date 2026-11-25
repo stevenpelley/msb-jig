@@ -85,14 +85,18 @@ func fakeAWSMCP() {
 	}
 }
 
-func awsBroker(t *testing.T) *httptest.Server {
+func awsBroker(t *testing.T) *httptest.Server { return awsBrokerMode(t, false) }
+
+// awsBrokerMode is the broker with the AWS provider alone, in server or
+// proxy mode, the fake MCP server behind it.
+func awsBrokerMode(t *testing.T, proxy bool) *httptest.Server {
 	t.Helper()
 	exe, err := os.Executable()
 	if err != nil {
 		t.Fatal(err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	ps, err := providers.Build(ctx, providers.Config{Providers: []providers.Provider{providers.AWS{Command: "env FAKE_AWS_MCP=1 " + exe}}}, t.TempDir(), slog.New(slog.DiscardHandler))
+	ps, err := providers.Build(ctx, providers.Config{Proxy: proxy, Providers: []providers.Provider{providers.AWS{Command: "env FAKE_AWS_MCP=1 " + exe}}}, t.TempDir(), slog.New(slog.DiscardHandler))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -102,9 +106,13 @@ func awsBroker(t *testing.T) *httptest.Server {
 }
 
 func awsPost(t *testing.T, srv *httptest.Server, body string) (map[string]any, *http.Response) {
+	return awsPostHost(t, srv, "aws.broker.internal", body)
+}
+
+func awsPostHost(t *testing.T, srv *httptest.Server, host, body string) (map[string]any, *http.Response) {
 	t.Helper()
 	req, _ := http.NewRequest("POST", srv.URL+awsmcp.Path, strings.NewReader(body))
-	req.Host = "aws.broker.internal"
+	req.Host = host
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -131,6 +139,19 @@ func TestAWSMCPStatelessCall(t *testing.T) {
 	echo, _ := json.Marshal(out["result"])
 	if !strings.Contains(string(echo), `"x":1`) {
 		t.Fatalf("result: %s", echo)
+	}
+}
+
+// In proxy mode the broker answers the AWS MCP Server's own host, through
+// the proxy on the Mac, and no longer serves the internal name.
+func TestAWSMCPProxyMode(t *testing.T) {
+	srv := awsBrokerMode(t, true)
+	out, _ := awsPostHost(t, srv, providers.AWSAPIHost, `{"jsonrpc":"2.0","id":"a","method":"tools/call","params":{"name":"echo","arguments":{"x":1}}}`)
+	if out["id"] != "a" {
+		t.Fatalf("id not mapped back: %v", out)
+	}
+	if _, resp := awsPostHost(t, srv, "aws.broker.internal", `{"jsonrpc":"2.0","id":1,"method":"tools/list"}`); resp.StatusCode == http.StatusOK {
+		t.Error("the internal name is served in proxy mode")
 	}
 }
 

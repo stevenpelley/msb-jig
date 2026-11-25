@@ -5,7 +5,8 @@ and docs (the version `mono-jig` uses) and sbx v0.54.0's help text. The
 microsandbox hook was tested on the user's Mac with a toy proxy on
 2026-11-24 (see "What we checked"). Proxy mode is built, beside server
 mode, as `mono-jig up|open <name> --broker proxy` (2026-11-24; see
-"Proxy mode as built"). Letting the broker decide all egress, with
+"Proxy mode as built"); since 2026-11-25 it serves AWS at its own host
+too, with no vsock route ("AWS at its own host"). Letting the broker decide all egress, with
 microsandbox allowing everything but a few fixed rules, was investigated
 and tested on 2026-11-24 but not built (see "Egress decided by the
 broker").
@@ -458,11 +459,12 @@ what its mode needs.
 | Location | `broker/upstream.go` | `Upstreams.Public` is nil in proxy mode, so `Location` and `Link` aren't rewritten. GitLab's LFS `href` rewrite is skipped too; the `header` is still removed |
 | Anonymous reads | `github/routes.go`, `gitlab/routes.go` | In proxy mode only, the last route (of `github.com`'s table, for GitHub) forwards a GET or HEAD that no earlier route matched to the provider without the credential (`anonymous.read`). Unmatched writes are still denied |
 | CA | `broker/ca.go` | `NewCA`/`LoadOrCreateCA` take extra permitted domains. A kept CA must cover them, or the supervisor stops and says to `rm` |
-| Supervisor | `jig/supervisor.go` (`cmd/mono-jig/` until 2026-11-24), `brokerhost.go`, `brokermode.go` | Listens on `127.0.0.1` on a port chosen at create and saved in `<state>/proxy-port`, since microsandbox keeps the proxy address with the sandbox. Makes a new password on every start and sets it in its own environment (`JIG_PROXY_PASSWORD`). The allowlist keeps the forge groups and adds the brokered hosts on 443; only AWS's group is dropped. `/etc/hosts` maps only `aws.broker.internal` |
+| Supervisor | `jig/supervisor.go` (`cmd/mono-jig/` until 2026-11-24), `brokerhost.go`, `brokermode.go` | Listens on `127.0.0.1` on a port chosen at create and saved in `<state>/proxy-port`, since microsandbox keeps the proxy address with the sandbox. Makes a new password on every start and sets it in its own environment (`JIG_PROXY_PASSWORD`). The allowlist keeps the forge groups and adds the brokered hosts on 443; only AWS's group is dropped (`providers.SelfServed`). Since 2026-11-25 no vsock route, socat bridge or `/etc/hosts` names (below) |
 | Guest | each provider's `Guest(proxy)` in `broker/providers`, and the agent's in `agent.ClaudeCode` (until 2026-11-24 `guest/provision.sh` with `BROKER_MODE=proxy`) | No `insteadOf`, `GH_HOST` or `ANTHROPIC_BASE_URL`. `GH_TOKEN`, `GITLAB_TOKEN` and `CLAUDE_CODE_OAUTH_TOKEN` are placeholders. `GITLAB_HOST` is the real host. glab's config names it |
 
-The vsock route and `broker.sock` stay in proxy mode, for AWS. They serve
-the same providers.
+Until 2026-11-25 the vsock route, `broker.sock`, socat and the
+`/etc/hosts` line stayed in proxy mode for AWS alone, at
+`aws.broker.internal`; see "AWS at its own host" below.
 
 ### End to end (2026-11-24)
 
@@ -514,6 +516,35 @@ was still denied (403).
 Not covered: AWS in proxy mode, Claude Code with a real token, pushes
 and merge-request writes (the routes are the same as server mode's and are
 unit-tested), LFS, and UDP.
+
+### AWS at its own host (2026-11-25)
+
+Proxy mode now serves the AWS MCP Server under its own host,
+`aws-mcp.us-east-1.api.aws` (`awsmcp.DefaultURL`), so the guest needs
+no vsock route, socat bridge or `/etc/hosts` names. `aws.broker.internal`
+had kept them for AWS alone, since microsandbox has no DNS records of its
+own and its proxy receives `CONNECT <ip>:<port>`: a made-up name can't
+reach the broker that way.
+
+- `providers.AWS.Hosts(true)` is the real host. The broker terminates it
+  like a forge host, then answers it itself through AWS's stdio proxy on
+  the Mac (which keeps per-call `aws_profile`); it never forwards there.
+  `$MCP_GATEWAY_URL` in the guest is the server's own URL.
+- `providers.SelfServed` marks such a provider: its allowlist group
+  (`aws`, `*.amazonaws.com`) still leaves in proxy mode, and only its
+  host is added on 443.
+- `providers.Config.Validate` refuses an internal name in proxy mode, and
+  `Build` runs it.
+- The supervisor creates a proxy-mode sandbox without the vsock route,
+  doesn't listen on `broker.sock`, doesn't run the bridge job or install
+  socat, and every start removes an older sandbox's `broker.internal`
+  line from `/etc/hosts`.
+- A proxy-mode sandbox made before this keeps its egress rules and CA,
+  neither of which names the new host: the supervisor stops at the CA
+  check and says to `rm`.
+
+Unit-tested (`broker/awsmcp`, `broker/providers`, `jig`); *unverified* in
+a sandbox on the Mac, as AWS in proxy mode was before.
 
 ## Egress decided by the broker (investigated 2026-11-24, not built)
 
