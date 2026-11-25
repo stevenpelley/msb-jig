@@ -70,7 +70,7 @@ settings (`docs/tracks.md`).
 ## Using it
 
 Requirements: macOS, Go 1.26, [microsandbox](https://github.com/superradcompany/microsandbox)
-(`msb`, tested with 0.7.16) and VS Code's `code` command. Optional: Docker
+(`msb` 0.8.2, the Go SDK's version: SDK 0.7.16 refused runtime 0.8.2) and VS Code's `code` command. Optional: Docker
 or Podman to build the base image; `glab`, `gh`, `claude`, the AWS CLI and
 `uv` for the providers you log in to.
 

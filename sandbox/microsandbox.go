@@ -40,7 +40,11 @@ func (Microsandbox) Open(ctx context.Context, s Spec) (Guest, bool, error) {
 	h, err := m.GetSandbox(ctx, s.Name)
 	switch {
 	case err == nil:
-		if st := h.Status(); st == m.SandboxStatusRunning || st == m.SandboxStatusStarting {
+		st, err := h.Status(ctx)
+		if err != nil {
+			return nil, false, fmt.Errorf("%s's status: %w", s.Name, err)
+		}
+		if st == m.SandboxStatusRunning || st == m.SandboxStatusStarting {
 			// Left running by a supervisor that was killed before the parent
 			// watch fired, or started by hand: stop it, so we own it.
 			if err := exec.Command("msb", "stop", "-t", "30", s.Name).Run(); err != nil {
