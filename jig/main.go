@@ -78,6 +78,11 @@ func usage() {
                           when creating it, how the guest reaches the broker: server
                           (broker.internal names) or proxy (microsandbox's outbound proxy;
                           the providers' hosts by their own names); default `+track.BrokerMode+`
+  open <name> [dir] --plain-image
+                          when creating it, start from plain `+track.BaseImage+` and install
+                          everything in the guest (minutes), instead of building its image
+                          on the Mac with Docker or Podman, the default (cached; seconds
+                          when nothing changed)
   cp <src> <dst>          copy between the Mac and a sandbox; a sandbox path is
                           <name>:<path>, relative to the agent's home unless absolute
   stop <name>             stop it
@@ -85,13 +90,14 @@ func usage() {
   image init [file]       write a starter Dockerfile (default ./Dockerfile)
   image build [-f Dockerfile [context]] [-engine docker|podman]
                           build the base image (git, Docker, Claude Code...), then your
-                          Dockerfile on it; new sandboxes start from the result
-  image show|reset        the image new sandboxes start from; back to plain Ubuntu
+                          Dockerfile on it, which every new sandbox's build then uses too
+                          (new sandboxes build it anyway; this does it ahead of time)
+  image show|reset        what new sandboxes build; back to the base image alone
   uninstall [--yes]       remove every sandbox, its state and the Keychain items
 
 sandboxes, beneath open and stop:
   up <name>          start the sandbox and its broker in the background (creates it the first time;
-                     --mount and --broker as for open)
+                     --mount, --broker and --plain-image as for open)
   run <name>         the same, in the foreground
   down <name>        stop it
   shell <name>       a login shell as the agent user
@@ -137,11 +143,12 @@ func Main(t Track) {
 		cmd := os.Args[1]
 		args, specs := splitMounts(os.Args[2:])
 		args, mode := splitBrokerMode(args)
+		args, plainImage = splitPlainImage(args)
 		dir := cmd == "code" || cmd == "open"
 		if len(args) != 1 && (!dir || len(args) != 2) {
 			usage()
 		}
-		if (len(specs) > 0 || mode != "") && cmd != "up" && cmd != "open" {
+		if (len(specs) > 0 || mode != "" || plainImage) && cmd != "up" && cmd != "open" {
 			usage()
 		}
 		if mode == "" && (cmd == "up" || cmd == "open") && track.BrokerMode != modeServer {

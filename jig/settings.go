@@ -16,8 +16,12 @@ import (
 // logins on the Mac. The JIG_* variables override them
 // (ProviderCLI.broker, extraCAFiles), for the checks.
 type Settings struct {
-	// Image is the image mono-jig image build made (image.go).
+	// Image is the image last built for new sandboxes (image.go).
 	Image string
+	// ImageFile and ImageContext are the user's own Dockerfile and its
+	// build context, absolute (image build -f), which every new sandbox's
+	// build puts on the base image; empty: the base image alone.
+	ImageFile, ImageContext string
 	// CAs are the extra CA certificates' files (ca.go).
 	CAs []string
 	// providers are each provider's own settings, by login name.
@@ -31,6 +35,9 @@ func (s Settings) MarshalJSON() ([]byte, error) {
 	}
 	if s.Image != "" {
 		m["image"] = s.Image
+	}
+	if s.ImageFile != "" {
+		m["image_file"], m["image_context"] = s.ImageFile, s.ImageContext
 	}
 	if len(s.CAs) > 0 {
 		m["cas"] = s.CAs
@@ -48,6 +55,14 @@ func (s *Settings) UnmarshalJSON(b []byte) error {
 			return err
 		}
 		delete(m, "image")
+	}
+	for k, p := range map[string]*string{"image_file": &s.ImageFile, "image_context": &s.ImageContext} {
+		if v, ok := m[k]; ok {
+			if err := json.Unmarshal(v, p); err != nil {
+				return err
+			}
+			delete(m, k)
+		}
 	}
 	if v, ok := m["cas"]; ok {
 		if err := json.Unmarshal(v, &s.CAs); err != nil {

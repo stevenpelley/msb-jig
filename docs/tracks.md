@@ -353,9 +353,14 @@ Another runtime needs those behind the interface first.
 
 Provisioning is shell components in `guest/provision/components/`, run
 by `provision.sh` in name order; each runs only when named. The image
-build (`mono-jig image build`) bakes `base git docker` and the added
-ones into the base image; a sandbox's first start runs what the image
-lacks; every start runs `ca` (extra CAs) and `apply` (`guest.Config`).
+build bakes `base git docker` and the added ones into the base image,
+then the user's Dockerfile on it if `image build -f` recorded one. It
+runs on the Mac (Docker or Podman) whenever a sandbox is created, from
+the engine's cache when nothing changed (2026-11-27; `jig/image.go`
+`newSandboxImage`), so a first start runs only what the image lacks
+(`ca broker apply`); every start runs `ca` (extra CAs) and `apply`
+(`guest.Config`). `--plain-image` creates a sandbox from `BaseImage`
+itself, with every component at its first start (minutes).
 
 | Component | Does | Debian-specific |
 |---|---|---|
@@ -379,8 +384,8 @@ A component is sourced by `provision.sh` as root, with `lib.sh`'s
 helpers. It starts `if want <name>; then`, logs with `log`, and must be
 idempotent. `$SANDBOX_USER` is the agent's user. The provision files'
 hash is part of the base image's tag, so changing a component rebuilds
-it at the next `image build`; sandboxes already created keep theirs
-until removed.
+it when the next sandbox is created; sandboxes already created keep
+theirs until removed.
 
 `BaseImage` is what the base image builds on, Debian or Ubuntu unless
 `base` is replaced; in server mode the first start also installs `socat`
@@ -465,7 +470,8 @@ What a track can't change without a library change:
 
 1. A repository and `cmd/<name>/main.go` as above, building with
    `jig.Personal()` unchanged.
-2. `mono-jig ca` if the network inspects TLS; `setup`; `image build`.
+2. `mono-jig ca` if the network inspects TLS; `setup` (builds the base
+   image ahead of the first sandbox).
 3. The allowlist layer: the organisation's package mirrors and hosts.
 4. `Track.Guest`: mirror settings for the package managers.
 5. Providers: the library's where they fit (GitHub with a host), then

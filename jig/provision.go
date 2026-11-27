@@ -125,7 +125,7 @@ func firstComponents(ctx context.Context, sb sandbox.Guest, c config, log *slog.
 		baked, hash = parseImageFile(s)
 	}
 	if hash == "" {
-		log.Warn("the sandbox's image has nothing of mono-jig's: this first start installs everything, which takes minutes; build the base image once with mono-jig image build, then rm and open",
+		log.Info("the sandbox's image has nothing of mono-jig's (--plain-image or JIG_IMAGE): this first start installs everything, which takes minutes",
 			"image", c.image)
 	}
 	if want := guest.ProvisionHash(provisionFiles()); hash != "" && hash != want {
