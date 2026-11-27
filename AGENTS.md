@@ -122,8 +122,9 @@ On the user's Mac, against `<user>/test`, these pass:
   `aws.broker.internal/mcp`; the broker runs AWS's stdio proxy on the Mac
   (`docs/prototype-plan.md` step 7). In proxy mode, since 2026-11-25, at
   the server's own URL (`aws-mcp.us-east-1.api.aws/mcp`), which the
-  broker answers itself; proxy mode has no vsock route (*unverified* on
-  the Mac).
+  broker answers itself; proxy mode has no vsock route (checked on the
+  Mac 2026-11-27 with every provider logged in:
+  `docs/transparent-broker.md`, "End to end with every provider").
 
 The Lima backend was removed the same day (in git at `695143a`), with its
 netstack and gvisor.
