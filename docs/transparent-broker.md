@@ -572,6 +572,10 @@ one refused write were sent.
 
 `mono-jig denied` also listed `http-intake.logs.us5.datadoghq.com`,
 Claude Code's telemetry (Datadog), refused because it's on no allow list.
+Since then `agent.ClaudeCode` sets
+`CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` in every guest (no
+telemetry, error reports or auto-updates), so it stops asking; that it
+does is *unverified* on the Mac.
 
 Not covered: pushes and merge-request writes, LFS, UDP, and server mode
 on 0.8.2.
