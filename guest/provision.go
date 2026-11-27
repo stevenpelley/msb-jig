@@ -50,11 +50,30 @@ func ComponentName(path string) string {
 	return name
 }
 
-// ImageDockerfile builds the base image for microsandbox sandboxes, with
-// provision/ beside it.
-//
 //go:embed image.Dockerfile
-var ImageDockerfile string
+var imageDockerfile string
+
+// layersMarker is the line in image.Dockerfile that ImageDockerfile
+// replaces with the components' layers.
+const layersMarker = "# COMPONENT LAYERS\n"
+
+// ImageDockerfile builds the base image for microsandbox sandboxes from
+// files (Provision's, under provision/ beside it), running the named
+// components: one layer each, in provision.sh's order, so Docker's cache
+// keeps every layer before the first changed component.
+func ImageDockerfile(files map[string]string, components []string) string {
+	var b strings.Builder
+	for _, p := range slices.Sorted(maps.Keys(files)) {
+		name := ComponentName(p)
+		if name == "" || !slices.Contains(components, name) {
+			continue
+		}
+		fmt.Fprintf(&b, "COPY provision/%s /opt/mono-jig/provision/components/\n", p)
+		fmt.Fprintf(&b, "RUN SANDBOX_USER=\"$SANDBOX_USER\" SANDBOX_UID=\"$SANDBOX_UID\" PROVISION_COMPONENTS=%s \\\n", name)
+		b.WriteString("    bash /opt/mono-jig/provision/provision.sh \\\n && rm -rf /var/lib/apt/lists/*\n")
+	}
+	return strings.Replace(imageDockerfile, layersMarker, b.String(), 1)
+}
 
 // ProvisionHash identifies a set of provision files, as the base image
 // records it.
