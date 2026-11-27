@@ -131,6 +131,12 @@ netstack and gvisor.
 Still open:
 - VS Code: the bridges check runs unattended (`checks/vscode-e2e/`, step 2); the git extension's socket and the remote `code` CLI stay open; Claude Code's extension installs and works on the remote; a repo's `.vscode/settings.json` overrides our settings (no new bridge, but ports and askpass come back); `mono-jig code <name> [dir]` checked by the user;
 - allowing a host without `rm`: waiting for microsandbox#1538;
+- sandbox creation is slow (2026-11-27: a new proxy-mode sandbox with msb 0.8.2 spent well over 5 minutes in the first start's provisioning); not measured yet. In order:
+  1. time each provision component, and the create, boot and provision phases, in `run.log` (today it records only when provisioning starts and when the sandbox is ready);
+  2. make `up` and `open` warn on, or build, a missing or stale base image (`image build`), so a first start runs only `ca broker apply` and not apt and the installers;
+  3. check spliced connections under msb 0.8.2: in proxy mode every download of a first start from a plain image goes through the broker, and a guest `curl https://proxy.golang.org/` hung for minutes on 2026-11-25 (it answered at once in a later run);
+  4. repeated creation from one image: a disk snapshot per image and provision hash, restored for each new sandbox (SDK 0.8.2 `CreateSnapshot`, `RestoreSandbox` with `WithRestoreNetworkPolicy`, `WithRestoreProxy`, `WithRestoreEnv`), then the sandbox's own CA, SSH keys and settings at start as now; whether a restore keeps mounts, the Docker disk and the vsock route is *unverified*;
+  5. create the Docker disk only when Docker is first used; cache apt packages across sandboxes;
 - the work track: built in its own repository (2026-11-24) with GitHub limited to some owners (`github.Config.Owners`), npm (`providers.NPM`, `jig.NPM`), kiro-cli (`agent.KiroCLI`) and `Track.BrokerMode`; not yet run in a sandbox;
 - the pitch (user, 2026-11-23): a full-featured sandbox (own image, host
   folders, brokered providers, an editor over SSH). Sell it first for
