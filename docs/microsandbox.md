@@ -12,7 +12,7 @@ The only API change we use: `Sandbox.Status` takes a context and returns
 an error. The checks below are from 0.7.16.
 
 **Verdict:** it works as the VM layer, and replaced Lima plus
-`investigator-net`'s netstack and filter on 2026-11-22. `mono-jig up`,
+`mono-jig-net`'s netstack and filter on 2026-11-22. `mono-jig up`,
 below, runs it end to end, and the broker fits behind it unchanged. The
 broker lives in the same process that owns the VM: the coupling we wanted,
 without Lima's fail-open problems.
@@ -22,7 +22,7 @@ without Lima's fail-open problems.
 The broker is ours and stays ours, with sbx and with anything else. What has
 grown complex and hard to trust is the Lima lifecycle around it:
 
-- hijacking the pidfile so Lima uses `investigator-net` as its network;
+- hijacking the pidfile so Lima uses `mono-jig-net` as its network;
 - keeping `networks.yaml` in step, because if our daemon is dead Lima starts
   its own unfiltered network (fail-open, still open after a SIGKILL);
 - the boot checks for a second NIC and for port forwards;
@@ -50,12 +50,12 @@ grown complex and hard to trust is the Lima lifecycle around it:
 
 | Our piece | With microsandbox |
 |---|---|
-| `investigator-net` netstack, DHCP, DNS | Its in-process stack and DNS forwarder |
+| `mono-jig-net` netstack, DHCP, DNS | Its in-process stack and DNS forwarder |
 | The domain filter (CONNECT proxy, groups, layers) | Its policy: `--net-default deny` plus `--net-rule allow@<host>[:tcp:<port>]`. We'd compile `filter/lists` into rules. |
 | Fail-closed lifecycle (pidfile, `networks.yaml`, NIC checks) | Nothing to do: the policy lives in the VM's own process (checked below) |
 | SSH over vsock, port-forward checks | `msb ssh serve <name> --stdio` as a ProxyCommand (VS Code). There's no sshd in the guest. |
-| `lima/investigator.yaml.in`, cloud-init | An OCI image: `provision.sh` as a Dockerfile, or run once with `msb exec` |
-| The broker (GitLab rules, the MCP filter, Anthropic) | **Unchanged.** `investigator-net broker` serves it on a Unix socket, and the guest reaches it over vsock. |
+| `lima/mono-jig.yaml.in`, cloud-init | An OCI image: `provision.sh` as a Dockerfile, or run once with `msb exec` |
+| The broker (GitLab rules, the MCP filter, Anthropic) | **Unchanged.** `mono-jig-net broker` serves it on a Unix socket, and the guest reaches it over vsock. |
 
 Two of its features don't fit, and we wouldn't use them:
 
@@ -98,7 +98,7 @@ Mac                                          guest
 ## Tying the broker's lifecycle to the sandbox's
 
 On Lima, the broker and the filter are the network, so a dead
-`investigator-net` can leave the VM with an unfiltered one. Here the
+`mono-jig-net` can leave the VM with an unfiltered one. Here the
 restriction lives in the VM's own process. A dead broker only takes away
 capabilities: the guest gets connection refused at
 `gitlab.broker.internal`, and the rest of its egress is unchanged. Every
@@ -144,7 +144,7 @@ compiled allowlist.
 
 Run by the agent on 2026-11-22, with the user's go-ahead. Sandboxes
 `alpine/curl`, `debian:bookworm` and `alpine`. The broker was
-`investigator-net broker` with the user's glab token and `mono-jig-claude`
+`mono-jig-net broker` with the user's glab token and `mono-jig-claude`
 Keychain item.
 
 | Check | Result |
@@ -175,11 +175,11 @@ Found on the way, not microsandbox's:
 
 ## The supervisor, built: `mono-jig up`
 
-Built 2026-11-22 as `cmd/investigator-msb`, about 450 lines, and folded into
+Built 2026-11-22 as `cmd/mono-jig-msb`, about 450 lines, and folded into
 the `mono-jig` CLI the same day (`cmd/mono-jig/sandbox.go`), once
 microsandbox replaced Lima. The commands below are `mono-jig <cmd>`;
 `code <name>` opens VS Code on the sandbox with the harness's settings.
-The broker setup it shares with `investigator-net` lives in `brokerd/`.
+The broker setup it shares with `mono-jig-net` lives in `brokerd/`.
 
 - `up <name>` starts `run <name>` in the background (setsid, log in
   `~/.mono-jig/<name>/run.log`) and waits for it to be ready.
@@ -191,7 +191,7 @@ The broker setup it shares with `investigator-net` lives in `brokerd/`.
   5. waits.
 
   It creates the sandbox through the SDK, attached, with:
-  - the allowlist compiled from `filter/lists` (`INV_PROFILE`, `JIG_LAYERS`);
+  - the allowlist compiled from `filter/lists` (`JIG_PROFILE`, `JIG_LAYERS`);
   - strict mode off;
   - the vsock route;
   - the CA written in as a patch.
@@ -212,7 +212,7 @@ The broker setup it shares with `investigator-net` lives in `brokerd/`.
   - glab's login as the GitLab token by default;
   - the `mono-jig-claude` Keychain item for Claude.
 
-Checked on the Mac with `JIG_GITLAB_USER=<user> investigator-msb up inv2` (now `mono-jig up inv2`):
+Checked on the Mac with `JIG_GITLAB_USER=<user> mono-jig-msb up jig2` (now `mono-jig up jig2`):
 
 | Check | Result |
 |---|---|
@@ -253,7 +253,7 @@ iptables). The fix is an ext4 disk of the sandbox's own at
 - dockerd runs as a root exec job, restarted if it ends, like the bridge;
   there's no systemd.
 
-Checked on `inv2` as `agent`:
+Checked on `jig2` as `agent`:
 - `hello-world`;
 - a BuildKit build;
 - `nginx` on a published port, reached with curl from the guest;
@@ -294,7 +294,7 @@ variable set at create (`-e`) reaches both SSH and exec sessions.
   writes it; before, Go's `clientEnv` and bash's `client_env` calls were
   kept in step by a test, one profile.d file per component (80–84).*
 
-Checked on `inv2` (recreated): a non-login SSH command gets all of them,
+Checked on `jig2` (recreated): a non-login SSH command gets all of them,
 and `glab api user` and `claude -p` work in it. Restarted with
 `JIG_CLAUDE_TOKEN_COMMAND=` the Claude variables are gone, and back on the
 next normal `up`. Login shells follow too: on every start after the
@@ -302,7 +302,7 @@ first, the supervisor writes the current `provision.sh` into the guest and
 runs only its `claude-env` component (since 2026-11-24, `apply`), which
 rewrites (or removes) the Claude profile.d file and `/etc/environment`
 block. Checked both ways on
-`inv2`: login shell, plain command and `/etc/environment` all agree.
+`jig2`: login shell, plain command and `/etc/environment` all agree.
 
 ## What we'd lose or have to settle
 
@@ -316,7 +316,7 @@ block. Checked both ways on
   - Once `runtime.log` passes 16 MB, the supervisor truncates it. The runtime
     appends, so writing restarts at zero (checked); a line written between
     the last read and the truncate is lost.
-  - Checked on `inv2`: `pastebin.com` and `api.anthropic.com` from the
+  - Checked on `jig2`: `pastebin.com` and `api.anthropic.com` from the
     agent, and `evil.example.net` from a Docker container, were all
     recorded. So were Claude Code's direct calls to `api.anthropic.com`
     during provisioning.

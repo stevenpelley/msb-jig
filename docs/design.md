@@ -4,9 +4,9 @@ The goal is a packaged sandbox that coworkers can run with one command. It conta
 
 **Update 2026-11-22:** Kiro IDE 1.5 (released 2026-11-20) connects over SSH to a remote Linux host and runs its agent there. The target is now **an editor on the Mac, as the UI only, connected over SSH to the sandbox**, where files, terminals and the agent run. **Build it for VS Code first**, prototyped on a personal Mac with personal accounts, then move to Kiro. kiro-cli stays in the image for headless runs. See [The editor over SSH into the sandbox](#the-editor-over-ssh-into-the-sandbox).
 
-**Update 2026-11-22, later:** everything that runs continuously on the Mac for a sandbox is **one process, `investigator-net`**: the VM's network stack, the domain filter and the broker, started and stopped with the VM. No `launchd` jobs and no container stack. See [Packaging: one process per sandbox](#packaging-one-process-per-sandbox).
+**Update 2026-11-22, later:** everything that runs continuously on the Mac for a sandbox is **one process, `mono-jig-net`**: the VM's network stack, the domain filter and the broker, started and stopped with the VM. No `launchd` jobs and no container stack. See [Packaging: one process per sandbox](#packaging-one-process-per-sandbox).
 
-**Update 2026-11-22, after a design review:** the broker denies every write it doesn't list ([Broker hardening](#broker-hardening-what-the-review-found)); `investigator-net` builds its netstack without gvisor-tap-vsock's forwarders ([Why the broker listens on the netstack](#why-the-broker-and-the-filter-listen-on-the-netstack)); the Lima lifecycle checks the VM's network after boot, not only the pidfile ([Lifecycle](#lifecycle)); and libkrun is assessed as a second VM runner and a path to the cloud ([libkrun](#libkrun-a-vm-inside-our-own-process-and-a-path-to-the-cloud)).
+**Update 2026-11-22, after a design review:** the broker denies every write it doesn't list ([Broker hardening](#broker-hardening-what-the-review-found)); `mono-jig-net` builds its netstack without gvisor-tap-vsock's forwarders ([Why the broker listens on the netstack](#why-the-broker-and-the-filter-listen-on-the-netstack)); the Lima lifecycle checks the VM's network after boot, not only the pidfile ([Lifecycle](#lifecycle)); and libkrun is assessed as a second VM runner and a path to the cloud ([libkrun](#libkrun-a-vm-inside-our-own-process-and-a-path-to-the-cloud)).
 
 ## Two tracks: personal first, then work
 
@@ -108,7 +108,7 @@ In both editors, files, terminals and the agent run in the sandbox. Only the edi
   - The `ProxyCommand` route is better, because it leaves no listening port that any process on the Mac could reach. Both editors accept a `ProxyCommand` on the first hop.
   - **OpenShell** already sets up SSH (`sandbox connect --editor vscode`). Whether it writes a plain SSH config that Kiro accepts is *unverified*.
 - **Editor settings**, written into the harness's own VS Code instance or Kiro's settings: the ones in the next section that close the credential bridges.
-- **`mono-jig open`** starts `investigator-net` and the sandbox, then opens the editor on the remote folder.
+- **`mono-jig open`** starts `mono-jig-net` and the sandbox, then opens the editor on the remote folder.
 
 ### The new trust boundary: the IDE connection
 
@@ -181,10 +181,10 @@ Use dev containers only with the container running inside the sandbox VM, never 
 
 ## The piece to build first: the credential broker
 
-Every requirement points to the same component: code on the Mac that holds each developer's credentials, enforces our rules, and serves the sandbox. The sandbox never holds a real token. This makes the sandbox tool interchangeable, and the broker is what we'd reuse for headless agents. It's a package inside `investigator-net` ([Packaging](#packaging-one-process-per-sandbox)), served over HTTPS on one hostname per provider. Logins are the CLI's job, not the broker's.
+Every requirement points to the same component: code on the Mac that holds each developer's credentials, enforces our rules, and serves the sandbox. The sandbox never holds a real token. This makes the sandbox tool interchangeable, and the broker is what we'd reuse for headless agents. It's a package inside `mono-jig-net` ([Packaging](#packaging-one-process-per-sandbox)), served over HTTPS on one hostname per provider. Logins are the CLI's job, not the broker's.
 
 ```
- Mac: investigator-net (developer's credentials)   Sandbox (VM, no real tokens)
+ Mac: mono-jig-net (developer's credentials)   Sandbox (VM, no real tokens)
 ┌──────────────────────────────────────────┐       ┌──────────────────────────┐
 │ broker                                   │       │ the agent                │
 │  ├─ github.broker.internal: git + API    │ ◀──── │ git / gh / stack tools   │
@@ -272,17 +272,17 @@ Cedar could express those predicates: its `like` operator handles `"refs/heads/a
 | `curl` | `mcp.broker.internal` | For large MCP results saved to a file ([Curl-friendly MCP](#curl-friendly-mcp)) |
 
 **Setup inside the VM** (written by `provision.sh` and the CLI):
-- **One hostname per provider,** answered by `investigator-net`'s DNS. Then repo paths look normal (`owner/repo`, or `group/sub/project`), which `gh` and `glab` need to work out the repo from the remote.
+- **One hostname per provider,** answered by `mono-jig-net`'s DNS. Then repo paths look normal (`owner/repo`, or `group/sub/project`), which `gh` and `glab` need to work out the repo from the remote.
 - **The CLI clones with broker URLs,** so `origin` is `https://github.broker.internal/acme/api.git`. A system-wide `url.<broker>.insteadOf` also rewrites `https://github.com/`, `git@github.com:` and `ssh://git@github.com/` (and the same for GitLab), catching URLs the agent types itself. There are no SSH keys in the VM, and port 22 to the providers isn't reachable anyway.
 - **`gh` and `glab` point at the broker as a self-hosted host:** `GH_HOST=github.broker.internal` with `GH_ENTERPRISE_TOKEN` set to a placeholder, and `GITLAB_HOST=gitlab.broker.internal` with a placeholder token. `gh` then calls `/api/v3/...` and `/api/graphql`, which the broker maps to `api.github.com`. Whether every `gh` command works this way is *unverified* (the open question about `gh` and `glab` against the broker).
 - **No credential helper and no prompts:** `credential.helper` is empty and `GIT_TERMINAL_PROMPT=0`. The broker never asks for credentials.
-- **TLS:** the broker serves HTTPS with a certificate from a small CA that the VM trusts. The CA carries an X.509 name constraint, so it can sign only `*.broker.internal`, and its key never leaves `investigator-net`. That's the broker's own server, not interception of anyone else's traffic.
+- **TLS:** the broker serves HTTPS with a certificate from a small CA that the VM trusts. The CA carries an X.509 name constraint, so it can sign only `*.broker.internal`, and its key never leaves `mono-jig-net`. That's the broker's own server, not interception of anyone else's traffic.
 
 **Who is calling?** On Lima, every connection on a sandbox's network comes from that sandbox, because the network belongs to it. So the broker needs no session token: the sandbox's identity is the network it arrived on. That holds only if nothing else can join the network: the daemon's socket directory is 0700 (Lima creates `_networks/<name>/` 0755), it serves no QEMU socket on `vz`, and it checks that the peer on the data socket is Lima's host agent for this sandbox (`LOCAL_PEERPID`). Otherwise any process of the user's on the Mac could connect and reach the broker. On sbx (prototype), where the broker listens on `127.0.0.1`, the placeholder tokens and a git `http.extraHeader` carry a random per-session token instead.
 
 **A feature-branch push, step by step:**
 1. The agent works on `agent/<user>/fix-timeout`, with the full name as the local branch. The rule is in the sandbox's `AGENTS.md`. **Don't set a push mapping** (`remote.origin.push = refs/heads/*:refs/heads/agent/<user>/*`): git applies it even to an explicit `git push origin <branch>` (checked in git's `push.c`, 2026-11-22), so a branch already named `agent/<user>/fix-timeout` would land on `agent/<user>/agent/<user>/fix-timeout`.
-2. `git push -u origin agent/<user>/fix-timeout`. DNS for `github.broker.internal` resolves to the gateway, and the TCP connection lands in `investigator-net` without ever leaving the Mac process.
+2. `git push -u origin agent/<user>/fix-timeout`. DNS for `github.broker.internal` resolves to the gateway, and the TCP connection lands in `mono-jig-net` without ever leaving the Mac process.
 3. `GET /acme/api.git/info/refs?service=git-receive-pack`. The policy checks read access to `acme/api`, and the broker forwards the request to `https://github.com/acme/api.git/...` with the user's token as Basic auth. The ref advertisement comes back.
 4. `POST /acme/api.git/git-receive-pack`. The body starts with one command line per ref (`<old> <new> refs/heads/agent/<user>/fix-timeout`) before the pack data. The broker reads those lines and checks each ref against the policy: the user, the push operation, the repo, the ref, and whether it's a create, update or delete. Ref names are checked with git's `check-ref-format` rules before the prefix match. Allowed: it streams the body upstream, streams the answer back, and logs it. Push options and request encodings are handled as in [Broker hardening](#broker-hardening-what-the-review-found).
    - **Force pushes and deletes inside the namespace are allowed,** because rebasing a stack needs them. Tags and every other branch are denied.
@@ -348,7 +348,7 @@ Keep the current pattern:
 
 *Added 2026-11-22; revised twice the same day.* The broker's policy covers **only the providers we manage**. Egress filtering by domain is a separate, simpler policy, with off-the-shelf code behind it:
 - **the runtime's own policy where it has one** (sbx, OpenShell);
-- on Lima, **an embedded explicit proxy** with a hostname ACL: our own, in `filter/` (about 400 lines). Stripe's smokescreen was the first choice, but it always resolves the destination itself and checks the address it gets, including when it dials an upstream proxy, so it can't chain to a proxy with a private address or run where external names don't resolve (both true in sbx and behind corporate proxies; decided 2026-11-22). It runs inside `investigator-net`, the same process as the network stack and the broker, but as its own component with its own ACL (see [Packaging: one process per sandbox](#packaging-one-process-per-sandbox)).
+- on Lima, **an embedded explicit proxy** with a hostname ACL: our own, in `filter/` (about 400 lines). Stripe's smokescreen was the first choice, but it always resolves the destination itself and checks the address it gets, including when it dials an upstream proxy, so it can't chain to a proxy with a private address or run where external names don't resolve (both true in sbx and behind corporate proxies; decided 2026-11-22). It runs inside `mono-jig-net`, the same process as the network stack and the broker, but as its own component with its own ACL (see [Packaging: one process per sandbox](#packaging-one-process-per-sandbox)).
 
 **The same harness serves as a general dev sandbox.** The mono-jig is one configuration of the allowlist. A broader one adds documentation sites for common tools and services, and the hosts that serve development and production tools (package registries, release downloads, container registries). It becomes the everyday sandbox for developers.
 
@@ -394,12 +394,12 @@ The CLI's commands are in [Install and uninstall](#install-and-uninstall): `mono
 
 *Rewritten 2026-11-22. The earlier plan, a broker container stack under Podman with `docker/mcp-gateway`, is dropped: on a Mac without Docker Desktop a container means another VM (Podman machine), and whether a Lima VM could reach a port Podman forwards was unknown. Nothing runs under `launchd` either.*
 
-**Everything that runs continuously for a sandbox is packaged with it.** On the Mac that's two processes per sandbox, both started and stopped with the VM: Lima's host agent, which runs the VM, and ours, `investigator-net`.
+**Everything that runs continuously for a sandbox is packaged with it.** On the Mac that's two processes per sandbox, both started and stopped with the VM: Lima's host agent, which runs the VM, and ours, `mono-jig-net`.
 
 ```
 Mac
   mono-jig CLI ──starts, checks, stops──▶ the two processes below
-  investigator-net <sandbox>      (ours; one per sandbox; runs only while the VM runs)
+  mono-jig-net <sandbox>      (ours; one per sandbox; runs only while the VM runs)
     gvisor-tap-vsock netstack ── the VM's only NIC (a Lima user-v2 network)
       ├─ gateway:53    DNS: answers only proxy.internal and *.broker.internal
       ├─ gateway:3128  domain filter: our explicit proxy, our generated ACL
@@ -417,12 +417,12 @@ Mac
 
 | Piece | Ours or stock | Role |
 |---|---|---|
-| `mono-jig` CLI | Ours | `setup`, `login`, `open`, `stop`, `allow`, `denied`, `logout`, `uninstall`. Generates the ACL, the policy settings (user name, allowed repos), the SSH config and the editor settings. Starts `investigator-net`, then the VM, and cleans up on delete. |
-| `investigator-net` | Ours, built on gvisor-tap-vsock | The VM's network, the domain filter and the broker, in one Go binary with separate packages for each |
+| `mono-jig` CLI | Ours | `setup`, `login`, `open`, `stop`, `allow`, `denied`, `logout`, `uninstall`. Generates the ACL, the policy settings (user name, allowed repos), the SSH config and the editor settings. Starts `mono-jig-net`, then the VM, and cleans up on delete. |
+| `mono-jig-net` | Ours, built on gvisor-tap-vsock | The VM's network, the domain filter and the broker, in one Go binary with separate packages for each |
 | VM image | Ours (`sandbox/provision.sh`) on a stock Ubuntu cloud image | Everything the agent and the tests need. `HTTPS_PROXY` points at `proxy.internal`; git `insteadOf`, `gh`, `glab` and the MCP client point at the `*.broker.internal` hosts. |
 | Lima | Stock | Boots and runs the VM: disks, cloud-init, vsock SSH, the guest agent |
 | Editor settings | Ours (configuration) | Close the credential bridges ([the IDE connection](#the-new-trust-boundary-the-ide-connection)) |
-| Credentials | The user's own (Keychain, AWS SSO or Okta) | Read only by `investigator-net` |
+| Credentials | The user's own (Keychain, AWS SSO or Okta) | Read only by `mono-jig-net` |
 | Allowlist layers | Ours (data) | Base, profile, org, user, grouped by tool |
 
 So we write four things: the CLI, the provisioning script, the network daemon with the filter around it, and the broker. The broker is most of the work.
@@ -431,16 +431,16 @@ So we write four things: the CLI, the provisioning script, the network daemon wi
 
 They're served on the VM network's gateway address, inside the process, the way gvisor-tap-vsock already serves DNS and DHCP. Nothing listens on the Mac for the VM.
 - **No host ports,** so no port collisions, no session token needed to keep other Mac processes out of the broker (given the socket checks in [Who is calling?](#how-the-agent-uses-git-and-gh)), and the agent can't reach the Mac's other local services.
-- **Build the stack ourselves, without forwarders.** gvisor-tap-vsock v0.9.0's `virtualnetwork.New` always installs TCP, UDP and ICMP forwarders that dial whatever the guest asks for (`services.go`), and doesn't expose the stack to remove them. Its DNS server passes every name outside its zones to the Mac's resolver. Lima's `gvproxy.go` also adds a NAT entry that maps the gateway to the Mac's `127.0.0.1`. So `investigator-net` uses gvisor-tap-vsock's tap switch and transport, but builds the gvisor stack itself with no forwarders and no NAT table, and runs its own DNS handler that returns NXDOMAIN for every other name. Only the filter and the broker open outbound connections, each by its own rules. If assembling it ourselves proves too awkward, vendor a patched copy, or use gvisor-tap-vsock#750's `DialFilter` once it merges.
+- **Build the stack ourselves, without forwarders.** gvisor-tap-vsock v0.9.0's `virtualnetwork.New` always installs TCP, UDP and ICMP forwarders that dial whatever the guest asks for (`services.go`), and doesn't expose the stack to remove them. Its DNS server passes every name outside its zones to the Mac's resolver. Lima's `gvproxy.go` also adds a NAT entry that maps the gateway to the Mac's `127.0.0.1`. So `mono-jig-net` uses gvisor-tap-vsock's tap switch and transport, but builds the gvisor stack itself with no forwarders and no NAT table, and runs its own DNS handler that returns NXDOMAIN for every other name. Only the filter and the broker open outbound connections, each by its own rules. If assembling it ourselves proves too awkward, vendor a patched copy, or use gvisor-tap-vsock#750's `DialFilter` once it merges.
 - **Tested, not assumed:** a fake guest checks that a SYN to any other address or port gets a reset, UDP and ICMP go nowhere, and `example.com` gets NXDOMAIN.
 - **It fails closed by construction.** If the process dies, the VM has no network at all.
 
 ### Lifecycle
 
-- **Now:** `mono-jig open` starts `investigator-net`, writes its PID into Lima's `usernet_<name>.pid`, checks it, then runs `limactl start`. On `mono-jig stop`, Lima stops the VM and kills the pidfile's process, which is ours.
-- **The pidfile check alone isn't race-free.** Lima only checks that the pidfile's process is alive, then starts its own unfiltered daemon if not. That leaves gaps: `investigator-net` dying between the check and the boot; a start that skips the CLI (`limactl start` typed by hand, a GUI); or a user's `_config/default.yaml` or `override.yaml` merging in `vzNAT` or another network, which Lima adds as an extra, unfiltered NIC. So the CLI also:
+- **Now:** `mono-jig open` starts `mono-jig-net`, writes its PID into Lima's `usernet_<name>.pid`, checks it, then runs `limactl start`. On `mono-jig stop`, Lima stops the VM and kills the pidfile's process, which is ours.
+- **The pidfile check alone isn't race-free.** Lima only checks that the pidfile's process is alive, then starts its own unfiltered daemon if not. That leaves gaps: `mono-jig-net` dying between the check and the boot; a start that skips the CLI (`limactl start` typed by hand, a GUI); or a user's `_config/default.yaml` or `override.yaml` merging in `vzNAT` or another network, which Lima adds as an extra, unfiltered NIC. So the CLI also:
   - **uses its own `LIMA_HOME`,** so the user's Lima defaults and overrides never apply, and the harness's VMs don't show up in the user's `limactl list`;
-  - **defines the network only while `investigator-net` runs:** the CLI writes the `networks.yaml` entry just before boot and removes it on stop, so a stray start fails with "network not found";
+  - **defines the network only while `mono-jig-net` runs:** the CLI writes the `networks.yaml` entry just before boot and removes it on stop, so a stray start fails with "network not found";
   - **checks after boot, from the Mac:** `limactl list --json` shows exactly one network for the VM, and the VM's MAC address got its DHCP lease from our daemon. If either check fails, it kills the VM.
 - **VM settings the template fixes:**
   - `propagateProxyEnv: false`, or Lima copies the Mac's proxy variables into the guest;
@@ -452,7 +452,7 @@ They're served on the VM network's gateway address, inside the process, the way 
 
 ### Credentials and logins
 
-- `investigator-net` runs as the user on the Mac, so it can use **macOS Keychain** for GitLab, GitHub, Datadog and Wiz tokens. That's better than the old plan's unencrypted volume.
+- `mono-jig-net` runs as the user on the Mac, so it can use **macOS Keychain** for GitLab, GitHub, Datadog and Wiz tokens. That's better than the old plan's unencrypted volume.
 - **AWS:** `AWS_CONFIG_FILE` and `AWS_SHARED_CREDENTIALS_FILE` point into the CLI's own directory, so the real `~/.aws` is never read or written. `mono-jig login` runs the SSO or `okta-aws-cli` device login.
 - **GitLab and GitHub:** a device-code login, or a token the user pastes into `mono-jig login`, stored in Keychain.
 - **Datadog and Wiz:** browser OAuth with a redirect to `127.0.0.1`, handled by the CLI during `login`, not by the long-running process. Use a random port and PKCE, so a process that takes the port can't use the code. The VM can't take it anyway, since Lima forwards no guest ports.
@@ -460,7 +460,7 @@ They're served on the VM network's gateway address, inside the process, the way 
 
 ### On sbx (prototype only)
 
-sbx owns the VM's network, so `investigator-net` runs without its netstack, and sbx's own policy does the domain filtering. The broker listens on `127.0.0.1` with a random per-session token. A script starts it with the sandbox and stops it after (the CLI isn't built until later). This mode exists only until the Lima backend works.
+sbx owns the VM's network, so `mono-jig-net` runs without its netstack, and sbx's own policy does the domain filtering. The broker listens on `127.0.0.1` with a random per-session token. A script starts it with the sandbox and stops it after (the CLI isn't built until later). This mode exists only until the Lima backend works.
 
 **Reaching the broker from sbx is the hard part, and none of it is tested:**
 - sbx's VM resolves no external names, `host.docker.internal` isn't in `NO_PROXY` (only `gateway.docker.internal` is), and every other request goes through sbx's proxy, which intercepts TLS. So `*.broker.internal` on port 443 won't work as on Lima.
@@ -469,19 +469,19 @@ sbx owns the VM's network, so `investigator-net` runs without its netstack, and 
 
 ### Security points
 
-- **The credentials sit in the process that parses the guest's packets.** A bug in the netstack could expose the broker's tokens. gvisor is memory-safe Go, and sbx makes the same trade. If we want separation later, `investigator-net` can split into a netstack child and a broker child under one parent, still one unit.
+- **The credentials sit in the process that parses the guest's packets.** A bug in the netstack could expose the broker's tokens. gvisor is memory-safe Go, and sbx makes the same trade. If we want separation later, `mono-jig-net` can split into a netstack child and a broker child under one parent, still one unit.
 - **Keep the packages apart inside the binary:** the netstack, the filter and the broker each test on their own, against a fake guest and fake upstreams. All of that runs in the agent's sandbox, without Lima.
-- **Only `investigator-net`'s sockets reach its network:** the socket directory is 0700, and the data socket checks its peer ([Who is calling?](#how-the-agent-uses-git-and-gh)).
+- **Only `mono-jig-net`'s sockets reach its network:** the socket directory is 0700, and the data socket checks its peer ([Who is calling?](#how-the-agent-uses-git-and-gh)).
 
 ### Install and uninstall
 
-Ship a small Homebrew tap that installs `mono-jig` and `investigator-net`, with Lima as a dependency.
+Ship a small Homebrew tap that installs `mono-jig` and `mono-jig-net`, with Lima as a dependency.
 
 ```
 mono-jig setup      # build or pull the VM image, write the Lima template and the allowlist layers
 mono-jig login      # GitLab or GitHub, AWS, Datadog, Wiz; then the agent's own sign-in inside the VM
-mono-jig open       # start investigator-net and the VM, then the editor over SSH
-mono-jig stop       # stop the VM; investigator-net stops with it
+mono-jig open       # start mono-jig-net and the VM, then the editor over SSH
+mono-jig stop       # stop the VM; mono-jig-net stops with it
 mono-jig logout     # remove tokens from Keychain and revoke where the provider supports it
 mono-jig uninstall  # delete the VMs, their networks and the CLI's directory, then: brew uninstall mono-jig
 ```
@@ -527,8 +527,8 @@ For headless agents in CI or Kubernetes, the broker package runs as a plain side
 *Added 2026-11-22.* The CLI treats the sandbox tool as a backend. sbx comes first, for the personal prototype; **Lima is the backend that doesn't need a Docker account** ([Leaving sbx](#leaving-sbx-lima)); OpenShell is an adapter we can try later. A backend must:
 - create a sandbox from our image,
 - give SSH access to it, through a `ProxyCommand` or a port on `127.0.0.1`,
-- **filter egress by domain** from our layered allowlist: with its own policy (sbx, OpenShell), or by letting `investigator-net` be the VM's only network ([Enforcing the route](#enforcing-the-route)),
-- give the sandbox a route to the broker: `investigator-net`'s gateway address on Lima, the Mac's address on sbx,
+- **filter egress by domain** from our layered allowlist: with its own policy (sbx, OpenShell), or by letting `mono-jig-net` be the VM's only network ([Enforcing the route](#enforcing-the-route)),
+- give the sandbox a route to the broker: `mono-jig-net`'s gateway address on Lima, the Mac's address on sbx,
 - run Docker inside the sandbox,
 - stop it and remove it with all its state.
 
@@ -540,7 +540,7 @@ Unknown hosts: sbx has an approval queue, which the CLI shows the user. Where th
 
 ## Leaving sbx: Lima
 
-*Superseded 2026-11-22: microsandbox replaced Lima as the VM layer (`microsandbox.md`), and the Lima code (`lima/`, `net/`, `investigator-net lima`, `checks/lima-net.sh`) was removed. It is in git at `695143a`. What follows is kept as the record.*
+*Superseded 2026-11-22: microsandbox replaced Lima as the VM layer (`microsandbox.md`), and the Lima code (`lima/`, `net/`, `mono-jig-net lima`, `checks/lima-net.sh`) was removed. It is in git at `695143a`. What follows is kept as the record.*
 
 *Added 2026-11-22. The design must not depend on sbx, because we can't assume Docker accounts at work. This section is the path off it. Not yet tested. The networking details were checked against Lima v2.3.0's source the same day; the rest is from what I already knew and is unverified until the spike.*
 
@@ -554,8 +554,8 @@ Unknown hosts: sbx has an approval queue, which the CLI shows the user. Where th
 | Our image as the sandbox | **One provisioning script, two packagings.** `sandbox/provision.sh` installs everything (sshd settings, git, Docker, the agent, toolchains). The sbx image's Dockerfile runs it, and so does the Lima template's `provision` step on a stock Ubuntu cloud image. Later, `devcontainer build` output can feed both. |
 | Docker inside | `dockerd` installed by the provisioning script, as in Lima's Docker template |
 | SSH for the editor | Built in. `limactl show-ssh` (or the VM's `ssh.config`) gives the host entry, which the CLI copies into its own SSH config with our settings. Our sshd settings keep Lima's own user and key working. |
-| Domain allowlist and approvals | Our filter (`filter/`), in `investigator-net` and served on the VM's network, with a hostname ACL generated from our layers. Unknown hosts are denied and logged. `mono-jig denied` lists recent denials, and `mono-jig allow <host>` adds one to the user layer. That's simpler than sbx's queue and good enough. |
-| Forcing traffic through the filter | sbx: its user-mode network stack does it ([How sbx enforces egress](#how-sbx-enforces-egress-observed-2026-11-22)). Lima: `investigator-net` serving a `user-v2` network, the VM's only NIC ([Option C on Lima](#option-c-on-lima-the-answers-researched-2026-11-22)). |
+| Domain allowlist and approvals | Our filter (`filter/`), in `mono-jig-net` and served on the VM's network, with a hostname ACL generated from our layers. Unknown hosts are denied and logged. `mono-jig denied` lists recent denials, and `mono-jig allow <host>` adds one to the user layer. That's simpler than sbx's queue and good enough. |
+| Forcing traffic through the filter | sbx: its user-mode network stack does it ([How sbx enforces egress](#how-sbx-enforces-egress-observed-2026-11-22)). Lima: `mono-jig-net` serving a `user-v2` network, the VM's only NIC ([Option C on Lima](#option-c-on-lima-the-answers-researched-2026-11-22)). |
 | Credential injection, MCP gateway | Not needed from the runtime: the broker does both |
 | Clone mode (no host mounts) | The CLI clones repos inside the VM, through the broker. Lima's default host mounts are turned off (`mounts: []`). |
 | Clean removal | `limactl delete <name>`, plus the CLI's per-sandbox directory and the network's `networks.yaml` entry |
@@ -600,7 +600,7 @@ sbx policy ls                                      # after `sbx rm`: are --sandb
 | 7 | **A supervising daemon:** many sandboxes, agent sessions restarted after a crash, background processes, declarative `sbx env`, `sbx ports` | We turn Lima's automatic port forwarding off; nothing restarts the agent | For everyday development |
 | 8 | **Fast start from a prebuilt OCI image** | `provision.sh` at first boot takes minutes | Yes, once it's used daily: build and ship a disk image ahead of time |
 | 9 | **Networking robustness:** IPv4 and IPv6 detection with happy-eyeballs, DNS through the host, VPN and corporate proxy handling | Not designed yet | **Yes:** at work the Mac likely sits behind a corporate proxy or SASE client, so the filter and the broker must chain to it |
-| 10 | **Maintenance:** signed releases, auto-updates, vendor support, Windows and Linux hosts | We maintain `investigator-net` and keep Lima pinned and current | The cost of owning it |
+| 10 | **Maintenance:** signed releases, auto-updates, vendor support, Windows and Linux hosts | We maintain `mono-jig-net` and keep Lima pinned and current | The cost of owning it |
 
 **In short, sbx is three products:** a VM runtime (Lima replaces it), a policy and credential plane (we rebuild a narrower, more transparent one), and an agent product (kits, the model credential, the MCP gateway, git sync, session supervision), where we have little. The gaps that matter now are 1 and 9; 6, 7 and 8 matter once the harness becomes the everyday dev sandbox.
 
@@ -611,7 +611,7 @@ The VM must reach only the domain filter and the broker. **The goal is sbx's pac
 | | Where enforcement lives | Removed with the VM? | Root on the Mac | Strength |
 |---|---|---|---|---|
 | **sbx** (for comparison) | User-mode network stack in the host daemon, the VM's only NIC | Yes, the data path. Policy rules are daemon state. | No | The agent can be root in the VM |
-| **C: our own user-mode network** (preferred) | A small per-VM daemon built on **gvisor-tap-vsock** (the user-mode stack behind Podman machine and Lima's own networks). It serves a Lima `user-v2` network, which on `vz` becomes the VM's **only** NIC. The domain filter and the broker are served inside it, and nothing else is reachable. This is `investigator-net`. | **Yes:** it starts and stops with the VM, as in sbx | **No** | Same shape as sbx |
+| **C: our own user-mode network** (preferred) | A small per-VM daemon built on **gvisor-tap-vsock** (the user-mode stack behind Podman machine and Lima's own networks). It serves a Lima `user-v2` network, which on `vz` becomes the VM's **only** NIC. The domain filter and the broker are served inside it, and nothing else is reachable. This is `mono-jig-net`. | **Yes:** it starts and stops with the VM, as in sbx | **No** | Same shape as sbx |
 | **Tart with Softnet** | A per-VM Softnet process, with rules passed as flags (`--net-softnet-allow`) | **Yes** | Yes, once (it's installed setuid) | Same packaging as sbx, IP-level only. The license still needs checking. |
 | **B: `nftables` inside the VM** | The VM's own kernel; the agent is non-root and Docker is rootless | **Yes,** completely | No | Weaker: relies on Linux privilege separation, and rootless Docker breaks some tests (privileged containers, host networking) |
 | **A: `pf` on the Mac** (last resort) | **The Mac's shared `pf` ruleset**: an anchor keyed on Lima's vmnet bridge and the VM's DHCP address | **No.** The CLI must remove it, and a crash leaves stale rules. It can also conflict with VPN clients or security agents that use `pf`. | Yes | Strong, but it's scattered host network configuration that outlives the VM |
@@ -631,12 +631,12 @@ The VM must reach only the domain filter and the broker. **The goal is sbx's pac
   - **lima#5818** adds `external: true` for `user-v2` networks. Lima then never starts a daemon for the network, and `limactl start` **fails** unless the endpoint socket answers. That's the fail-closed behaviour we want, with the daemon run by our CLI.
   - **lima#5813** adds a `daemon:` path that Lima starts and stops for the network.
   - Both are on the agenda of Lima's monthly meeting (discussion #5819), with maintainer approval of the `external: true` name. Neither is merged yet.
-- **SSH doesn't need the network.** `ssh.overVsock` defaults to true for `vz` with Linux guests: the host agent proxies SSH to the guest's vsock port 22, which needs systemd 256 or later in the guest (Ubuntu 24.04 ships 255, so use a newer image). Otherwise Lima falls back to a port forward through the network daemon's endpoint socket. `investigator-net` provides that one forward and refuses all others: from the Mac's loopback to a guest's port 22 only (built 2026-11-22). Port forwards from the guest agent also run over vsock.
+- **SSH doesn't need the network.** `ssh.overVsock` defaults to true for `vz` with Linux guests: the host agent proxies SSH to the guest's vsock port 22, which needs systemd 256 or later in the guest (Ubuntu 24.04 ships 255, so use a newer image). Otherwise Lima falls back to a port forward through the network daemon's endpoint socket. `mono-jig-net` provides that one forward and refuses all others: from the Mac's loopback to a guest's port 22 only (built 2026-11-22). Port forwards from the guest agent also run over vsock.
 
 **2. Does option C need root anywhere? No.**
 - `vz` VMs, `user-v2` networks and the gvisor-tap-vsock daemon all run as the user. Only `socket_vmnet` (Lima's shared and bridged networks) needs root and a sudoers file, and we don't use it.
 
-**What we build: `investigator-net`.** gvisor-tap-vsock v0.9.0 (the version Lima v2.3.0 uses) has **no outbound filter**: its TCP forwarder dials whatever the guest asks for. So the daemon is our own Go program. It uses Lima's `pkg/networks/usernet/gvproxy.go` (about 300 lines) as the reference for the sockets, **but not for its forwarders or its NAT table**, which open the network. It:
+**What we build: `mono-jig-net`.** gvisor-tap-vsock v0.9.0 (the version Lima v2.3.0 uses) has **no outbound filter**: its TCP forwarder dials whatever the guest asks for. So the daemon is our own Go program. It uses Lima's `pkg/networks/usernet/gvproxy.go` (about 300 lines) as the reference for the sockets, **but not for its forwarders or its NAT table**, which open the network. It:
 - serves the sockets Lima expects (on `vz`, the data socket and the endpoint socket; no QEMU socket);
 - forwards nothing for the guest. gvisor-tap-vsock's `virtualnetwork.New` installs TCP, UDP and ICMP forwarders that can't be removed, so we build the gvisor stack ourselves on its tap switch ([why](#why-the-broker-and-the-filter-listen-on-the-netstack)). The domain filter and the broker are served on the gateway address inside the process;
 - answers DNS for `proxy.internal` and `*.broker.internal` only, with its own handler. gvisor-tap-vsock's DNS server passes every other name to the Mac's resolver (`dns.go`, checked 2026-11-22), so it isn't used. Clients reach everything else through `HTTPS_PROXY`, which resolves names on the Mac. That also closes DNS exfiltration, as sbx does.
@@ -646,7 +646,7 @@ Upstream filtering is coming too, but not soon enough to wait for: gvisor-tap-vs
 **What's left on the Mac after `limactl delete`:** no network devices or `pf` rules. Two things the CLI removes itself: the network's entry in `~/.lima/_config/networks.yaml` (one network per sandbox, so one daemon per sandbox), and its socket directory. Lima stops a `user-v2` daemon it believes it owns when the VM stops (it kills the PID in the pidfile), which with the workaround is our daemon. That fits the lifecycle.
 
 **What the spike still has to check on a Mac:**
-1. With our daemon (start with plain `limactl usernet` run by hand, to see the plumbing, then `investigator-net`), does the VM boot with exactly one NIC, reach the filter and the broker, and fail to reach anything else by IP or by name? A SYN to `1.1.1.1:443` and to the gateway's other ports must get a reset.
+1. With our daemon (start with plain `limactl usernet` run by hand, to see the plumbing, then `mono-jig-net`), does the VM boot with exactly one NIC, reach the filter and the broker, and fail to reach anything else by IP or by name? A SYN to `1.1.1.1:443` and to the gateway's other ports must get a reset.
 2. Does SSH work over vsock with a systemd 256+ guest, with no port forward on the daemon?
 3. With the daemon stopped, does `mono-jig open` refuse? With the network entry removed, does a hand-typed `limactl start` fail? With lima#5818 built from its branch, does `limactl start` fail?
 4. Does the post-boot check catch an extra NIC, added through an override file in our `LIMA_HOME`?
@@ -707,17 +707,17 @@ Upstream filtering is coming too, but not soon enough to wait for: gvisor-tap-vs
 |---|---|---|
 | **Lima with `vmType: krunkit`** | Lima drives krunkit as a VM type; its template defaults `ssh.overVsock` to true for krunkit, as for `vz`, and supports nested virtualization on M3 or later | **The cheap experiment.** If our `user-v2` network works under krunkit (*unverified*), switching is one line of the template. |
 | **krunkit** | Red Hat's macOS CLI on libkrun-efi; Podman machine uses it; macOS 14 or later | What Lima drives; we wouldn't use it directly |
-| **libkrun, embedded in `investigator-net`** | cgo from Go | **The tightest packaging possible:** VM, netstack, filter and broker in one process. We'd then own boot, disks, cloud-init and SSH setup (what Lima does for us). libkrun's main branch is now 2.0, which breaks the 1.x API and isn't stable yet. On macOS the binary needs the `com.apple.security.hypervisor` entitlement and code signing. |
+| **libkrun, embedded in `mono-jig-net`** | cgo from Go | **The tightest packaging possible:** VM, netstack, filter and broker in one process. We'd then own boot, disks, cloud-init and SSH setup (what Lima does for us). libkrun's main branch is now 2.0, which breaks the 1.x API and isn't stable yet. On macOS the binary needs the `com.apple.security.hypervisor` entitlement and code signing. |
 | **smolvm** | A single binary that runs libkrun in-process, with no daemon, on macOS, Linux and Windows | The closest existing "VM in a process". Check its maturity and whether we can attach our netstack. |
 | **Microsandbox** | libkrun sandboxes for agents, with Rust, Python, TypeScript and Go SDKs | Agent-focused, but brings its own network policy, which overlaps ours. Check whether it takes our netstack. |
 | **NVIDIA OpenShell** | Has an opt-in libkrun driver on macOS and Linux | Already an alternative runtime here; its fleet path uses the same library |
 
-**The cloud path.** Most of the harness doesn't care where the VM runs: `provision.sh`, `investigator-net` (netstack, filter and broker) and the policy are the same on Linux. What changes:
+**The cloud path.** Most of the harness doesn't care where the VM runs: `provision.sh`, `mono-jig-net` (netstack, filter and broker) and the policy are the same on Linux. What changes:
 - **The VM runner:** libkrun on Linux needs KVM, so bare metal or a cloud instance with nested virtualization. Firecracker is the usual cloud choice and takes the same kind of tap or socket NIC. libkrun's advantage is one library on both the Mac and Linux.
 - **Credentials:** a cloud host has no Keychain and no developer at a browser. The broker gets workload identity or tokens handed in per run, and the per-user rules still need to know which user the agent acts for.
 - **The editor:** SSH still works, through a bastion or a tunnel instead of vsock.
 
-**Recommendation:** stay on Lima, and keep the VM runner behind the [sandbox backend interface](#the-sandbox-backend-interface). Run the krunkit spike check (option C check 7). Embed libkrun in `investigator-net` only if one-process packaging or Linux hosts become a priority; the netstack and the broker don't change when we do.
+**Recommendation:** stay on Lima, and keep the VM runner behind the [sandbox backend interface](#the-sandbox-backend-interface). Run the krunkit spike check (option C check 7). Embed libkrun in `mono-jig-net` only if one-process packaging or Linux hosts become a priority; the netstack and the broker don't change when we do.
 
 ### Dev containers without a dev-container runtime
 
@@ -759,7 +759,7 @@ The spec doesn't need a runtime that understands it:
 
 - Lima: do lima#5818 (`external: true`) or lima#5813 (`daemon:`) merge, and when? Until then we carry the pidfile workaround. Does `sbx rm` remove per-sandbox policy rules? Do work Macs give developers `sudo`? Tart: does its license allow our use at work? Apple `container`: does Docker run inside, and can we attach our own netstack? Does our `user-v2` network work with `vmType: krunkit`? (Answered 2026-11-22: work Macs run macOS 27; smokescreen can't chain to a private upstream, so the filter is our own.)
 - **The model credential:** can the broker hold and inject the agent's model credential (Claude Code's API key or OAuth token; Kiro's sign-in), so no model token sits in the VM, as sbx's kits do?
-- **Corporate networks:** how do `investigator-net`'s filter and broker chain to a corporate proxy or SASE client on work Macs, and handle VPN split DNS? The filter's upstream proxy covers it; the broker uses `HTTPS_PROXY` (`NewUpstreamClient`).
+- **Corporate networks:** how do `mono-jig-net`'s filter and broker chain to a corporate proxy or SASE client on work Macs, and handle VPN split DNS? The filter's upstream proxy covers it; the broker uses `HTTPS_PROXY` (`NewUpstreamClient`).
 - **sbx mode:** do requests to `host.docker.internal:<port>` reach the broker intact through sbx's proxy, and does `gh` accept a host with a port over plain HTTP?
 - **Building the netstack:** can gvisor-tap-vsock's tap switch be used with a stack we build ourselves, or do we vendor a patched copy?
 - **Prebuilt images:** how do we build and ship a Lima disk image so a sandbox starts in seconds rather than provisioning at first boot?
