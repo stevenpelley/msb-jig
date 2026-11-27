@@ -278,6 +278,7 @@ the user's own CLI login.
 ```go
 type Agent interface {
     Name() string
+    Command() string                  // its CLI: mono-jig <Command> <name> runs it
     Components() map[string]string   // provision files that install it
     Guest(b providers.Config, instructions []string) guest.Config
     EditorExtensions() []string       // installed on the remote by the editor
@@ -291,6 +292,10 @@ type Agent interface {
   (`b.Get("anthropic")`), and the instructions, already rendered
   (a header, then each provider's section, then the track's), written
   where the agent reads them. Claude Code's go in `~/.claude/CLAUDE.md`.
+- **Command**: the CLI on the guest user's login PATH (`claude`,
+  `kiro-cli`). `mono-jig <Command> <name> [arg...]` starts the sandbox
+  if needed and runs it from `~` with the arguments. It can't be one of
+  mono-jig's own commands or the editor's name (`Main` fails).
 - Its hosts (installer, sign-in) go in the track's allowlist.
 
 `agent.KiroCLI` is kiro-cli (`agent/70-kiro.sh`: a pinned release,
@@ -316,6 +321,10 @@ type Editor interface {
     Open(root string, p editor.Profile, host, dir string) error
 }
 ```
+
+`Name` is also its command: `mono-jig <Name> <name> [dir]` (`vscode`,
+`kiro`) opens it on the sandbox, and `open` does the same after
+starting it.
 
 The editor runs on the Mac as its own instance (settings and extensions
 under the state directory) and reaches the sandbox over SSH, with the

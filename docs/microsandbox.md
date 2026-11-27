@@ -178,7 +178,8 @@ Found on the way, not microsandbox's:
 Built 2026-11-22 as `cmd/mono-jig-msb`, about 450 lines, and folded into
 the `mono-jig` CLI the same day (`cmd/mono-jig/sandbox.go`), once
 microsandbox replaced Lima. The commands below are `mono-jig <cmd>`;
-`code <name>` opens VS Code on the sandbox with the harness's settings.
+`code <name>` (since 2026-11-27 `vscode <name>`, the editor's name)
+opens VS Code on the sandbox with the harness's settings.
 The broker setup it shares with `mono-jig-net` lives in `brokerd/`.
 
 - `up <name>` starts `run <name>` in the background (setsid, log in

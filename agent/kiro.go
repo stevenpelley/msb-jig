@@ -24,6 +24,8 @@ var kiroComponent string
 
 func (KiroCLI) Name() string { return "kiro-cli" }
 
+func (KiroCLI) Command() string { return "kiro-cli" }
+
 func (KiroCLI) Components() map[string]string {
 	return map[string]string{"components/70-kiro.sh": kiroComponent}
 }
