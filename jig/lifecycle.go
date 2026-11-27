@@ -59,8 +59,10 @@ func sandboxCmd(cmd, name string, args []string) {
 		shell(name)
 	case "ssh-config":
 		fmt.Print(sshConfig(name, state))
-	case "code":
+	case "editor":
 		code(name, state, args)
+	case "agent":
+		agentCLI(name, state, args)
 	case "open":
 		open(name, state, args)
 	case "stop":
@@ -172,7 +174,8 @@ func up(name, state string) {
 			fail("not ready after 20 minutes; see %s", logPath)
 		case <-tick.C:
 			if _, err := os.Stat(ready); err == nil {
-				fmt.Printf("%s is up (supervisor pid %d)\n  shell:   mono-jig shell %[3]s\n  VS Code: mono-jig code %[3]s\n  down:    mono-jig down %[3]s\n", name, c.Process.Pid, name)
+				fmt.Printf("%s is up (supervisor pid %d)\n  shell:   mono-jig shell %[3]s\n  agent:   mono-jig %[4]s %[3]s\n  editor:  mono-jig %[5]s %[3]s\n  down:    mono-jig down %[3]s\n",
+					name, c.Process.Pid, name, agentCmd(), track.Editor.Name())
 				return
 			}
 		}
@@ -210,4 +213,24 @@ func shell(name string) {
 		fail("msb not found")
 	}
 	fail("%v", syscall.Exec(msb, []string{"msb", "exec", "-t", "-u", guestUser, name, "--", "bash", "-l"}, os.Environ()))
+}
+
+// agentCLI runs the track's agent CLI in the sandbox with args, from the
+// guest user's home, in a login shell (for its PATH). It starts the
+// sandbox first, as open does, if it isn't up.
+func agentCLI(name, state string, args []string) {
+	msb, err := exec.LookPath("msb")
+	if err != nil {
+		fail("msb not found")
+	}
+	if pidOf(state) == 0 {
+		up(name, state)
+	}
+	fail("%v", syscall.Exec(msb, agentArgv(name, args), os.Environ()))
+}
+
+// agentArgv is the msb command line agentCLI runs.
+func agentArgv(name string, args []string) []string {
+	return append([]string{"msb", "exec", "-t", "-u", guestUser, name, "--",
+		"bash", "-lc", `cd && exec "$0" "$@"`, agentCmd()}, args...)
 }

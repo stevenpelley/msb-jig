@@ -15,6 +15,10 @@ import (
 // Agent is a coding agent.
 type Agent interface {
 	Name() string
+	// Command is its CLI, on the guest user's login PATH: mono-jig
+	// <Command> <name> runs it in the sandbox from the user's home. It
+	// must not be a mono-jig command or the editor's name.
+	Command() string
 	// Components are the provision files it adds, by path
 	// (components/NN-<name>.sh, as guest.Provision): run at the image
 	// build and a sandbox's first start, to install it.
@@ -36,6 +40,8 @@ type ClaudeCode struct{}
 var claudeComponent string
 
 func (ClaudeCode) Name() string { return "claude-code" }
+
+func (ClaudeCode) Command() string { return "claude" }
 
 func (ClaudeCode) Components() map[string]string {
 	return map[string]string{"components/70-claude.sh": claudeComponent}

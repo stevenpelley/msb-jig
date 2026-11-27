@@ -154,7 +154,7 @@ func code(name, state string, args []string) {
 	fail("%v", track.Editor.Open(root, editorProfile(root), sshHost(name), guestDir(args)))
 }
 
-// guestDir is the folder mono-jig code opens: an absolute guest path
+// guestDir is the folder mono-jig <editor> opens: an absolute guest path
 // as given, anything else under the guest user's home.
 func guestDir(args []string) string {
 	home := "/home/" + guestUser

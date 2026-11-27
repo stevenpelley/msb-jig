@@ -1,6 +1,7 @@
 package jig
 
 import (
+	"fmt"
 	"maps"
 	"path/filepath"
 	"slices"
@@ -70,6 +71,9 @@ func (t Track) withDefaults() Track {
 	if t.Agent == nil || t.Editor == nil || t.Backend == nil {
 		fail("the track needs an Agent, an Editor and a Backend (jig.Track)")
 	}
+	if err := checkToolCommands(t.Agent.Command(), t.Editor.Name()); err != nil {
+		fail("the track's %v", err)
+	}
 	if t.BaseImage == "" {
 		t.BaseImage = "ubuntu:26.04"
 	}
@@ -86,6 +90,25 @@ func (t Track) withDefaults() Track {
 		fail("the track's guest settings: %v", err)
 	}
 	return t
+}
+
+// checkToolCommands checks the agent's and the editor's commands
+// (mono-jig <agent> <name>, mono-jig <editor> <name>): set, different,
+// and none of mono-jig's own.
+func checkToolCommands(agentCmd, editorCmd string) error {
+	switch {
+	case agentCmd == "":
+		return fmt.Errorf("agent has no Command")
+	case editorCmd == "":
+		return fmt.Errorf("editor has no Name")
+	case agentCmd == editorCmd:
+		return fmt.Errorf("agent's Command and editor's Name are both %q", agentCmd)
+	case slices.Contains(commands, agentCmd):
+		return fmt.Errorf("agent's Command %q is a mono-jig command", agentCmd)
+	case slices.Contains(commands, editorCmd):
+		return fmt.Errorf("editor's Name %q is a mono-jig command", editorCmd)
+	}
+	return nil
 }
 
 // track is the one Main runs.

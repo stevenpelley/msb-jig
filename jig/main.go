@@ -21,7 +21,8 @@
 //	mono-jig run <name>         the supervisor, in the foreground
 //	mono-jig down <name>        stop the supervisor, and with it the sandbox
 //	mono-jig shell <name>       a login shell as the agent user
-//	mono-jig code <name> [dir]  the editor on the sandbox, with the harness's Settings
+//	mono-jig <agent> <name> ... the agent's CLI (Agent.Command: claude, kiro-cli) in the sandbox, from ~
+//	mono-jig <editor> <name> [dir]  the editor (Editor.Name: vscode, kiro) on the sandbox, with the harness's Settings
 //	mono-jig ssh-config <name>  write and print the sandbox's OpenSSH Host block
 //	mono-jig denied <name>      the hosts its egress policy refused (denials.jsonl)
 //	mono-jig rm <name>          down, then remove the sandbox and its disks (the state directory stays)
@@ -86,6 +87,9 @@ func usage() {
   cp <src> <dst>          copy between the Mac and a sandbox; a sandbox path is
                           <name>:<path>, relative to the agent's home unless absolute
   stop <name>             stop it
+  `+agentCmd()+` <name> [arg...]
+                          run `+agentCmd()+` in the sandbox, from the agent user's home
+                          (starting the sandbox, or creating it, first if needed)
   denied <name>           hosts the sandbox was refused, most recent first
   image init [file]       write a starter Dockerfile (default ./Dockerfile)
   image build [-f Dockerfile [context]] [-engine docker|podman]
@@ -101,7 +105,7 @@ sandboxes, beneath open and stop:
   run <name>         the same, in the foreground
   down <name>        stop it
   shell <name>       a login shell as the agent user
-  code <name> [dir]  open the editor on it
+  `+track.Editor.Name()+` <name> [dir]  open the editor on it
   ssh-config <name>  write and print its OpenSSH Host block
   rm <name>          stop and remove it, with its disks
 
@@ -117,7 +121,16 @@ func Main(t Track) {
 	if len(os.Args) < 2 {
 		usage()
 	}
-	switch os.Args[1] {
+	cmd := os.Args[1]
+	switch {
+	case cmd == track.Editor.Name():
+		cmd = "editor"
+	case cmd == agentCmd():
+		cmd = "agent"
+	case cmd == "editor" || cmd == "agent":
+		usage()
+	}
+	switch cmd {
 	case "ssh-setup":
 		sshSetup(os.Args[2:])
 	case "allowlist":
@@ -139,19 +152,28 @@ func Main(t Track) {
 		uninstall(os.Args[2:])
 	case "cp":
 		cp(os.Args[2:])
-	case "up", "run", "down", "shell", "code", "open", "stop", "ssh-config", "denied", "rm":
-		cmd := os.Args[1]
-		args, specs := splitMounts(os.Args[2:])
-		args, mode := splitBrokerMode(args)
-		args, plainImage = splitPlainImage(args)
-		dir := cmd == "code" || cmd == "open"
-		if len(args) != 1 && (!dir || len(args) != 2) {
-			usage()
+	case "up", "run", "down", "shell", "editor", "agent", "open", "stop", "ssh-config", "denied", "rm":
+		args := os.Args[2:]
+		var specs []string
+		var mode string
+		if cmd == "agent" {
+			// The rest are the agent's own arguments.
+			if len(args) == 0 {
+				usage()
+			}
+		} else {
+			args, specs = splitMounts(args)
+			args, mode = splitBrokerMode(args)
+			args, plainImage = splitPlainImage(args)
+			dir := cmd == "editor" || cmd == "open"
+			if len(args) != 1 && (!dir || len(args) != 2) {
+				usage()
+			}
+			if (len(specs) > 0 || mode != "" || plainImage) && cmd != "up" && cmd != "open" {
+				usage()
+			}
 		}
-		if (len(specs) > 0 || mode != "" || plainImage) && cmd != "up" && cmd != "open" {
-			usage()
-		}
-		if mode == "" && (cmd == "up" || cmd == "open") && track.BrokerMode != modeServer {
+		if mode == "" && (cmd == "up" || cmd == "open" || cmd == "agent") && track.BrokerMode != modeServer {
 			setRuntimePaths()
 			if ok, err := track.Backend.Exists(context.Background(), args[0]); err == nil && !ok {
 				mode = track.BrokerMode // a new sandbox: the track's default
@@ -170,6 +192,14 @@ func Main(t Track) {
 		usage()
 	}
 }
+
+// agentCmd is the command that runs the track's agent CLI.
+func agentCmd() string { return track.Agent.Command() }
+
+// commands are mono-jig's own commands, which the agent's and the
+// editor's can't be.
+var commands = []string{"ssh-setup", "allowlist", "setup", "login", "logout", "image", "ca", "uninstall", "cp",
+	"up", "run", "down", "shell", "editor", "agent", "open", "stop", "ssh-config", "denied", "rm", "help"}
 
 func defaultState() string {
 	if d := os.Getenv("JIG_STATE"); d != "" {
