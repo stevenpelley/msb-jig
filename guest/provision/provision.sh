@@ -36,9 +36,18 @@ set -euo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib.sh
 source "$here/lib.sh"
+# usec: microseconds since the epoch (bash 5's EPOCHREALTIME; 0 without).
+usec() { local t=${EPOCHREALTIME:-0}; echo "${t//[.,]/}"; }
 for component in "$here"/components/*.sh; do
+  name=${component##*/}; name=${name#[0-9][0-9]-}; name=${name%.sh}
+  start=$(usec)
   # shellcheck disable=SC1090
   source "$component"
+  # Each part's time, for those that ran (run.log; slow first starts).
+  if want "$name" && (( start > 0 )); then
+    ms=$(( ($(usec) - start) / 1000 ))
+    log "$name took $((ms / 1000)).$(printf '%03d' $((ms % 1000)))s"
+  fi
 done
 
 log "done"

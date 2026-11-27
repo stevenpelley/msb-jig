@@ -155,6 +155,11 @@ func up(name, state string) {
 	}
 	exited := make(chan error, 1)
 	go func() { exited <- c.Wait() }()
+	if plainImageHint(name) {
+		fmt.Printf("note: new sandboxes start from the plain image %s, so this first start installs\n"+
+			"  everything (about 5 minutes). Build the base image once to make it seconds:\n"+
+			"  mono-jig image build (Docker or Podman), then rm and open\n", baseImage())
+	}
 	fmt.Printf("starting %s (log: %s); the first start provisions the guest, which takes a few minutes\n", name, logPath)
 	tick := time.NewTicker(time.Second)
 	defer tick.Stop()
@@ -206,4 +211,15 @@ func shell(name string) {
 		fail("msb not found")
 	}
 	fail("%v", syscall.Exec(msb, []string{"msb", "exec", "-t", "-u", guestUser, name, "--", "bash", "-l"}, os.Environ()))
+}
+
+// plainImageHint: name doesn't exist yet and would be created from the
+// plain base image (no mono-jig image build, no JIG_IMAGE), so its first
+// start installs everything.
+func plainImageHint(name string) bool {
+	if ref, local := sandboxImage(); local || ref != baseImage() {
+		return false
+	}
+	ok, err := track.Backend.Exists(context.Background(), name)
+	return err == nil && !ok
 }

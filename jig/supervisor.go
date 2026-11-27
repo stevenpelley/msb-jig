@@ -194,17 +194,20 @@ func run(name, state string) {
 	if fi, err := os.Stat(runtimeLog(name)); err == nil {
 		logStart = fi.Size()
 	}
+	t0 := time.Now()
 	sb, created, err := openSandbox(ctx, track.Backend, c)
 	if err != nil {
 		fail("sandbox: %v", err)
 	}
 	defer sb.Close()
-	log.Info("sandbox running", "name", name, "created", created)
+	log.Info("sandbox running", "name", name, "created", created, "seconds", secondsSince(t0))
 
+	t0 = time.Now()
 	if err := provision(ctx, sb, c, log); err != nil {
 		_ = sb.Stop(context.Background(), 30*time.Second)
 		fail("provision: %v", err)
 	}
+	log.Info("provisioned", "seconds", secondsSince(t0))
 	stopped := make(chan struct{})
 	go func() {
 		res, err := sb.Wait(context.Background())
@@ -274,4 +277,9 @@ func keep(ctx context.Context, sb sandbox.Guest, log *slog.Logger, stopped <-cha
 			log.Warn("job ended; restarting", "job", name, "err", err)
 		}
 	}
+}
+
+// secondsSince is the time since t, in seconds to a tenth, for the log.
+func secondsSince(t time.Time) float64 {
+	return float64(time.Since(t).Round(100*time.Millisecond)) / float64(time.Second)
 }
