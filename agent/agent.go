@@ -48,9 +48,12 @@ func (ClaudeCode) EditorExtensions() []string { return []string{"anthropic.claud
 const ClaudeMarker = "<!-- Written by mono-jig provision.sh; edits are lost on reprovisioning. -->"
 
 func (ClaudeCode) Guest(b providers.Config, instructions []string) guest.Config {
-	var g guest.Config
+	// No telemetry, error reports or auto-updates: the sandbox allows none
+	// of their hosts (Datadog showed in mono-jig denied, 2026-11-27), and
+	// Claude Code's version is the image's, until the image is rebuilt.
+	g := guest.Config{Env: map[string]string{"CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1"}}
 	if b.Get("anthropic") != nil {
-		g.Env = map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": "placeholder"}
+		g.Env["CLAUDE_CODE_OAUTH_TOKEN"] = "placeholder"
 		if !b.Proxy {
 			g.Env["ANTHROPIC_BASE_URL"] = "https://" + providers.AnthropicHost
 		}
