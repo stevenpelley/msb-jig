@@ -25,7 +25,7 @@ The parts that don't carry over are small: one provider adapter, the agent profi
 
 Both tracks also serve as a **general dev sandbox**: the egress allowlist has an `mono-jig` profile and a broader `dev` profile with documentation and tool-download hosts (see [Egress filtering](#egress-filtering-a-separate-policy-from-the-brokers)).
 
-These notes compare building it on **Docker Sandboxes (sbx)** and on **NVIDIA OpenShell**. The research was done on 2026-11-21 with OpenShell 0.1.9 and sbx v0.54.0 on macOS. Items marked *unverified* haven't been tested.
+These notes compare building it on **Docker Sandboxes (sbx)** and on **NVIDIA OpenShell**. The research was done on 2026-11-21 with OpenShell 0.1.9 and sbx v0.54.0 on macOS. *2026-11-27: OpenShell can't run Docker inside its sandboxes on any driver, so we stay on microsandbox; see [openshell.md](openshell.md).* Items marked *unverified* haven't been tested.
 
 ## Constraints
 
@@ -518,7 +518,7 @@ For headless agents in CI or Kubernetes, the broker package runs as a plain side
 4. Package a setup script for the Mac:
    - install the gateway and the VM driver's dependencies (`libkrun`, `e2fsprogs`) and select the `vm` driver,
    - or, for the Docker driver, use bridge networking with `host.docker.internal`.
-5. **First, check whether `dockerd` can run inside an OpenShell VM sandbox.** Our tests need it.
+5. **First, check whether `dockerd` can run inside an OpenShell VM sandbox.** Our tests need it. *(Answered 2026-11-27: it can't, on any driver; [openshell.md](openshell.md).)*
 
 ## The sandbox backend interface
 
@@ -768,7 +768,7 @@ The spec doesn't need a runtime that understands it:
 - Is the GitLab MCP server we use hosted by GitLab, so that the broker must filter its tool calls? Is GitLab's GraphQL merge mutation `mergeRequestAccept`?
 - Can the remote's `code --openExternal` be refused, and what is the exact setting for installing remote extensions from the Mac?
 
-- Can `dockerd` run inside an OpenShell VM sandbox, or is there another way to run our tests there?
+- Can `dockerd` run inside an OpenShell VM sandbox, or is there another way to run our tests there? (Answered 2026-11-27: no; [openshell.md](openshell.md).)
 - Does work allow free personal Docker accounts for sbx?
 - Which credential bridges does VS Code actually open into a Remote - SSH window with default settings, and do our settings close all of them? Then the same for Kiro, whose remote support is its own.
 - Does `remote.SSH.localServerDownload: "always"` let the sandbox run without any Microsoft egress?
