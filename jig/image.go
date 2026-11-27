@@ -237,8 +237,10 @@ func imageEngine(named string) string {
 func buildImage(engine, file, ctxDir string) string {
 	setRuntimePaths()
 	tag := buildBase(engine)
+	keep := []string{tag}
 	if file != "" {
 		tag = buildUser(engine, file, ctxDir)
+		keep = append(keep, tag)
 	}
 	if exec.Command("msb", "image", "inspect", tag).Run() == nil {
 		fmt.Println(tag, "is already in microsandbox's cache")
@@ -251,6 +253,7 @@ func buildImage(engine, file, ctxDir string) string {
 	s := LoadSettings()
 	s.Image = tag
 	SaveSettings(s)
+	pruneImages(engine, keep)
 	return tag
 }
 

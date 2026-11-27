@@ -371,6 +371,17 @@ the engine's cache when nothing changed (2026-11-27; `jig/image.go`
 (`guest.Config`). `--plain-image` creates a sandbox from `BaseImage`
 itself, with every component at its first start (minutes).
 
+Each build records its tags (`images.json` in the state directory) and
+removes the recorded tags it no longer uses, from the engine (`rmi`) and
+from microsandbox's cache, saying how much that freed (`jig/imageprune.go`;
+before 2026-11-27 old images piled up until a build on the Mac failed
+with `ENOSPC`). It removes only images it built, so not another track's
+or the user's; a microsandbox image a sandbox still uses stays until
+that sandbox is removed; the engine's build cache stays
+(`docker builder prune`). `JIG_KEEP_IMAGES=1` only records. Checked
+against Docker in the sandbox; the microsandbox side (`Image.Remove`,
+`ErrImageInUse`) is *unverified* on the Mac.
+
 | Component | Does | Debian-specific |
 |---|---|---|
 | `10-ca` | trusts the extra CAs (`mono-jig ca`) | `update-ca-certificates` |
