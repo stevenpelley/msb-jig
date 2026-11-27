@@ -182,6 +182,8 @@ proxy filtering Docker API calls (no bind mounts outside the workspace, no
 
 ## When to look again
 
+- We stop needing Docker inside the agent's sandbox
+  ([no-docker-in-sandbox.md](no-docker-in-sandbox.md)).
 - OpenShell adds a mode in which something in the sandbox may be root and
   create namespaces (watch #4970), or a filtered remote Docker.
 - For unattended agents on Linux or Kubernetes hosts, where a shared,
