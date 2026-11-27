@@ -76,7 +76,8 @@ func setup() {
 		fmt.Println("building the base image with", e, "(mono-jig image build)")
 		image, local = buildImage(e, "", ""), true
 	} else if ok && image == baseImage() {
-		fmt.Println("no docker or podman: sandboxes start from plain Ubuntu and install everything at their first start")
+		fmt.Println("no docker or podman: new sandboxes need one to build their image, or --plain-image\n" +
+			"  (plain Ubuntu, everything installed at the first start)")
 	}
 	if ok && !local {
 		fmt.Println("pulling", image)

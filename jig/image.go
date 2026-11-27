@@ -1,6 +1,7 @@
 package jig
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -13,13 +14,16 @@ import (
 	"runtime"
 	"slices"
 	"strconv"
-	"time"
+	"strings"
 
 	"github.com/stevenpelley/msb-jig/guest"
 )
 
-// Sandbox images. mono-jig image build builds, with Docker or Podman
-// on the Mac:
+// Sandbox images. Every new sandbox starts from an image built on the
+// Mac (newSandboxImage): up, open and run build it first, with Docker or
+// Podman, which answer from their cache when nothing changed, so the guest
+// never installs mono-jig's parts itself. mono-jig image build builds the
+// same ahead of time:
 //
 //   - the base image, localhost/mono-jig-base:<hash>, from the
 //     Dockerfile and provision/ embedded in this binary
@@ -30,13 +34,15 @@ import (
 //   - then, with -f, your Dockerfile on top of it (FROM
 //     $JIG_BASE, passed as a build argument).
 //
-// It loads the result into microsandbox's image cache (msb load) and
-// records it in settings.json; new sandboxes start from it. Their first
-// start runs only what the image doesn't have (firstComponents): the
-// broker's CA and settings, and Claude's and AWS's. A plain image
-// (JIG_IMAGE=ubuntu:26.04, or baseImage) still works, with everything installed at the
-// first start. A sandbox keeps the image it was created from: mono-jig
-// rm, then open, to move one to a new image.
+// It loads the result into microsandbox's image cache (msb load) unless
+// it's there already, and records it in settings.json, with your
+// Dockerfile, which later builds use too. A first start runs only what
+// the image doesn't have (firstComponents): the broker's CA and settings.
+// --plain-image (or JIG_IMAGE) creates a sandbox from another image
+// instead, such as plain Ubuntu (baseImage), with everything installed at
+// its first start, for a Mac without Docker or Podman. A sandbox keeps the
+// image it was created from: mono-jig rm, then open, to move one to a new
+// image.
 
 // baseImage is the image the base image builds on, and the plain image
 // sandboxes start from without one: JIG_BASE_IMAGE, default the track's. Its
@@ -80,12 +86,17 @@ func imageCmd(args []string) {
 		imageBuild(args[1:])
 	case "show":
 		ref, _ := sandboxImage()
-		fmt.Println(ref)
+		fmt.Println("last built:", ref)
+		if s := LoadSettings(); s.ImageFile != "" {
+			fmt.Printf("new sandboxes build the base image, then %s (context %s)\n", s.ImageFile, s.ImageContext)
+		} else {
+			fmt.Println("new sandboxes build the base image alone")
+		}
 	case "reset":
 		s := LoadSettings()
-		s.Image = ""
+		s.ImageFile, s.ImageContext = "", ""
 		SaveSettings(s)
-		fmt.Println("new sandboxes start from", baseImage(), "(everything installed at the first start)")
+		fmt.Println("new sandboxes build the base image alone (your Dockerfile is no longer used)")
 	default:
 		usage()
 	}
@@ -133,8 +144,75 @@ func imageBuild(args []string) {
 	if e == "" {
 		fail("neither docker nor podman is installed")
 	}
-	tag := buildImage(e, *file, ctxDir)
-	fmt.Printf("new sandboxes start from %s\n(an existing sandbox keeps its image: mono-jig rm <name>, then open, to move it)\n", tag)
+	s := LoadSettings()
+	if *file != "" {
+		f, err1 := filepath.Abs(*file)
+		c, err2 := filepath.Abs(ctxDir)
+		if err := errors.Join(err1, err2); err != nil {
+			fail("%v", err)
+		}
+		s.ImageFile, s.ImageContext = f, c
+	} else {
+		s.ImageFile, s.ImageContext = "", ""
+	}
+	SaveSettings(s)
+	tag := buildImage(e, s.ImageFile, s.ImageContext)
+	fmt.Printf("new sandboxes start from %s, built again (from the cache) when created\n(an existing sandbox keeps its image: mono-jig rm <name>, then open, to move it)\n", tag)
+}
+
+// plainImage: --plain-image, create the sandbox from JIG_IMAGE or the plain
+// base image (baseImage) instead of building one on the Mac.
+var plainImage bool
+
+// splitPlainImage takes --plain-image out of args.
+func splitPlainImage(args []string) (rest []string, plain bool) {
+	for _, a := range args {
+		if a == "--plain-image" {
+			plain = true
+		} else {
+			rest = append(rest, a)
+		}
+	}
+	return rest, plain
+}
+
+// newSandboxImage readies the image for a sandbox about to be created, and
+// sets JIG_IMAGE to it for the supervisor (sandboxImage). For a sandbox
+// that exists it does nothing: it keeps its image.
+func newSandboxImage(name string) {
+	ok, err := track.Backend.Exists(context.Background(), name)
+	if err != nil {
+		fail("%v", err)
+	}
+	if ok {
+		if plainImage {
+			fail("--plain-image is for a new sandbox; %s exists (mono-jig rm %s first)", name, name)
+		}
+		return
+	}
+	if plainImage {
+		ref := env("JIG_IMAGE", baseImage())
+		os.Setenv("JIG_IMAGE", ref)
+		fmt.Printf("--plain-image: %s from %s; its first start installs everything (minutes)\n", name, ref)
+		return
+	}
+	if v := os.Getenv("JIG_IMAGE"); v != "" {
+		fmt.Printf("%s from JIG_IMAGE=%s\n", name, v)
+		return
+	}
+	e := imageEngine("")
+	if e == "" {
+		fail("a new sandbox's image is built on the Mac with Docker or Podman, and neither is installed:\n" +
+			"install one, or pass --plain-image to install everything in the guest at its first start (minutes)")
+	}
+	s := LoadSettings()
+	if s.ImageFile != "" {
+		if _, err := os.Stat(s.ImageFile); err != nil {
+			fail("your Dockerfile %s: %v\n(mono-jig image reset to build the base image alone)", s.ImageFile, err)
+		}
+	}
+	fmt.Printf("building %s's image with %s (from the cache when nothing changed)\n", name, e)
+	os.Setenv("JIG_IMAGE", buildImage(e, s.ImageFile, s.ImageContext))
 }
 
 // imageEngine is the engine to build with: the one named, else docker or
@@ -155,16 +233,12 @@ func imageEngine(named string) string {
 }
 
 // buildImage builds the base image, then file on it if there is one,
-// loads the result into microsandbox and records it.
+// loads the result into microsandbox unless it's there, and records it.
 func buildImage(engine, file, ctxDir string) string {
 	setRuntimePaths()
 	tag := buildBase(engine)
 	if file != "" {
-		// A new tag each build: sandboxes made from an earlier build keep it.
-		tag = "localhost/mono-jig:" + time.Now().Format("20060102-150405")
-		runCmd(engine, append(buildVerb(engine), "--platform", "linux/"+runtime.GOARCH,
-			"--build-arg", "JIG_BASE="+baseTag(),
-			"-t", tag, "-f", file, ctxDir)...)
+		tag = buildUser(engine, file, ctxDir)
 	}
 	if exec.Command("msb", "image", "inspect", tag).Run() == nil {
 		fmt.Println(tag, "is already in microsandbox's cache")
@@ -178,6 +252,41 @@ func buildImage(engine, file, ctxDir string) string {
 	s.Image = tag
 	SaveSettings(s)
 	return tag
+}
+
+// buildUser builds file on the base image, tagged by the image's ID, so
+// an unchanged build (from the cache) has the same tag and isn't loaded
+// into microsandbox again, and a changed one gets a new tag (sandboxes made
+// from the old one keep it).
+func buildUser(engine, file, ctxDir string) string {
+	idf, err := os.CreateTemp("", "mono-jig-iid-")
+	if err != nil {
+		fail("%v", err)
+	}
+	idf.Close()
+	defer os.Remove(idf.Name())
+	runCmd(engine, append(buildVerb(engine), "--platform", "linux/"+runtime.GOARCH,
+		"--build-arg", "JIG_BASE="+baseTag(), "--iidfile", idf.Name(),
+		"-f", file, ctxDir)...)
+	b, err := os.ReadFile(idf.Name())
+	if err != nil {
+		fail("%v", err)
+	}
+	tag, err := userTag(string(b))
+	if err != nil {
+		fail("%s build: %v", engine, err)
+	}
+	runCmd(engine, "tag", strings.TrimSpace(string(b)), tag)
+	return tag
+}
+
+// userTag names the user's image by its ID (sha256:<hex>, from --iidfile).
+func userTag(id string) (string, error) {
+	h := strings.TrimPrefix(strings.TrimSpace(id), "sha256:")
+	if len(h) < 12 || strings.Trim(h, "0123456789abcdef") != "" {
+		return "", fmt.Errorf("unexpected image ID %q", id)
+	}
+	return "localhost/mono-jig:" + h[:12], nil
 }
 
 // baseArgs are the base image's build arguments.

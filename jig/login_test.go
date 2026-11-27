@@ -64,12 +64,12 @@ func TestLoadConfigSettings(t *testing.T) {
 
 // settings.json keeps its shape: each provider under its name, and image.
 func TestSettingsJSON(t *testing.T) {
-	in := `{"aws":{"profiles":["p"]},"gitlab":{"user":"u","url":"https://gitlab.com","token":"glab"},"image":"i"}`
+	in := `{"aws":{"profiles":["p"]},"gitlab":{"user":"u","url":"https://gitlab.com","token":"glab"},"image":"i","image_context":"/c","image_file":"/c/Dockerfile"}`
 	var s Settings
 	if err := json.Unmarshal([]byte(in), &s); err != nil {
 		t.Fatal(err)
 	}
-	if a := ProviderSettings[awsSettings](s, "aws"); s.Image != "i" || a == nil || a.Profiles[0] != "p" ||
+	if a := ProviderSettings[awsSettings](s, "aws"); s.Image != "i" || s.ImageFile != "/c/Dockerfile" || s.ImageContext != "/c" || a == nil || a.Profiles[0] != "p" ||
 		ProviderSettings[githubSettings](s, "github") != nil {
 		t.Fatalf("%+v", s)
 	}
@@ -125,5 +125,27 @@ func TestJiraBroker(t *testing.T) {
 	t.Setenv("JIG_JIRA_TOKEN_COMMAND", "")
 	if p := jiraBroker(s); p != nil {
 		t.Fatalf("no token: %+v", p)
+	}
+}
+
+func TestSplitPlainImage(t *testing.T) {
+	rest, plain := splitPlainImage([]string{"s", "--plain-image", "dir"})
+	if !plain || len(rest) != 2 || rest[0] != "s" || rest[1] != "dir" {
+		t.Errorf("%v %v", rest, plain)
+	}
+	if _, plain := splitPlainImage([]string{"s"}); plain {
+		t.Error("plain without the flag")
+	}
+}
+
+// The user's image is named by its ID: the same build, the same tag.
+func TestUserTag(t *testing.T) {
+	if tag, err := userTag("sha256:0123456789abcdef0123\n"); err != nil || tag != "localhost/mono-jig:0123456789ab" {
+		t.Errorf("%q %v", tag, err)
+	}
+	for _, bad := range []string{"", "sha256:short", "sha256:0123456789abXYZ"} {
+		if _, err := userTag(bad); err == nil {
+			t.Errorf("%q accepted", bad)
+		}
 	}
 }

@@ -71,16 +71,18 @@ settings (`docs/tracks.md`).
 ## Using it
 
 Requirements: macOS, Go 1.26, [microsandbox](https://github.com/superradcompany/microsandbox)
-(`msb` 0.8.2, the Go SDK's version: SDK 0.7.16 refused runtime 0.8.2) and VS Code's `code` command. Optional: Docker
-or Podman to build the base image; `glab`, `gh`, `claude`, the AWS CLI and
-`uv` for the providers you log in to.
+(`msb` 0.8.2, the Go SDK's version: SDK 0.7.16 refused runtime 0.8.2), VS Code's `code` command, and
+Docker or Podman: every new sandbox starts from an image built on the Mac,
+from the engine's cache when nothing changed (`open --plain-image` instead
+installs everything in the guest, which takes minutes). Optional: `glab`,
+`gh`, `claude`, the AWS CLI and `uv` for the providers you log in to.
 
 Build your track's command (above) as `mono-jig`, then:
 
 ```sh
 mono-jig setup                 # check the Mac, the editor profile, the base image
 mono-jig login all             # choose providers; tokens stay in your logins or the Keychain
-mono-jig open <name> [dir]     # create or start a sandbox, open VS Code on it
+mono-jig open <name> [dir]     # create (building its image first) or start a sandbox, open VS Code on it
 mono-jig stop <name>
 mono-jig                       # no arguments: every command (image build, ca, cp, allowlist, rm, …)
 ```
