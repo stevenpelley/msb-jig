@@ -39,7 +39,7 @@ func TestGuestConfigServerMode(t *testing.T) {
 		"GITLAB_HOST": "gitlab.broker.internal", "GITLAB_TOKEN": "placeholder", "GH_HOST": "github.broker.internal",
 		"ANTHROPIC_BASE_URL": "https://anthropic.broker.internal", "CLAUDE_CODE_OAUTH_TOKEN": "placeholder",
 		"MCP_GATEWAY_URL": providers.AWSURL, "GIT_TERMINAL_PROMPT": "0",
-		"CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
+		"CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1", "CLAUDE_CODE_NO_FLICKER": "1",
 	} {
 		if g.Env[k] != v {
 			t.Errorf("%s = %q, want %q", k, g.Env[k], v)
@@ -99,13 +99,13 @@ func TestGuestConfigProxyMode(t *testing.T) {
 	}
 }
 
-// With no provider: the base environment and the agent's own setting
-// (no nonessential traffic), and no files or instructions. The hosts line
+// With no provider: the base environment and the agent's own settings
+// (no nonessential traffic, the full-screen renderer), and no files or instructions. The hosts line
 // only removes the broker's names.
 func TestGuestConfigNone(t *testing.T) {
 	var c config
 	g := guestConfig(c)
-	if len(g.Env) != 5 || g.Env["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"] != "1" || len(g.Files) != 0 || len(g.Instructions) != 0 {
+	if len(g.Env) != 6 || g.Env["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"] != "1" || g.Env["CLAUDE_CODE_NO_FLICKER"] != "1" || len(g.Files) != 0 || len(g.Instructions) != 0 {
 		t.Errorf("%+v", g)
 	}
 	if h := hostsLine(c); strings.Contains(h, "127.0.0.1") {

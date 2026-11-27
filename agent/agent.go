@@ -51,7 +51,14 @@ func (ClaudeCode) Guest(b providers.Config, instructions []string) guest.Config 
 	// No telemetry, error reports or auto-updates: the sandbox allows none
 	// of their hosts (Datadog showed in mono-jig denied, 2026-11-27), and
 	// Claude Code's version is the image's, until the image is rebuilt.
-	g := guest.Config{Env: map[string]string{"CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1"}}
+	//
+	// And the full-screen renderer, which on the Mac comes from feature
+	// flags (tengu_flickering_*, cached in ~/.claude.json) that the guest
+	// never gets: without it claude scrolls in the terminal (2026-11-27).
+	g := guest.Config{Env: map[string]string{
+		"CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
+		"CLAUDE_CODE_NO_FLICKER":                   "1",
+	}}
 	if b.Get("anthropic") != nil {
 		g.Env["CLAUDE_CODE_OAUTH_TOKEN"] = "placeholder"
 		if !b.Proxy {
