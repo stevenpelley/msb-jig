@@ -543,8 +543,38 @@ reach the broker that way.
   neither of which names the new host: the supervisor stops at the CA
   check and says to `rm`.
 
-Unit-tested (`broker/awsmcp`, `broker/providers`, `jig`); *unverified* in
-a sandbox on the Mac, as AWS in proxy mode was before.
+Unit-tested (`broker/awsmcp`, `broker/providers`, `jig`); checked in a
+sandbox on the Mac on 2026-11-27 (below).
+
+### End to end with every provider (2026-11-27)
+
+On the user's Mac, with microsandbox 0.8.2 and msb-jig `c5ad4cb`
+(mono-jig pinned to it):
+- a new proxy-mode sandbox (the default), from an image built on the Mac
+  with Docker (cached from an earlier run): `up` took 7s, of which the
+  first start's `ca broker apply` took 2.6s;
+- the user's GitHub, GitLab, Claude and AWS logins (`mono-jig login all`).
+
+The user's own check script ran these, and all passed. Only reads and
+one refused write were sent.
+
+| Check | Result |
+|---|---|
+| Guest plumbing | No `broker.internal` line in `/etc/hosts`, no socat, no `broker.sock` on the Mac; no `GH_HOST`, `ANTHROPIC_BASE_URL` or `insteadOf`; the broker's CA trusted |
+| `https://proxy.golang.org/` | 200, spliced |
+| `github.com`: certificate, `gh api user`, `git ls-remote` | Issued by the broker's CA; the user's login; the credential injected |
+| `gh api -X PUT .../pulls/2/merge` | 403 from the broker |
+| `glab api user`, `git ls-remote` from GitLab | The user's login; the credential injected |
+| `MCP_GATEWAY_URL` | `https://aws-mcp.us-east-1.api.aws/mcp`, AWS's own URL |
+| `aws-mcp.us-east-1.api.aws`: certificate, `mcpcli tools` | Issued by the broker's CA; the `aws___` tools listed |
+| `curl https://sts.amazonaws.com/` | Refused (`mono-jig denied` lists it) |
+| `claude -p` with the broker's token | Answered |
+
+`mono-jig denied` also listed `http-intake.logs.us5.datadoghq.com`,
+Claude Code's telemetry (Datadog), refused because it's on no allow list.
+
+Not covered: pushes and merge-request writes, LFS, UDP, and server mode
+on 0.8.2.
 
 ## Egress decided by the broker (investigated 2026-11-24, not built)
 
