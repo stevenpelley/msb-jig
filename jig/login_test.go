@@ -101,11 +101,11 @@ func TestPruneAuthorizedKeys(t *testing.T) {
 
 func TestSandboxNames(t *testing.T) {
 	root := t.TempDir()
-	for _, d := range []string{"inv1", "_vscode", "_vscode-ext", "Bad"} {
+	for _, d := range []string{"jig1", "_vscode", "_vscode-ext", "Bad"} {
 		os.Mkdir(filepath.Join(root, d), 0o700)
 	}
 	os.WriteFile(filepath.Join(root, "settings.json"), nil, 0o600)
-	if got := sandboxNames(root); !slices.Equal(got, []string{"inv1"}) {
+	if got := sandboxNames(root); !slices.Equal(got, []string{"jig1"}) {
 		t.Fatalf("%v", got)
 	}
 }
