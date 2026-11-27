@@ -300,11 +300,17 @@ func baseArgs() []string {
 	}
 }
 
+// baseDockerfile is the base image's Dockerfile: a layer per baked
+// component.
+func baseDockerfile() string {
+	return guest.ImageDockerfile(provisionFiles(), strings.Fields(imageComponents()))
+}
+
 // baseTag names the base image by everything it's built from, the
 // extra CAs included.
 func baseTag() string {
 	h := sha256.New()
-	for _, s := range slices.Concat([]string{guest.ImageDockerfile}, baseArgs(), extraCAs()) {
+	for _, s := range slices.Concat([]string{baseDockerfile()}, baseArgs(), extraCAs()) {
 		fmt.Fprintf(h, "%d:%s", len(s), s)
 	}
 	return "localhost/mono-jig-base:" + hex.EncodeToString(h.Sum(nil)[:6])
@@ -318,7 +324,7 @@ func buildBase(engine string) string {
 		fail("%v", err)
 	}
 	defer os.RemoveAll(dir)
-	files := map[string]string{"Dockerfile": guest.ImageDockerfile, "ca/README": "Extra CAs (mono-jig ca), one .crt each.\n"}
+	files := map[string]string{"Dockerfile": baseDockerfile(), "ca/README": "Extra CAs (mono-jig ca), one .crt each.\n"}
 	for name, body := range provisionFiles() {
 		files["provision/"+name] = body
 	}

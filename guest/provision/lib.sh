@@ -10,6 +10,10 @@ export DEBIAN_FRONTEND=noninteractive
 
 want() { [[ " $PROVISION_COMPONENTS " == *" $1 "* ]]; }
 log() { printf '[provision] %s\n' "$*"; }
+# apt_lists: fetch the package lists unless they're here. Each layer of the
+# image removes its own, and a first start on a plain image has none until
+# base runs.
+apt_lists() { compgen -G '/var/lib/apt/lists/*_Packages*' >/dev/null || apt-get update -qq; }
 
 # client_env <name> [KEY=VALUE...]: the tools' settings, where every session
 # reads them. /etc/profile.d/<name>.sh serves login shells; a block in

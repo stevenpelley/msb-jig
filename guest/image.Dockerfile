@@ -11,15 +11,18 @@ ARG BASE_IMAGE=ubuntu:26.04
 FROM ${BASE_IMAGE}
 ARG SANDBOX_USER
 ARG SANDBOX_UID
-ARG PROVISION_COMPONENTS
-ARG PROVISION_HASH
-COPY provision/ /opt/mono-jig/provision/
+COPY provision/provision.sh provision/lib.sh /opt/mono-jig/provision/
 # Extra CAs (mono-jig ca), before anything downloads: ca-certificates,
 # installed by provision.sh's base, trusts them.
 COPY ca/ /usr/local/share/ca-certificates/mono-jig-build/
-RUN SANDBOX_USER="$SANDBOX_USER" SANDBOX_UID="$SANDBOX_UID" \
-    PROVISION_COMPONENTS="$PROVISION_COMPONENTS" \
-    bash /opt/mono-jig/provision/provision.sh \
- && rm -rf /var/lib/apt/lists/* \
- && mkdir -p /etc/mono-jig \
+# One layer per component, in provision.sh's order, each with only its own
+# file (ImageDockerfile writes them here): a changed component rebuilds
+# from its layer on, and the layers before it come from the build cache.
+# Each removes the apt lists it fetched, so none stay in the image.
+# COMPONENT LAYERS
+# Last, so a change to provision files the image doesn't run (the
+# settings every start writes) rebuilds only this layer.
+ARG PROVISION_COMPONENTS
+ARG PROVISION_HASH
+RUN mkdir -p /etc/mono-jig \
  && printf 'components=%s\nprovision=%s\n' "$PROVISION_COMPONENTS" "$PROVISION_HASH" >/etc/mono-jig/image

@@ -28,13 +28,45 @@ func TestImageComponents(t *testing.T) {
 			t.Errorf("%s is baked but not a first-start component", p)
 		}
 	}
+	df := baseDockerfile()
 	for _, s := range []string{"ARG PROVISION_COMPONENTS", "ARG PROVISION_HASH", imageFile} {
-		if !strings.Contains(guest.ImageDockerfile, s) {
+		if !strings.Contains(df, s) {
 			t.Errorf("image.Dockerfile lacks %q", s)
 		}
 	}
 	if baseTag() != baseTag() || !strings.HasPrefix(baseTag(), "localhost/mono-jig-base:") {
 		t.Errorf("baseTag %q", baseTag())
+	}
+}
+
+// The base image's Dockerfile has a layer per baked component, in
+// provision.sh's order, each copying only its own file; the arguments
+// that change with any provision file come after them all.
+func TestBaseDockerfileLayers(t *testing.T) {
+	df := baseDockerfile()
+	if strings.Contains(df, "COMPONENT LAYERS") || strings.Contains(df, "COPY provision/ ") {
+		t.Fatalf("not expanded:\n%s", df)
+	}
+	last := -1
+	for _, name := range strings.Fields(imageComponents()) {
+		i := strings.Index(df, "PROVISION_COMPONENTS="+name+" ")
+		if i < 0 || i < last {
+			t.Errorf("%s: layer missing or out of order:\n%s", name, df)
+		}
+		last = i
+	}
+	if n, want := strings.Count(df, "\nRUN SANDBOX_USER="), len(strings.Fields(imageComponents())); n != want {
+		t.Errorf("%d component layers, want %d", n, want)
+	}
+	if !strings.Contains(df, "COPY provision/components/70-claude.sh /opt/mono-jig/provision/components/\n") {
+		t.Errorf("claude's layer copies more than its file:\n%s", df)
+	}
+	if strings.Index(df, "ARG PROVISION_HASH") < last {
+		t.Errorf("PROVISION_HASH before a component layer: any provision change would rebuild it")
+	}
+	files := map[string]string{"components/20-base.sh": "", "components/50-broker.sh": "", "lib.sh": ""}
+	if g := guest.ImageDockerfile(files, []string{"base"}); strings.Contains(g, "50-broker.sh") || !strings.Contains(g, "20-base.sh") {
+		t.Errorf("only the named components get layers:\n%s", g)
 	}
 }
 
