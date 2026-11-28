@@ -29,7 +29,7 @@ AllowStreamLocalForwarding local
 
 // sshdJob runs sshd in the foreground as a supervisor job. A sandbox
 // provisioned before sshd was added has none, nor a host key: then it
-// sleeps (rm and open to add it).
+// sleeps (rm and create it again to add it).
 const sshdJob = `if ! command -v sshd >/dev/null || [ ! -s /etc/ssh/ssh_host_ed25519_key ]; then exec sleep infinity; fi
 install -d -m 0755 /run/sshd
 exec "$(command -v sshd)" -D -e >>/var/log/sshd.log 2>&1`
@@ -96,7 +96,7 @@ func sshdSetup(ctx context.Context, sb sandbox.Guest, name, state string) error 
 	case err != nil:
 		return err
 	case code == 3:
-		return fmt.Errorf("the guest has no sshd, which the editor needs: it was provisioned before sshd was added; rm and open it")
+		return fmt.Errorf("the guest has no sshd, which the editor needs: it was provisioned before sshd was added; rm and create it again")
 	case code != 0:
 		return fmt.Errorf("setting up sshd (exit %d): %s", code, out)
 	}

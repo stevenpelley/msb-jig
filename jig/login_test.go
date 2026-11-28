@@ -128,16 +128,6 @@ func TestJiraBroker(t *testing.T) {
 	}
 }
 
-func TestSplitPlainImage(t *testing.T) {
-	rest, plain := splitPlainImage([]string{"s", "--plain-image", "dir"})
-	if !plain || len(rest) != 2 || rest[0] != "s" || rest[1] != "dir" {
-		t.Errorf("%v %v", rest, plain)
-	}
-	if _, plain := splitPlainImage([]string{"s"}); plain {
-		t.Error("plain without the flag")
-	}
-}
-
 // The user's image is named by its ID: the same build, the same tag.
 func TestUserTag(t *testing.T) {
 	if tag, err := userTag("sha256:0123456789abcdef0123\n"); err != nil || tag != "localhost/mono-jig:0123456789ab" {

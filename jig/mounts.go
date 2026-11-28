@@ -1,12 +1,10 @@
 package jig
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path"
 	"path/filepath"
 	"slices"
@@ -17,18 +15,23 @@ import (
 // <state>/share on the Mac, at /mnt/host in the guest (and ~/host, a link
 // to it), the one folder the agent writes on the Mac by default: nothing
 // on the Mac runs from it. More folders are mounted with
-// --mount host[:guest][:rw] when the sandbox is created (mono-jig up or open): microsandbox can't change
-// a sandbox's mounts afterwards, so the list is saved in
-// <state>/mounts.json, the supervisor applies it at create, and a sandbox
-// that exists refuses a new one (mono-jig rm first). Guest paths are
-// under /mnt: the agent's home is made at the first start, and a mount
-// there before it would leave it root's. mono-jig cp copies single
+// mono-jig create -v <host>:<guest>:ro|rw: microsandbox can't change a
+// sandbox's mounts afterwards, so the list is saved in
+// <state>/mounts.json and the supervisor applies it at create. Guest
+// paths are under /mnt: the agent's home is made at the first start, and
+// a mount there before it would leave it root's. msb cp copies single
 // files either way without a mount.
 //
-// Mounts are read-only unless :rw says otherwise (docs/design.md, "Don't
-// mount host files read-write"): in a writable repo the agent could plant
-// .git/hooks, core.fsmonitor or .vscode/settings.json, which the Mac's own
-// tools would later run outside the sandbox, with the user's credentials.
+// -v is msb create's flag, and every spec we accept means the same to
+// msb, so the guest path and the mode are required, with no defaults.
+// msb mounts read-write unless told :ro; before 2026-11-28 ours were
+// read-only unless told :rw (docs/design.md, "Don't mount host files
+// read-write": in a writable repo the agent could plant .git/hooks,
+// core.fsmonitor or .vscode/settings.json, which the Mac's own tools
+// would later run outside the sandbox, with the user's credentials).
+// With the mode required, a read-write mount is always asked for by
+// name. What we don't support (a named volume, other options) is
+// refused, not read another way.
 
 const (
 	guestMounts = "/mnt"
@@ -44,58 +47,31 @@ type Mount struct {
 	ReadOnly bool   `json:"readOnly,omitempty"`
 }
 
-// parseMount reads host[:guest][:ro|:rw]: read-only unless :rw. The
-// guest path defaults to /mnt/<the host folder's name>.
+// parseMount reads <host>:<guest>:ro|rw, as msb create -v does. The host
+// path starts with / or . (anything else is a named volume to msb).
 func parseMount(spec string) (Mount, error) {
 	parts := strings.Split(spec, ":")
-	mt := Mount{ReadOnly: true}
-	if n := len(parts); n > 1 && (parts[n-1] == "ro" || parts[n-1] == "rw") {
-		mt.ReadOnly = parts[n-1] == "ro"
-		parts = parts[:n-1]
+	if len(parts) != 3 || parts[0] == "" || parts[1] == "" {
+		return Mount{}, fmt.Errorf("-v %s: want <host>:<guest>:ro|rw", spec)
 	}
-	if len(parts) > 2 || parts[0] == "" {
-		return mt, fmt.Errorf("--mount %s: want host[:guest][:ro|:rw]", spec)
+	if parts[2] != "ro" && parts[2] != "rw" {
+		return Mount{}, fmt.Errorf("-v %s: the mode is ro or rw, and nothing else", spec)
 	}
-	host, err := filepath.Abs(expandHome(parts[0]))
+	if !strings.HasPrefix(parts[0], "/") && !strings.HasPrefix(parts[0], ".") {
+		return Mount{}, fmt.Errorf("-v %s: the host folder starts with / or . (to msb, anything else names a volume, which mono-jig doesn't mount)", spec)
+	}
+	host, err := filepath.Abs(parts[0])
 	if err != nil {
-		return mt, err
+		return Mount{}, err
 	}
 	if fi, err := os.Stat(host); err != nil || !fi.IsDir() {
-		return mt, fmt.Errorf("--mount %s: %s isn't a folder", spec, host)
+		return Mount{}, fmt.Errorf("-v %s: %s isn't a folder", spec, host)
 	}
-	mt.Host = host
-	mt.Guest = path.Join(guestMounts, filepath.Base(host))
-	if len(parts) == 2 {
-		mt.Guest = path.Clean(parts[1])
-	}
+	mt := Mount{Host: host, Guest: path.Clean(parts[1]), ReadOnly: parts[2] == "ro"}
 	if !strings.HasPrefix(mt.Guest, guestMounts+"/") || mt.Guest == shareGuest {
-		return mt, fmt.Errorf("--mount %s: the guest path must be under %s/, and not %s", spec, guestMounts, shareGuest)
+		return Mount{}, fmt.Errorf("-v %s: the guest path must be under %s/, and not %s", spec, guestMounts, shareGuest)
 	}
 	return mt, nil
-}
-
-func expandHome(p string) string {
-	if p == "~" || strings.HasPrefix(p, "~/") {
-		h, _ := os.UserHomeDir()
-		return filepath.Join(h, strings.TrimPrefix(p, "~"))
-	}
-	return p
-}
-
-// splitMounts takes the --mount flags out of args.
-func splitMounts(args []string) (rest, specs []string) {
-	for i := 0; i < len(args); i++ {
-		switch a := args[i]; {
-		case a == "--mount" && i+1 < len(args):
-			i++
-			specs = append(specs, args[i])
-		case strings.HasPrefix(a, "--mount="):
-			specs = append(specs, strings.TrimPrefix(a, "--mount="))
-		default:
-			rest = append(rest, a)
-		}
-	}
-	return rest, specs
 }
 
 // inRepo returns the folder holding .git at or above dir, or "".
@@ -112,8 +88,8 @@ func inRepo(dir string) string {
 
 func mountsFile(state string) string { return filepath.Join(state, "mounts.json") }
 
-// saveMounts records the mounts for a sandbox about to be created.
-func saveMounts(name, state string, specs []string) {
+// parseMounts reads create's -v specs, failing on the first bad one.
+func parseMounts(specs []string) []Mount {
 	var ms []Mount
 	for _, s := range specs {
 		mt, err := parseMount(s)
@@ -121,20 +97,20 @@ func saveMounts(name, state string, specs []string) {
 			fail("%v", err)
 		}
 		if slices.ContainsFunc(ms, func(o Mount) bool { return o.Guest == mt.Guest }) {
-			fail("--mount: two folders at %s", mt.Guest)
+			fail("-v: two folders at %s", mt.Guest)
 		}
 		if repo := inRepo(mt.Host); !mt.ReadOnly && repo != "" {
 			fmt.Fprintf(os.Stderr, "warning: %s is mounted read-write and is in the git repository %s: the agent can write hooks and settings that git and your editor run on the Mac\n", mt.Host, repo)
 		}
 		ms = append(ms, mt)
 	}
-	if ok, err := track.Backend.Exists(context.Background(), name); err != nil {
-		fail("%v", err)
-	} else if ok {
-		fail("%s exists, and its mounts were fixed when it was made: mono-jig rm %s, then again with --mount", name, name)
-	}
-	if err := os.MkdirAll(state, 0o700); err != nil {
-		fail("%v", err)
+	return ms
+}
+
+// writeMounts records the mounts for a sandbox about to be created.
+func writeMounts(state string, ms []Mount) {
+	if len(ms) == 0 {
+		return
 	}
 	b, _ := json.MarshalIndent(ms, "", "  ")
 	if err := os.WriteFile(mountsFile(state), append(b, '\n'), 0o600); err != nil {
@@ -160,33 +136,4 @@ func loadMounts(state string) ([]Mount, error) {
 		return nil, fmt.Errorf("%s: %w", mountsFile(state), err)
 	}
 	return append(ms, more...), nil
-}
-
-// cp copies between the Mac and a sandbox with msb copy. A sandbox path
-// is <name>:/absolute/path, or <name>:relative to the agent's home.
-func cp(args []string) {
-	if len(args) != 2 {
-		usage()
-	}
-	var sandboxes int
-	for i, a := range args {
-		name, p, ok := strings.Cut(a, ":")
-		if !ok || !nameRE.MatchString(name) {
-			continue
-		}
-		sandboxes++
-		if !path.IsAbs(p) {
-			p = path.Join("/home", guestUser, p)
-		}
-		args[i] = name + ":" + p
-	}
-	if sandboxes != 1 {
-		fail("cp: one of the two paths is in the sandbox, as <name>:<path>")
-	}
-	setRuntimePaths()
-	c := exec.Command("msb", "copy", args[0], args[1])
-	c.Stdout, c.Stderr = os.Stdout, os.Stderr
-	if err := c.Run(); err != nil {
-		fail("msb copy: %v", err)
-	}
 }

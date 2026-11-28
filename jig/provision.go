@@ -104,7 +104,7 @@ func components(c config) string {
 	return comps + " " + addedComponents()
 }
 
-// imageComponents are the parts of provision.sh mono-jig image build
+// imageComponents are the parts of provision.sh mono-jig build
 // puts in the base image: those that depend only on the image.
 func imageComponents() string {
 	if guestSSHD() {
@@ -125,11 +125,11 @@ func firstComponents(ctx context.Context, sb sandbox.Guest, c config, log *slog.
 		baked, hash = parseImageFile(s)
 	}
 	if hash == "" {
-		log.Info("the sandbox's image has nothing of mono-jig's (--plain-image or JIG_IMAGE): this first start installs everything, which takes minutes",
+		log.Info("the sandbox's image has nothing of mono-jig's (JIG_PLAIN_IMAGE or JIG_IMAGE): this first start installs everything, which takes minutes",
 			"image", c.image)
 	}
 	if want := guest.ProvisionHash(provisionFiles()); hash != "" && hash != want {
-		log.Warn("the image was built from other provision files; to bring it up to date: mono-jig image build, then rm and open",
+		log.Warn("the image was built from other provision files; to bring it up to date: mono-jig build, then rm and create it again",
 			"image", hash, "binary", want)
 	}
 	var comps []string

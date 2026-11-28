@@ -43,8 +43,8 @@ done
 
 func withTrack(t *testing.T, exists bool) {
 	t.Helper()
-	old, oldPlain := track, plainImage
-	t.Cleanup(func() { track, plainImage = old, oldPlain })
+	old := track
+	t.Cleanup(func() { track = old })
 	track = Personal().withDefaults()
 	track.Backend = existsBackend{exists: exists}
 	t.Setenv("JIG_STATE", t.TempDir())
@@ -79,18 +79,18 @@ func TestNewSandboxImageBuilds(t *testing.T) {
 	}
 }
 
-// --plain-image starts from the plain base image, with no build; an
+// JIG_PLAIN_IMAGE=1 starts from the plain base image, with no build; an
 // existing sandbox keeps its image and builds nothing.
 func TestNewSandboxImagePlainAndExisting(t *testing.T) {
 	withTrack(t, false)
 	calls := fakeTools(t)
-	plainImage = true
+	t.Setenv("JIG_PLAIN_IMAGE", "1")
 	newSandboxImage("s")
 	if got := os.Getenv("JIG_IMAGE"); got != baseImage() {
 		t.Errorf("plain: JIG_IMAGE %q", got)
 	}
 	os.Unsetenv("JIG_IMAGE")
-	plainImage = false
+	os.Unsetenv("JIG_PLAIN_IMAGE")
 	track.Backend = existsBackend{exists: true}
 	newSandboxImage("s")
 	if os.Getenv("JIG_IMAGE") != "" || calls() != "" {

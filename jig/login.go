@@ -1,8 +1,8 @@
 package jig
 
-// The user-facing commands: setup, login, logout, open, stop, uninstall
-// (docs/design.md, "Install and uninstall"). They sit on the
-// sandbox commands in sandbox.go; up, down and rm stay for the checks.
+// The commands that set mono-jig up and take it down: setup, login,
+// logout, self uninstall (docs/design.md, "Install and uninstall"). The
+// sandbox commands are in lifecycle.go.
 
 import (
 	"bufio"
@@ -73,10 +73,10 @@ func setup() {
 	}
 	image, local := sandboxImage()
 	if e := imageEngine(""); ok && image == baseImage() && os.Getenv("JIG_IMAGE") == "" && e != "" {
-		fmt.Println("building the base image with", e, "(mono-jig image build)")
+		fmt.Println("building the base image with", e, "(mono-jig build)")
 		image, local = buildImage(e, "", ""), true
 	} else if ok && image == baseImage() {
-		fmt.Println("no docker or podman: new sandboxes need one to build their image, or --plain-image\n" +
+		fmt.Println("no docker or podman: new sandboxes need one to build their image, or JIG_PLAIN_IMAGE=1\n" +
 			"  (plain Ubuntu, everything installed at the first start)")
 	}
 	if ok && !local {
@@ -90,7 +90,7 @@ func setup() {
 	if !ok {
 		fail("setup isn't complete: fix the missing pieces above and run it again")
 	}
-	fmt.Printf("set up in %s\nnext: mono-jig login all, then mono-jig open <name>\n", root)
+	fmt.Printf("set up in %s\nnext: mono-jig login all, then mono-jig create <name>\n", root)
 }
 
 // --- login, logout ---
@@ -208,30 +208,13 @@ func KeychainDelete(service string) {
 	}
 }
 
-// --- open, stop ---
-
-// open starts the sandbox if it isn't up, creating it the first time,
-// then opens VS Code on it.
-func open(name, state string, args []string) {
-	if pidOf(state) == 0 {
-		up(name, state)
-	}
-	code(name, state, args)
-}
-
-func stop(name, state string) {
-	if pidOf(state) == 0 {
-		fmt.Println(name, "isn't running")
-		return
-	}
-	down(state)
-}
-
 // --- uninstall ---
 
-// uninstall removes every sandbox, the state directory (with the VS Code
-// profile and settings), the Keychain items and the sandboxes' SSH keys
-// from microsandbox. Homebrew's packages and msb's image cache stay.
+// uninstall (self uninstall, as msb self uninstall removes msb) removes
+// every sandbox, the state directory (with the VS Code profile and
+// settings), the Keychain items, the sandboxes' SSH keys from
+// microsandbox, and this executable, unless Homebrew installed it (then
+// brew uninstall does). microsandbox and msb's image cache stay.
 func uninstall(args []string) {
 	yes := slices.Equal(args, []string{"--yes"})
 	if len(args) > 0 && !yes {
@@ -240,8 +223,12 @@ func uninstall(args []string) {
 	setRuntimePaths()
 	root := stateRoot()
 	names := sandboxNames(root)
+	self, brew := selfPath()
 	fmt.Printf("This removes:\n  the sandboxes %s, with their disks and everything in them\n  %s\n  the Keychain items %s\n  their SSH keys from microsandbox\n",
 		strings.Join(names, " "), root, strings.Join(keychainItems(), " "))
+	if self != "" && !brew {
+		fmt.Printf("  %s\n", self)
+	}
 	if !yes {
 		fmt.Print("type yes to go on: ")
 		line, _ := bufio.NewReader(os.Stdin).ReadString('\n')
@@ -266,7 +253,28 @@ func uninstall(args []string) {
 		fail("%v", err)
 	}
 	fmt.Println("removed", root, "and the Keychain items")
-	fmt.Println("to finish: brew uninstall mono-jig (and microsandbox, if nothing else uses it)")
+	switch {
+	case brew:
+		fmt.Println("to finish: brew uninstall mono-jig (and microsandbox, if nothing else uses it)")
+	case self != "":
+		if err := os.Remove(self); err != nil {
+			fail("%v", err)
+		}
+		fmt.Println("removed", self)
+	}
+}
+
+// selfPath is this executable, with links resolved, and whether Homebrew
+// installed it ("" if it can't be found).
+func selfPath() (path string, brew bool) {
+	p, err := os.Executable()
+	if err != nil {
+		return "", false
+	}
+	if r, err := filepath.EvalSymlinks(p); err == nil {
+		p = r
+	}
+	return p, strings.Contains(p, "/Cellar/")
 }
 
 // sandboxNames are the sandboxes with a state directory under root.

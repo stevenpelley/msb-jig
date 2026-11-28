@@ -11,7 +11,7 @@ import (
 
 // settings are what mono-jig login records, in <root>/settings.json:
 // which providers the broker serves, and as whom, each under its login
-// name (ProviderCLI), the image mono-jig image build made, and the extra
+// name (ProviderCLI), the image mono-jig build made, and the extra
 // CAs' files. No secrets: tokens stay in the Keychain or in the tools' own
 // logins on the Mac. The JIG_* variables override them
 // (ProviderCLI.broker, extraCAFiles), for the checks.
@@ -19,7 +19,7 @@ type Settings struct {
 	// Image is the image last built for new sandboxes (image.go).
 	Image string
 	// ImageFile and ImageContext are the user's own Dockerfile and its
-	// build context, absolute (image build -f), which every new sandbox's
+	// build context, absolute (build -f), which every new sandbox's
 	// build puts on the base image; empty: the base image alone.
 	ImageFile, ImageContext string
 	// CAs are the extra CA certificates' files (ca.go).

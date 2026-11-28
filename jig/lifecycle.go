@@ -36,64 +36,107 @@ func env(k, def string) string {
 	return def
 }
 
-// sandboxCmd runs the commands that take a sandbox name. The supervisor
-// (run) is in supervisor.go; the editor's access (ssh-config, code) in
-// remote.go.
-func sandboxCmd(cmd, name string, args []string) {
+// sandboxState checks a sandbox's name and returns its state directory.
+// It also points the SDK at msb, which every sandbox command needs.
+func sandboxState(name string) string {
 	if !nameRE.MatchString(name) {
 		fail("name must be lowercase letters, digits and dashes, at most 31 characters")
 	}
-	state := filepath.Join(stateRoot(), name)
 	setRuntimePaths()
-	switch cmd {
-	case "up":
-		up(name, state)
-	case "run":
-		if pid := pidOf(state); pid == 0 {
-			newSandboxImage(name)
-		}
-		run(name, state)
-	case "down":
-		down(state)
-	case "shell":
-		shell(name)
-	case "ssh-config":
-		fmt.Print(sshConfig(name, state))
-	case "editor":
-		code(name, state, args)
-	case "agent":
-		agentCLI(name, state, args)
-	case "open":
-		open(name, state, args)
-	case "stop":
-		stop(name, state)
-	case "denied":
-		denied(state)
-	case "rm":
-		down(state)
-		if err := track.Backend.Remove(context.Background(), name); err != nil {
-			fail("remove: %v", err)
-		}
-		// The next sandbox of this name has a new host key, and gets a new
-		// key of ours, authorized again (sshConfig).
-		_ = os.Remove(filepath.Join(state, "known_hosts"))
-		_ = os.Remove(sshFilesFor(state).sshdKnown)
-		_ = os.Remove(sshFilesFor(state).msbConfig)
-		if err := pruneAuthorizedKeys(func(c string) bool { return c == sshHost(name) }); err != nil {
-			fail("%v", err)
-		}
-		_ = os.Remove(filepath.Join(state, "ssh_key"))
-		_ = os.Remove(filepath.Join(state, "ssh_key.pub"))
-		// The next sandbox of this name mounts only what its --mount says.
-		_ = os.Remove(mountsFile(state))
-		// And its broker's mode, by --broker or the default.
-		_ = os.Remove(brokerModeFile(state))
-		_ = os.Remove(proxyPortFile(state))
-		// And the broker's CA, which only that sandbox trusted: the next
-		// one gets its own, constrained to the names its mode needs.
-		_ = os.RemoveAll(filepath.Join(state, "broker-ca"))
-		fmt.Println("removed", name, "(state kept in", state+")")
+	return filepath.Join(stateRoot(), name)
+}
+
+// exists reports whether microsandbox has the sandbox.
+func exists(name string) bool {
+	ok, err := track.Backend.Exists(context.Background(), name)
+	if err != nil {
+		fail("%v", err)
 	}
+	return ok
+}
+
+// create records what's fixed when a sandbox is made (its mounts and the
+// broker's mode, which microsandbox can't change afterwards), then starts
+// it: the supervisor creates it, from an image built on the Mac first.
+func create(name string, specs []string) {
+	state := sandboxState(name)
+	ms := parseMounts(specs)
+	mode := env("JIG_BROKER_MODE", track.BrokerMode)
+	if mode != modeServer && mode != modeProxy {
+		fail("JIG_BROKER_MODE=%s: want server or proxy", mode)
+	}
+	if exists(name) {
+		fail("%s exists: mono-jig start %s, or mono-jig rm %s and create it again", name, name, name)
+	}
+	// What an earlier sandbox of this name left, which a new one mustn't
+	// inherit.
+	clearSandboxState(name, state)
+	if err := os.MkdirAll(state, 0o700); err != nil {
+		fail("%v", err)
+	}
+	writeMounts(state, ms)
+	writeBrokerMode(state, mode)
+	startSupervisor(name, state)
+}
+
+// start starts a sandbox that exists.
+func start(name, state string) {
+	if pid := pidOf(state); pid != 0 {
+		fmt.Printf("%s is already started (supervisor pid %d)\n", name, pid)
+		return
+	}
+	ensureStarted(name, state)
+}
+
+// ensureStarted starts the sandbox unless it's started; it doesn't
+// create one.
+func ensureStarted(name, state string) {
+	if pidOf(state) != 0 {
+		return
+	}
+	if !exists(name) {
+		fail("there's no sandbox %s: mono-jig create %s", name, name)
+	}
+	startSupervisor(name, state)
+}
+
+// rm removes the sandbox, and what its state directory holds for it
+// alone. The rest stays: its log, its denials and the exchange folder.
+func rm(name, state string, force bool) {
+	if pidOf(state) != 0 {
+		if !force {
+			fail("%s is started: mono-jig stop %s first, or rm -f", name, name)
+		}
+		down(state)
+	}
+	if err := track.Backend.Remove(context.Background(), name); err != nil {
+		fail("remove: %v", err)
+	}
+	clearSandboxState(name, state)
+	fmt.Println("removed", name, "(state kept in", state+")")
+}
+
+// clearSandboxState removes the files that belong to one sandbox of this
+// name, so the next one starts afresh.
+func clearSandboxState(name, state string) {
+	// The next sandbox of this name has a new host key, and gets a new
+	// key of ours, authorized again (sshConfig).
+	_ = os.Remove(filepath.Join(state, "known_hosts"))
+	_ = os.Remove(sshFilesFor(state).sshdKnown)
+	_ = os.Remove(sshFilesFor(state).msbConfig)
+	if err := pruneAuthorizedKeys(func(c string) bool { return c == sshHost(name) }); err != nil {
+		fail("%v", err)
+	}
+	_ = os.Remove(filepath.Join(state, "ssh_key"))
+	_ = os.Remove(filepath.Join(state, "ssh_key.pub"))
+	// The next sandbox of this name mounts only what its create says.
+	_ = os.Remove(mountsFile(state))
+	// And its broker's mode, by JIG_BROKER_MODE or the default.
+	_ = os.Remove(brokerModeFile(state))
+	_ = os.Remove(proxyPortFile(state))
+	// And the broker's CA, which only that sandbox trusted: the next
+	// one gets its own, constrained to the names its mode needs.
+	_ = os.RemoveAll(filepath.Join(state, "broker-ca"))
 }
 
 // setRuntimePaths points the SDK at a Homebrew install, which it doesn't
@@ -122,7 +165,7 @@ func setRuntimePaths() {
 	}
 }
 
-// --- up, down: the supervisor in the background ---
+// --- the supervisor in the background ---
 
 func pidOf(state string) int {
 	b, err := os.ReadFile(filepath.Join(state, "run.pid"))
@@ -136,11 +179,10 @@ func pidOf(state string) int {
 	return pid
 }
 
-func up(name, state string) {
-	if pid := pidOf(state); pid != 0 {
-		fmt.Printf("%s is already up (supervisor pid %d)\n", name, pid)
-		return
-	}
+// startSupervisor runs this executable again as the sandbox's
+// supervisor (supervisorEnv), in its own session, logging to run.log, and
+// waits until the sandbox is ready.
+func startSupervisor(name, state string) {
 	if err := os.MkdirAll(state, 0o700); err != nil {
 		fail("%v", err)
 	}
@@ -153,7 +195,8 @@ func up(name, state string) {
 	ready := filepath.Join(state, "ready")
 	_ = os.Remove(ready)
 	self, _ := os.Executable()
-	c := exec.Command(self, "run", name)
+	c := exec.Command(self)
+	c.Env = append(os.Environ(), supervisorEnv+"="+name)
 	c.Stdout, c.Stderr = lf, lf
 	c.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	if err := c.Start(); err != nil {
@@ -174,7 +217,7 @@ func up(name, state string) {
 			fail("not ready after 20 minutes; see %s", logPath)
 		case <-tick.C:
 			if _, err := os.Stat(ready); err == nil {
-				fmt.Printf("%s is up (supervisor pid %d)\n  shell:   mono-jig shell %[3]s\n  agent:   mono-jig %[4]s %[3]s\n  editor:  mono-jig %[5]s %[3]s\n  down:    mono-jig down %[3]s\n",
+				fmt.Printf("%s is started (supervisor pid %d)\n  shell:   mono-jig ssh %[3]s\n  agent:   mono-jig %[4]s %[3]s\n  editor:  mono-jig %[5]s %[3]s\n  stop:    mono-jig stop %[3]s\n",
 					name, c.Process.Pid, name, agentCmd(), track.Editor.Name())
 				return
 			}
@@ -199,7 +242,7 @@ func down(state string) {
 	_ = syscall.Kill(pid, syscall.SIGTERM)
 	for i := 0; i < 90; i++ {
 		if syscall.Kill(pid, 0) != nil {
-			fmt.Println("down")
+			fmt.Println("stopped")
 			return
 		}
 		time.Sleep(time.Second)
@@ -207,30 +250,57 @@ func down(state string) {
 	fail("the supervisor (pid %d) didn't stop in 90s", pid)
 }
 
-func shell(name string) {
+// stop stops the supervisor, and with it the sandbox.
+func stop(name, state string) {
+	if pidOf(state) == 0 {
+		fmt.Println(name, "isn't started")
+		return
+	}
+	down(state)
+}
+
+// sshCmd runs a login shell as the guest user, or cmd from the user's
+// home, starting the sandbox first if it's stopped.
+func sshCmd(name, state string, cmd []string) {
 	msb, err := exec.LookPath("msb")
 	if err != nil {
 		fail("msb not found")
 	}
-	fail("%v", syscall.Exec(msb, []string{"msb", "exec", "-t", "-u", guestUser, name, "--", "bash", "-l"}, os.Environ()))
+	ensureStarted(name, state)
+	fail("%v", syscall.Exec(msb, sshArgv(name, cmd, isTerminal(os.Stdin)), os.Environ()))
+}
+
+// sshArgv is the msb command line sshCmd runs: a tty for the shell, and
+// for a command when stdin is a terminal.
+func sshArgv(name string, cmd []string, tty bool) []string {
+	if len(cmd) == 0 {
+		return []string{"msb", "exec", "-t", "-u", guestUser, name, "--", "bash", "-l"}
+	}
+	argv := []string{"msb", "exec"}
+	if tty {
+		argv = append(argv, "-t")
+	}
+	return append(append(argv, "-u", guestUser, name, "--", "bash", "-lc", `cd && exec "$0" "$@"`), cmd...)
+}
+
+func isTerminal(f *os.File) bool {
+	fi, err := f.Stat()
+	return err == nil && fi.Mode()&os.ModeCharDevice != 0
 }
 
 // agentCLI runs the track's agent CLI in the sandbox with args, from the
 // guest user's home, in a login shell (for its PATH). It starts the
-// sandbox first, as open does, if it isn't up.
+// sandbox first if it's stopped.
 func agentCLI(name, state string, args []string) {
 	msb, err := exec.LookPath("msb")
 	if err != nil {
 		fail("msb not found")
 	}
-	if pidOf(state) == 0 {
-		up(name, state)
-	}
+	ensureStarted(name, state)
 	fail("%v", syscall.Exec(msb, agentArgv(name, args), os.Environ()))
 }
 
 // agentArgv is the msb command line agentCLI runs.
 func agentArgv(name string, args []string) []string {
-	return append([]string{"msb", "exec", "-t", "-u", guestUser, name, "--",
-		"bash", "-lc", `cd && exec "$0" "$@"`, agentCmd()}, args...)
+	return sshArgv(name, append([]string{agentCmd()}, args...), true)
 }

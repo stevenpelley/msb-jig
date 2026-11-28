@@ -73,8 +73,8 @@ settings (`docs/tracks.md`).
 Requirements: macOS, Go 1.26, [microsandbox](https://github.com/superradcompany/microsandbox)
 (`msb` 0.8.2, the Go SDK's version: SDK 0.7.16 refused runtime 0.8.2), VS Code's `code` command, and
 Docker or Podman: every new sandbox starts from an image built on the Mac,
-from the engine's cache when nothing changed (`open --plain-image` instead
-installs everything in the guest, which takes minutes). Optional: `glab`,
+from the engine's cache when nothing changed (`JIG_PLAIN_IMAGE=1 mono-jig
+create` instead installs everything in the guest, which takes minutes). Optional: `glab`,
 `gh`, `claude`, the AWS CLI and `uv` for the providers you log in to.
 
 Build your track's command (above) as `mono-jig`, then:
@@ -82,10 +82,17 @@ Build your track's command (above) as `mono-jig`, then:
 ```sh
 mono-jig setup                 # check the Mac, the editor profile, the base image
 mono-jig login all             # choose providers; tokens stay in your logins or the Keychain
-mono-jig open <name> [dir]     # create (building its image first) or start a sandbox, open VS Code on it
+mono-jig create <name>         # build its image, create the sandbox and start it
+mono-jig vscode <name> [dir]   # VS Code on it (or claude <name>, ssh <name>), starting it if stopped
 mono-jig stop <name>
-mono-jig                       # no arguments: every command (image build, ca, cp, allowlist, rm, …)
+mono-jig                       # no arguments: every command (build, rm, denied, ca, …)
 ```
+
+mono-jig supplements microsandbox's `msb` rather than wrapping it. Where
+`msb` has a command of the same name (`create`, `start`, `stop`, `rm`,
+`ssh`), mono-jig's does the same and also runs the sandbox's broker. For
+everything else, such as listing or inspecting sandboxes, use `msb`
+(`msb ls`, `msb inspect <name>`).
 
 State lives in `~/.mono-jig`: settings, your allowlist layer
 (`allowlist.yaml`) and one directory per sandbox.

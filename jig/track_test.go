@@ -17,8 +17,9 @@ func TestCheckToolCommands(t *testing.T) {
 		{"", "vscode", false},
 		{"claude", "", false},
 		{"kiro", "kiro", false},
-		{"shell", "vscode", false},
-		{"claude", "open", false},
+		{"ssh", "vscode", false},
+		{"claude", "build", false},
+		{"claude", "self", false},
 		{"agent", "vscode", false},
 	} {
 		if err := checkToolCommands(c.agent, c.editor); (err == nil) != c.ok {
@@ -34,5 +35,18 @@ func TestAgentArgv(t *testing.T) {
 	want := []string{"msb", "exec", "-t", "-u", "agent", "box", "--", "bash", "-lc", `cd && exec "$0" "$@"`, "claude", "--resume", "a b"}
 	if !slices.Equal(got, want) {
 		t.Errorf("agentArgv = %q, want %q", got, want)
+	}
+}
+
+func TestSSHArgv(t *testing.T) {
+	if got, want := sshArgv("box", nil, false), []string{"msb", "exec", "-t", "-u", "agent", "box", "--", "bash", "-l"}; !slices.Equal(got, want) {
+		t.Errorf("shell = %q, want %q", got, want)
+	}
+	cmd := []string{"ls", "-l"}
+	if got, want := sshArgv("box", cmd, false), []string{"msb", "exec", "-u", "agent", "box", "--", "bash", "-lc", `cd && exec "$0" "$@"`, "ls", "-l"}; !slices.Equal(got, want) {
+		t.Errorf("no tty = %q, want %q", got, want)
+	}
+	if got := sshArgv("box", cmd, true); got[2] != "-t" {
+		t.Errorf("tty = %q", got)
 	}
 }

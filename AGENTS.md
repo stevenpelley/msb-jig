@@ -108,8 +108,8 @@ Keep these parties separate when reasoning about enforcement:
 ## Current state
 
 As of 2026-11-22. **microsandbox is the VM layer** (user's decision;
-`docs/microsandbox.md`, `docs/prototype-plan.md` step 6b). `mono-jig up <name>`
-starts one supervisor process per sandbox. It owns the VM through
+`docs/microsandbox.md`, `docs/prototype-plan.md` step 6b). `mono-jig start <name>`
+(or `create`) starts one supervisor process per sandbox. It owns the VM through
 microsandbox's Go SDK and serves the broker on a Unix socket, which the
 guest reaches over vsock. If the process dies, so does the VM. The egress
 policy is microsandbox's, compiled from the allowlist's layers.
@@ -167,7 +167,7 @@ The agent runs on the Mac itself and asks before running commands.
 | `broker/<provider>/routes.go` | `Routes` (`gitlab`; `github` has `ServerRoutes` and `ProxyRoutes`, one set of tables per mode, from shared route lists; in `anthropic.go` and `aws.go` for the two without per-request rules): the provider's upstreams with their credentials, then its route table (every request it serves, the check it runs, where it goes); anything unmatched is denied, except in proxy mode, where GitHub and GitLab forward unmatched reads without the credential (their last route, `anonymous.read`). The checks are beside it (`checks.go`, `mcp.go`, `graphql.go`); tests run through `providers.Build` |
 | `broker/` | The core: `broker.go` (routes, matching, decision log), `policy.go` (the shared rules: agent branches; no title tag since 2026-11-24), `upstream.go` (credential injection, header rewriting), `request.go` (reading requests as the provider does: no dot segments, no case-variant JSON keys, no URL parameters beside a checked body), `server.go` (routing by host, SNI check), `listen.go` (TLS, Unix socket, token commands), `connect.go` (proxy mode's front end: microsandbox's CONNECT proxy; terminates brokered SNI, splices the rest, refuses TLS without SNI), `ca.go` (the name-constrained CA). `gitproto/` parses pushes, `mcp/` JSON-RPC, `brokertest/` the shared test fixtures |
 | `allowlist/` | The egress allowlist: groups (`lists/sbx-balanced.yaml`, copied from sbx's balanced policy, and `lists/groups.yaml`, ours and the providers'), the base layer, user and org layers; a provider's hosts drop out when the broker serves it |
-| `jig/` | The CLI, as a library (`Track`: providers, agent, editor, backend, base image; `Main`; `Personal`). `setup`, `login`, `logout`, `open`, `stop`, `uninstall` for users (`login.go`; each provider's login, status, settings and broker provider in `login_<name>.go`, listed in `registry.go`; settings in `~/.mono-jig/settings.json`, by provider, tokens in the Keychain, extra hosts in `~/.mono-jig/allowlist.yaml`); beneath them `up\|run\|down\|shell\|code\|ssh-config\|rm <name>` (`lifecycle.go`, `supervisor.go`: broker plus VM (`brokerhost.go` the broker, `spec.go` the sandbox from the config, `provision.go` the guest, through `sandbox.Backend`); `guestconfig.go`: the guest's settings, from the providers and the agent; `track.go`: the agent and editor in use; `remote.go`: SSH and the editor; `sshd.go`: the guest's OpenSSH sshd, for an editor that needs it (Kiro)); `ca.go`: `ca`, extra CA certificates (a TLS-inspecting proxy's root) for the image build and every start; `image.go`: every new sandbox's image, built on the Mac first (Docker or Podman, from their cache when unchanged, then `msb load` unless cached; `--plain-image` skips it), `image build` ahead of time and your own Dockerfile on the base (recorded for later builds, tagged by image ID); `mounts.go`: the exchange folder, `--mount` at create (read-only unless `:rw`), `cp`; `brokermode.go`: `--broker server\|proxy` at create, the proxy's port and password; `allowlist` prints the compiled list; `ssh-setup` for sshd-based sandboxes |
+| `jig/` | The CLI, as a library (`Track`: providers, agent, editor, backend, base image; `Main`; `Personal`). `main.go`: the commands and the usage, which lists every one (2026-11-28: `create`, `start`, the agent's and the editor's commands, `ssh`, `stop`, `rm`; `setup`, `login`, `logout`, `build`; `denied`, `allowlist`; `ca`, `ssh-config`, `self uninstall`; then what's left to msb). `setup`, `login`, `logout`, `self uninstall` in `login.go` (each provider's login, status, settings and broker provider in `login_<name>.go`, listed in `registry.go`; settings in `~/.mono-jig/settings.json`, by provider, tokens in the Keychain, extra hosts in `~/.mono-jig/allowlist.yaml`); the sandbox commands in `lifecycle.go` (`supervisor.go`: broker plus VM, this executable again with `JIG_SUPERVISOR=<name>`; `brokerhost.go` the broker, `spec.go` the sandbox from the config, `provision.go` the guest, through `sandbox.Backend`; `guestconfig.go`: the guest's settings, from the providers and the agent; `track.go`: the agent and editor in use; `remote.go`: SSH and the editor; `sshd.go`: the guest's OpenSSH sshd, for an editor that needs it (Kiro)); `ca.go`: `ca`, extra CA certificates (a TLS-inspecting proxy's root) for the image build and every start; `image.go`: every new sandbox's image, built on the Mac first (Docker or Podman, from their cache when unchanged, then `msb load` unless cached; `JIG_PLAIN_IMAGE=1` skips it), `build` ahead of time and your own Dockerfile on the base (recorded for later builds, tagged by image ID); `mounts.go`: the exchange folder, `create -v <host>:<guest>:ro\|rw` (msb's syntax, all three parts required); `brokermode.go`: the mode at create (`Track.BrokerMode`, `JIG_BROKER_MODE`), the proxy's port and password; `allowlist` prints the compiled list |
 | `cmd/mono-jig-sbx/` | The broker for an sbx sandbox: on the Mac's loopback, plain HTTP, behind a session token |
 | `sandbox/` | The VM runtime (`Backend`: open from a `Spec`, exists, remove; `Guest`: files, run, jobs, stop) and `Microsandbox`, the only place the CLI's sandboxes touch the microsandbox SDK |
 | `agent/` | The coding agent (`Agent`): its provision component, its guest settings and instructions file, its editor extensions. `ClaudeCode` (`70-claude.sh`); `KiroCLI` (`70-kiro.sh`, a pinned kiro-cli; steering, permissions and settings files; 2026-11-24) |
@@ -177,7 +177,7 @@ The agent runs on the Mac itself and asks before running commands.
 | `oauth/` | The harness as an OAuth client of a hosted MCP server (2026-11-24): discovery (RFC 9728, RFC 8414), registration of a public client (RFC 7591), sign-in with PKCE and a loopback redirect, and `Source`, the broker's refreshing access token; `jig.OAuthMCP` (`jig/login_oauth.go`) is its login, `jig/mcplist.go` lists a server's tools at login |
 | `editor/` | The editor on the Mac (`Editor`: find, configure, install, open) and how it reaches a sandbox: per-sandbox SSH keys and config; `VSCode`, with the harness's VS Code settings; `Kiro` (Kiro IDE 1.5's Remote SSH, 2026-11-25) |
 | `guest/` | What goes into the VM: `provision/` (`provision.sh`, one script for the image and the microsandbox guest, sources `lib.sh` and `components/NN-<name>.sh` in order; the `apply` component writes `guest.Config`, `ca` trusts the extra CAs), `config.go` (`guest.Config`: the environment, git settings, files and packages the supervisor builds per sandbox), `instructions/` (the agent's instructions, a section per provider), `install-keys.sh`, the image's `Dockerfile`, `mcpcli/` (the agent's MCP client, copied from the `sbx-mcp-client` skill) |
-| `checks/` | `bridges.sh` (run in the editor's terminal), `vscode-e2e/` (VS Code over Remote-SSH, unattended, running `bridges.sh` through a probe extension), `step1-docker.sh` (step 1 against a container) |
+| `checks/` | `bridges.sh` (run in the editor's terminal), `vscode-e2e/` (VS Code over Remote-SSH, unattended, running `bridges.sh` through a probe extension), `step1-docker.sh` (step 1 against a container, with `ssh-setup/` writing the keys and config) |
 
 ## Working rules
 
@@ -191,6 +191,18 @@ The agent runs on the Mac itself and asks before running commands.
   `json.Unmarshal` into a struct (Go matches keys ignoring case); don't
   read a body while the URL's parameters could stand in for it; on
   GitLab, refuse text that holds quick actions (`/merge`, `/approve`).
+- The CLI supplements msb, it doesn't wrap it (user, 2026-11-28). A
+  command named like one of msb's means what msb's means, plus the
+  broker: `create` makes and starts a sandbox, `start` starts one that
+  exists, `ssh` is a shell, `rm` refuses a started sandbox without
+  `-f`, `create -v` takes msb's `<host>:<guest>:<mode>` with no defaults.
+  Don't add a command or flag msb already has under another name or
+  meaning, or one that only repeats msb (listing, inspecting, logs,
+  `exec`, `cp`): point to msb in the usage instead. Every command is in
+  the usage; nothing is hidden (the supervisor is started through
+  `JIG_SUPERVISOR`, not a command). Choices that belong to the track
+  aren't flags (`Track.BrokerMode`; `JIG_BROKER_MODE` and
+  `JIG_PLAIN_IMAGE` for experiments, listed in the usage).
 - Research notes carry the date and tool versions they were checked
   against. Mark anything not tested or not confirmed in a source as
   *unverified*, and list sources at the end.

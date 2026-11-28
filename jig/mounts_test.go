@@ -8,16 +8,11 @@ import (
 
 func TestParseMount(t *testing.T) {
 	dir := t.TempDir()
-	base := filepath.Base(dir)
 	ok := []struct {
 		spec string
 		want Mount
 	}{
-		// Read-only unless :rw.
-		{dir, Mount{Host: dir, Guest: "/mnt/" + base, ReadOnly: true}},
-		{dir + ":ro", Mount{Host: dir, Guest: "/mnt/" + base, ReadOnly: true}},
-		{dir + ":rw", Mount{Host: dir, Guest: "/mnt/" + base}},
-		{dir + ":/mnt/src", Mount{Host: dir, Guest: "/mnt/src", ReadOnly: true}},
+		{dir + ":/mnt/src:ro", Mount{Host: dir, Guest: "/mnt/src", ReadOnly: true}},
 		{dir + ":/mnt/src:rw", Mount{Host: dir, Guest: "/mnt/src"}},
 		{dir + ":/mnt/a/../src:ro", Mount{Host: dir, Guest: "/mnt/src", ReadOnly: true}},
 	}
@@ -29,13 +24,20 @@ func TestParseMount(t *testing.T) {
 	}
 	for _, spec := range []string{
 		"",
-		dir + "/missing",
-		dir + ":/home/agent/src", // not under /mnt
-		dir + ":/mnt",
-		dir + ":/mnt/host", // the exchange folder
-		dir + ":/mnt/../etc",
-		dir + ":relative",
-		dir + ":/mnt/a:/mnt/b",
+		dir,                 // no guest path or mode: both required, as msb reads them
+		dir + ":/mnt/src",   // no mode
+		dir + ":ro",         // no guest path
+		dir + ":/mnt/src:x", // not ro or rw
+		dir + ":/mnt/src:ro,noexec",
+		"data:/mnt/data:ro", // a named volume, to msb
+		"~/src:/mnt/src:ro", // the same, unless the shell expanded it
+		dir + "/missing:/mnt/m:ro",
+		dir + ":/home/agent/src:ro", // not under /mnt
+		dir + ":/mnt:ro",
+		dir + ":/mnt/host:ro", // the exchange folder
+		dir + ":/mnt/../etc:ro",
+		dir + ":relative:ro",
+		dir + ":/mnt/a:/mnt/b:ro",
 	} {
 		if got, err := parseMount(spec); err == nil {
 			t.Errorf("parseMount(%q) = %+v, want an error", spec, got)
@@ -43,10 +45,31 @@ func TestParseMount(t *testing.T) {
 	}
 }
 
-func TestSplitMounts(t *testing.T) {
-	rest, specs := splitMounts([]string{"box", "--mount", "a", "src", "--mount=b:ro"})
-	if !reflect.DeepEqual(rest, []string{"box", "src"}) || !reflect.DeepEqual(specs, []string{"a", "b:ro"}) {
-		t.Errorf("got %q %q", rest, specs)
+func TestCreateArgs(t *testing.T) {
+	name, specs, err := createArgs([]string{"-v", "a", "box", "--volume", "b", "--volume=c"})
+	if err != nil || name != "box" || !reflect.DeepEqual(specs, []string{"a", "b", "c"}) {
+		t.Errorf("got %q %q %v", name, specs, err)
+	}
+	for _, args := range [][]string{nil, {"-v"}, {"box", "-v"}, {"box", "other"}, {"box", "--mount", "a"}} {
+		if _, _, err := createArgs(args); err == nil {
+			t.Errorf("createArgs(%q) accepted", args)
+		}
+	}
+}
+
+func TestRmArgs(t *testing.T) {
+	for _, c := range []struct {
+		args  []string
+		force bool
+	}{{[]string{"box"}, false}, {[]string{"-f", "box"}, true}, {[]string{"box", "--force"}, true}} {
+		if name, force, err := rmArgs(c.args); err != nil || name != "box" || force != c.force {
+			t.Errorf("rmArgs(%q) = %q %v %v", c.args, name, force, err)
+		}
+	}
+	for _, args := range [][]string{nil, {"-f"}, {"a", "b"}, {"-x", "box"}} {
+		if _, _, err := rmArgs(args); err == nil {
+			t.Errorf("rmArgs(%q) accepted", args)
+		}
 	}
 }
 
@@ -59,17 +82,13 @@ func TestLoadMounts(t *testing.T) {
 	}
 }
 
-func TestSplitBrokerMode(t *testing.T) {
-	for _, args := range [][]string{{"box", "--broker", "proxy", "src"}, {"--broker=proxy", "box", "src"}} {
-		rest, mode := splitBrokerMode(args)
-		if !reflect.DeepEqual(rest, []string{"box", "src"}) || mode != "proxy" {
-			t.Errorf("%q: got %q %q", args, rest, mode)
-		}
-	}
-	if _, mode := splitBrokerMode([]string{"box"}); mode != "" {
-		t.Errorf("no flag: %q", mode)
-	}
-	if got := loadBrokerMode(t.TempDir()); got != modeServer {
+func TestLoadBrokerMode(t *testing.T) {
+	state := t.TempDir()
+	if got := loadBrokerMode(state); got != modeServer {
 		t.Errorf("default mode %q", got)
+	}
+	writeBrokerMode(state, modeProxy)
+	if got := loadBrokerMode(state); got != modeProxy {
+		t.Errorf("written proxy, read %q", got)
 	}
 }

@@ -20,10 +20,10 @@ import (
 )
 
 // Sandbox images. Every new sandbox starts from an image built on the
-// Mac (newSandboxImage): up, open and run build it first, with Docker or
-// Podman, which answer from their cache when nothing changed, so the guest
-// never installs mono-jig's parts itself. mono-jig image build builds the
-// same ahead of time:
+// Mac (newSandboxImage): create builds it first, with Docker or Podman,
+// which answer from their cache when nothing changed, so the guest never
+// installs mono-jig's parts itself. mono-jig build builds the same ahead
+// of time:
 //
 //   - the base image, localhost/mono-jig-base:<hash>, from the
 //     Dockerfile and provision/ embedded in this binary
@@ -38,11 +38,11 @@ import (
 // it's there already, and records it in settings.json, with your
 // Dockerfile, which later builds use too. A first start runs only what
 // the image doesn't have (firstComponents): the broker's CA and settings.
-// --plain-image (or JIG_IMAGE) creates a sandbox from another image
+// JIG_PLAIN_IMAGE=1 (or JIG_IMAGE) creates a sandbox from another image
 // instead, such as plain Ubuntu (baseImage), with everything installed at
 // its first start, for a Mac without Docker or Podman. A sandbox keeps the
-// image it was created from: mono-jig rm, then open, to move one to a new
-// image.
+// image it was created from: mono-jig rm, then create, to move one to a
+// new image.
 
 // baseImage is the image the base image builds on, and the plain image
 // sandboxes start from without one: JIG_BASE_IMAGE, default the track's. Its
@@ -50,7 +50,7 @@ import (
 func baseImage() string { return env("JIG_BASE_IMAGE", track.BaseImage) }
 
 // sandboxImage is the image new sandboxes start from: JIG_IMAGE, else the
-// last image mono-jig image build made, else plain Ubuntu. local is
+// last image mono-jig build made, else plain Ubuntu. local is
 // true for a built image, which msb can't pull.
 func sandboxImage() (ref string, local bool) {
 	if v := os.Getenv("JIG_IMAGE"); v != "" {
@@ -62,74 +62,11 @@ func sandboxImage() (ref string, local bool) {
 	return baseImage(), false
 }
 
-const starterDockerfile = `# Your sandbox image, on top of mono-jig's base: Ubuntu with the agent
-# user, git, gh, glab, Docker and Claude Code. Build it with
-#   mono-jig image build -f <this file>
-# which builds the base first and passes it in. Hosts your tools need at
-# run time go in ~/.mono-jig/allowlist.yaml.
-ARG JIG_BASE
-FROM ${JIG_BASE}
-RUN apt-get update \
- && apt-get install -y --no-install-recommends \
-      ripgrep \
- && rm -rf /var/lib/apt/lists/*
-`
-
-func imageCmd(args []string) {
-	if len(args) == 0 {
-		usage()
-	}
-	switch args[0] {
-	case "init":
-		imageInit(args[1:])
-	case "build":
-		imageBuild(args[1:])
-	case "show":
-		ref, _ := sandboxImage()
-		fmt.Println("last built:", ref)
-		if s := LoadSettings(); s.ImageFile != "" {
-			fmt.Printf("new sandboxes build the base image, then %s (context %s)\n", s.ImageFile, s.ImageContext)
-		} else {
-			fmt.Println("new sandboxes build the base image alone")
-		}
-	case "reset":
-		s := LoadSettings()
-		s.ImageFile, s.ImageContext = "", ""
-		SaveSettings(s)
-		fmt.Println("new sandboxes build the base image alone (your Dockerfile is no longer used)")
-	default:
-		usage()
-	}
-}
-
-// imageInit writes a starter Dockerfile.
-func imageInit(args []string) {
-	path := "Dockerfile"
-	if len(args) == 1 {
-		path = args[0]
-	} else if len(args) > 1 {
-		usage()
-	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		fail("%v", err)
-	}
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
-	if errors.Is(err, os.ErrExist) {
-		fail("%s exists; not overwriting it", path)
-	} else if err != nil {
-		fail("%v", err)
-	}
-	if _, err := f.WriteString(starterDockerfile); err != nil {
-		fail("%v", err)
-	}
-	if err := f.Close(); err != nil {
-		fail("%v", err)
-	}
-	fmt.Printf("wrote %s; add your tools, then: mono-jig image build -f %s\n", path, path)
-}
-
-func imageBuild(args []string) {
-	fs := flag.NewFlagSet("image build", flag.ExitOnError)
+// build builds the image new sandboxes start from, and records your
+// Dockerfile (or none) for the builds at create.
+func build(args []string) {
+	fs := flag.NewFlagSet("build", flag.ExitOnError)
+	fs.Usage = usage
 	file := fs.String("f", "", "your Dockerfile, FROM $JIG_BASE (default: the base image alone)")
 	engine := fs.String("engine", "", "docker or podman (default: whichever is installed, docker first)")
 	_ = fs.Parse(args)
@@ -157,23 +94,7 @@ func imageBuild(args []string) {
 	}
 	SaveSettings(s)
 	tag := buildImage(e, s.ImageFile, s.ImageContext)
-	fmt.Printf("new sandboxes start from %s, built again (from the cache) when created\n(an existing sandbox keeps its image: mono-jig rm <name>, then open, to move it)\n", tag)
-}
-
-// plainImage: --plain-image, create the sandbox from JIG_IMAGE or the plain
-// base image (baseImage) instead of building one on the Mac.
-var plainImage bool
-
-// splitPlainImage takes --plain-image out of args.
-func splitPlainImage(args []string) (rest []string, plain bool) {
-	for _, a := range args {
-		if a == "--plain-image" {
-			plain = true
-		} else {
-			rest = append(rest, a)
-		}
-	}
-	return rest, plain
+	fmt.Printf("new sandboxes start from %s, built again (from the cache) when created\n(an existing sandbox keeps its image: mono-jig rm <name>, then create, to move it)\n", tag)
 }
 
 // newSandboxImage readies the image for a sandbox about to be created, and
@@ -185,15 +106,12 @@ func newSandboxImage(name string) {
 		fail("%v", err)
 	}
 	if ok {
-		if plainImage {
-			fail("--plain-image is for a new sandbox; %s exists (mono-jig rm %s first)", name, name)
-		}
 		return
 	}
-	if plainImage {
+	if os.Getenv("JIG_PLAIN_IMAGE") == "1" {
 		ref := env("JIG_IMAGE", baseImage())
 		os.Setenv("JIG_IMAGE", ref)
-		fmt.Printf("--plain-image: %s from %s; its first start installs everything (minutes)\n", name, ref)
+		fmt.Printf("JIG_PLAIN_IMAGE=1: %s from %s; its first start installs everything (minutes)\n", name, ref)
 		return
 	}
 	if v := os.Getenv("JIG_IMAGE"); v != "" {
@@ -203,15 +121,19 @@ func newSandboxImage(name string) {
 	e := imageEngine("")
 	if e == "" {
 		fail("a new sandbox's image is built on the Mac with Docker or Podman, and neither is installed:\n" +
-			"install one, or pass --plain-image to install everything in the guest at its first start (minutes)")
+			"install one, or set JIG_PLAIN_IMAGE=1 to install everything in the guest at its first start (minutes)")
 	}
 	s := LoadSettings()
 	if s.ImageFile != "" {
 		if _, err := os.Stat(s.ImageFile); err != nil {
-			fail("your Dockerfile %s: %v\n(mono-jig image reset to build the base image alone)", s.ImageFile, err)
+			fail("your Dockerfile %s: %v\n(mono-jig build, without -f, to build the base image alone)", s.ImageFile, err)
 		}
 	}
-	fmt.Printf("building %s's image with %s (from the cache when nothing changed)\n", name, e)
+	what := "the base image"
+	if s.ImageFile != "" {
+		what = "the base image and " + s.ImageFile
+	}
+	fmt.Printf("building %s's image with %s: %s (from the cache when nothing changed)\n", name, e, what)
 	os.Setenv("JIG_IMAGE", buildImage(e, s.ImageFile, s.ImageContext))
 }
 
@@ -355,7 +277,7 @@ func buildBase(engine string) string {
 // builder on the docker-container driver (Docker Desktop can make it the
 // default) the result otherwise stays in the build cache, and docker save
 // can't find it (seen 2026-11-25). With the docker driver --load is the
-// default anyway. A Dockerfile FROM the base image (image build -f) still
+// default anyway. A Dockerfile FROM the base image (build -f) still
 // can't see it on the docker-container driver, which reads only registries.
 func buildVerb(engine string) []string {
 	if engine == "docker" {

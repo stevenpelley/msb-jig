@@ -47,8 +47,9 @@ type Track struct {
 	// after the providers': environment (package mirrors, say), packages,
 	// files, and a section of the agent's instructions.
 	Guest guest.Config
-	// BrokerMode is the broker's mode for a sandbox created without
-	// --broker: "server" or "proxy" (jig/brokermode.go). Empty: server.
+	// BrokerMode is the broker's mode for a new sandbox, unless
+	// JIG_BROKER_MODE says otherwise: "server" or "proxy"
+	// (jig/brokermode.go). Empty: server.
 	BrokerMode string
 }
 
