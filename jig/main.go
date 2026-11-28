@@ -4,42 +4,18 @@
 // (docs/library-split.md).
 // A sandbox is a microsandbox VM owned by a supervisor process that also
 // serves the broker (docs/microsandbox.md); the commands taking a <name>
-// manage one.
-//
-//	mono-jig setup              check the Mac, write the editor profile, build the base image
-//	mono-jig login [provider]   record the track's providers for the broker (login.go); alone: what's recorded
-//	mono-jig logout [provider]  forget them, and remove their Keychain items
-//	mono-jig image build        your own sandbox image, from a Dockerfile (image.go)
-//	mono-jig open <name> [dir]  start the sandbox if needed (creating it the first time), then the editor on dir
-//	mono-jig stop <name>        stop it
-//	mono-jig cp <src> <dst>     copy files between the Mac and a sandbox (mounts.go: host folders)
-//	mono-jig uninstall          remove every sandbox, the state directory and the Keychain items
-//
-// And beneath them, for the checks:
-//
-//	mono-jig up <name>          start the supervisor in the background (creates and provisions the sandbox once)
-//	mono-jig run <name>         the supervisor, in the foreground
-//	mono-jig down <name>        stop the supervisor, and with it the sandbox
-//	mono-jig shell <name>       a login shell as the agent user
-//	mono-jig <agent> <name> ... the agent's CLI (Agent.Command: claude, kiro-cli) in the sandbox, from ~
-//	mono-jig <editor> <name> [dir]  the editor (Editor.Name: vscode, kiro) on the sandbox, with the harness's Settings
-//	mono-jig ssh-config <name>  write and print the sandbox's OpenSSH Host block
-//	mono-jig denied <name>      the hosts its egress policy refused (denials.jsonl)
-//	mono-jig rm <name>          down, then remove the sandbox and its disks (the state directory stays)
-//	mono-jig allowlist          the hosts a new sandbox may reach
-//	mono-jig ssh-setup          SSH keys and config for an sshd-based sandbox (sbx, checks/step1-docker.sh)
+// manage one. The commands are a supplement to msb, not a replacement:
+// where msb has a command of the same name (create, start, stop, rm, ssh),
+// ours means the same, plus the broker, and everything msb already does
+// (ls, inspect, logs, exec, cp) is left to it. usage lists them.
 package jig
 
 import (
-	"context"
-	"flag"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/stevenpelley/msb-jig/allowlist"
-	"github.com/stevenpelley/msb-jig/editor"
 )
 
 // providerUsage are the providers' login lines.
@@ -60,68 +36,99 @@ func providerUsage() string {
 }
 
 func usage() {
+	ag, ed := agentCmd(), track.Editor.Name()
 	fmt.Fprintln(os.Stderr, `usage: mono-jig <command> ...
 
+Sandboxes. Make one with create; the commands that use it start it if
+it's stopped. Where msb has a command of the same name, ours does the
+same, and also runs the sandbox's broker:
+  create <name> [-v <host>:<guest>:ro|rw]...
+                          create the sandbox and start it. -v mounts a Mac folder
+                          as msb create -v does, all three parts required: <host>
+                          starts with / or ., <guest> is under /mnt. Every sandbox
+                          also has ~/.mono-jig/<name>/share at /mnt/host (and ~/host)
+  start <name>            start it and its broker, in the background
+                          (log: ~/.mono-jig/<name>/run.log)
+  `+pad(ag+" <name> [arg...]", 24)+`run `+ag+` in the sandbox, from the agent user's home
+  `+pad(ed+" <name> [dir]", 24)+`open `+ed+` on the sandbox, on dir (relative to the agent
+                          user's home; default the home)
+  ssh <name> [cmd...]     a login shell as the agent user, or cmd from its home
+  stop <name>             stop the sandbox and its broker
+  rm [-f] <name>          remove the sandbox and its disks; -f stops it first
+
+Setting up:
   setup                   check what's needed, set up the editor profile, build the base image
   login                   show what the broker uses for each provider (`+cliProviderNames()+`)
   login all               ask about each provider in turn and log in with the defaults
 `+providerUsage()+`  logout [<provider>...]  forget them (all, if none named)
+  build [-f <Dockerfile> [<context>]] [-engine docker|podman]
+                          build the image new sandboxes start from: the base (git,
+                          Docker, `+ag+`...), then your Dockerfile on it, which starts
+                          ARG JIG_BASE and FROM ${JIG_BASE}. The Dockerfile is
+                          recorded: each create builds it again (from the cache).
+                          Without -f, the base alone. A sandbox keeps the image it
+                          was created from
+
+When something's wrong:
+  denied <name>           hosts the sandbox was refused, most recent first
+  allowlist               the hosts a new sandbox may reach (base, JIG_LAYERS,
+                          ~/.mono-jig/allowlist.yaml)
+
+Rarely:
   ca [<pem-file>...|--clear]
                           extra CA certificates the sandboxes trust, such as a
                           TLS-inspecting proxy's root; none given: show them
-  open <name> [dir]       start the sandbox (creating it the first time) and open the editor
-                          on dir (relative to the sandbox user's home; default: home)
-  open <name> [dir] --mount host[:guest][:rw] ...
-                          when creating it, also mount these Mac folders (guest path under
-                          /mnt; default /mnt/<folder name>). Every sandbox has
-                          ~/.mono-jig/<name>/share at /mnt/host (and ~/host)
-  open <name> [dir] --broker server|proxy
-                          when creating it, how the guest reaches the broker: server
-                          (broker.internal names) or proxy (microsandbox's outbound proxy;
-                          the providers' hosts by their own names); default `+track.BrokerMode+`
-  open <name> [dir] --plain-image
-                          when creating it, start from plain `+track.BaseImage+` and install
-                          everything in the guest (minutes), instead of building its image
-                          on the Mac with Docker or Podman, the default (cached; seconds
-                          when nothing changed)
-  cp <src> <dst>          copy between the Mac and a sandbox; a sandbox path is
-                          <name>:<path>, relative to the agent's home unless absolute
-  stop <name>             stop it
-  `+agentCmd()+` <name> [arg...]
-                          run `+agentCmd()+` in the sandbox, from the agent user's home
-                          (starting the sandbox, or creating it, first if needed)
-  denied <name>           hosts the sandbox was refused, most recent first
-  image init [file]       write a starter Dockerfile (default ./Dockerfile)
-  image build [-f Dockerfile [context]] [-engine docker|podman]
-                          build the base image (git, Docker, Claude Code...), then your
-                          Dockerfile on it, which every new sandbox's build then uses too
-                          (new sandboxes build it anyway; this does it ahead of time)
-  image show|reset        what new sandboxes build; back to the base image alone
-  uninstall [--yes]       remove every sandbox, its state and the Keychain items
+  ssh-config <name>       write and print its OpenSSH Host block, for ssh or
+                          another editor (`+ed+` writes it itself)
+  self uninstall [--yes]  remove mono-jig: every sandbox, its state, the Keychain
+                          items and this command
 
-sandboxes, beneath open and stop:
-  up <name>          start the sandbox and its broker in the background (creates it the first time;
-                     --mount, --broker and --plain-image as for open)
-  run <name>         the same, in the foreground
-  down <name>        stop it
-  shell <name>       a login shell as the agent user
-  `+track.Editor.Name()+` <name> [dir]  open the editor on it
-  ssh-config <name>  write and print its OpenSSH Host block
-  rm <name>          stop and remove it, with its disks
+Environment, read by create:
+  JIG_BROKER_MODE=server|proxy
+                          how the guest reaches the broker, default `+track.BrokerMode+`: server
+                          (broker.internal names) or proxy (microsandbox's outbound
+                          proxy; the providers' hosts by their own names)
+  JIG_PLAIN_IMAGE=1       start from plain `+track.BaseImage+` and install everything in the
+                          guest at the first start (minutes), without Docker or Podman
+and by build and create: JIG_KEEP_IMAGES=1 keeps the images a build replaces.
 
-other:
-  allowlist [-format list|sbx]  the hosts a new sandbox may reach (base, JIG_LAYERS, ~/.mono-jig/allowlist.yaml)
-  ssh-setup [flags]  SSH keys and config for an sshd-based sandbox (sbx, checks/step1-docker.sh)`)
+Everything else is msb's (microsandbox):
+  msb ls                  every sandbox, running or stopped
+  msb inspect <name>      one sandbox's configuration and status
+  msb logs <name>         its output; msb ps, msb metrics
+  msb exec -u agent <name> -- <cmd>, msb cp <src> <name>:<path>
+                          only while it's started (mono-jig start): msb starts a
+                          stopped sandbox without its broker
+Stop and remove sandboxes with mono-jig, not msb stop or msb rm: mono-jig
+also stops the broker and clears the sandbox's state.`)
 	os.Exit(2)
 }
+
+// pad left-aligns s in a column of width n, or ends the line when it's
+// longer, as the usage's other entries do.
+func pad(s string, n int) string {
+	if len(s) < n {
+		return s + strings.Repeat(" ", n-len(s))
+	}
+	return s + "\n" + strings.Repeat(" ", n+2)
+}
+
+// supervisorEnv names the sandbox whose supervisor this process is: start
+// runs the same executable with it set, instead of a command of its own.
+const supervisorEnv = "JIG_SUPERVISOR"
 
 // Main runs the command line for track t.
 func Main(t Track) {
 	track = t.withDefaults()
+	if name := os.Getenv(supervisorEnv); name != "" {
+		os.Unsetenv(supervisorEnv)
+		run(name, sandboxState(name))
+		return
+	}
 	if len(os.Args) < 2 {
 		usage()
 	}
-	cmd := os.Args[1]
+	cmd, args := os.Args[1], os.Args[2:]
 	switch {
 	case cmd == track.Editor.Name():
 		cmd = "editor"
@@ -131,66 +138,120 @@ func Main(t Track) {
 		usage()
 	}
 	switch cmd {
-	case "ssh-setup":
-		sshSetup(os.Args[2:])
-	case "allowlist":
-		allowlistCmd(os.Args[2:])
 	case "setup":
-		if len(os.Args) != 2 {
+		if len(args) != 0 {
 			usage()
 		}
 		setup()
 	case "login":
-		login(os.Args[2:])
+		login(args)
 	case "logout":
-		logout(os.Args[2:])
-	case "image":
-		imageCmd(os.Args[2:])
+		logout(args)
+	case "build":
+		build(args)
 	case "ca":
-		caCmd(os.Args[2:])
-	case "uninstall":
-		uninstall(os.Args[2:])
-	case "cp":
-		cp(os.Args[2:])
-	case "up", "run", "down", "shell", "editor", "agent", "open", "stop", "ssh-config", "denied", "rm":
-		args := os.Args[2:]
-		var specs []string
-		var mode string
+		caCmd(args)
+	case "allowlist":
+		if len(args) != 0 {
+			usage()
+		}
+		allowlistCmd()
+	case "self":
+		if len(args) == 0 || args[0] != "uninstall" {
+			usage()
+		}
+		uninstall(args[1:])
+	case "create":
+		name, specs, err := createArgs(args)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "mono-jig create:", err)
+			usage()
+		}
+		create(name, specs)
+	case "rm":
+		name, force, err := rmArgs(args)
+		if err != nil {
+			usage()
+		}
+		rm(name, sandboxState(name), force)
+	case "agent", "ssh":
+		if len(args) == 0 {
+			usage()
+		}
+		state := sandboxState(args[0])
 		if cmd == "agent" {
-			// The rest are the agent's own arguments.
-			if len(args) == 0 {
-				usage()
-			}
+			agentCLI(args[0], state, args[1:])
 		} else {
-			args, specs = splitMounts(args)
-			args, mode = splitBrokerMode(args)
-			args, plainImage = splitPlainImage(args)
-			dir := cmd == "editor" || cmd == "open"
-			if len(args) != 1 && (!dir || len(args) != 2) {
-				usage()
-			}
-			if (len(specs) > 0 || mode != "" || plainImage) && cmd != "up" && cmd != "open" {
-				usage()
-			}
+			sshCmd(args[0], state, args[1:])
 		}
-		if mode == "" && (cmd == "up" || cmd == "open" || cmd == "agent") && track.BrokerMode != modeServer {
-			setRuntimePaths()
-			if ok, err := track.Backend.Exists(context.Background(), args[0]); err == nil && !ok {
-				mode = track.BrokerMode // a new sandbox: the track's default
-			}
+	case "editor":
+		if len(args) != 1 && len(args) != 2 {
+			usage()
 		}
-		if mode != "" {
-			setRuntimePaths()
-			saveBrokerMode(args[0], filepath.Join(stateRoot(), args[0]), mode)
+		code(args[0], sandboxState(args[0]), args[1:])
+	case "start", "stop", "ssh-config", "denied":
+		if len(args) != 1 {
+			usage()
 		}
-		if len(specs) > 0 {
-			setRuntimePaths()
-			saveMounts(args[0], filepath.Join(stateRoot(), args[0]), specs)
+		name, state := args[0], sandboxState(args[0])
+		switch cmd {
+		case "start":
+			start(name, state)
+		case "stop":
+			stop(name, state)
+		case "ssh-config":
+			fmt.Print(sshConfig(name, state))
+		case "denied":
+			denied(state)
 		}
-		sandboxCmd(cmd, args[0], args[1:])
 	default:
 		usage()
 	}
+}
+
+// createArgs reads create's arguments: one name, and -v or --volume
+// mounts (-v spec, --volume spec, --volume=spec), in any order.
+func createArgs(args []string) (name string, specs []string, err error) {
+	for i := 0; i < len(args); i++ {
+		switch a := args[i]; {
+		case a == "-v" || a == "--volume":
+			if i+1 == len(args) {
+				return "", nil, fmt.Errorf("%s needs <host>:<guest>:ro|rw", a)
+			}
+			i++
+			specs = append(specs, args[i])
+		case strings.HasPrefix(a, "--volume="):
+			specs = append(specs, strings.TrimPrefix(a, "--volume="))
+		case strings.HasPrefix(a, "-"):
+			return "", nil, fmt.Errorf("unknown flag %s", a)
+		case name != "":
+			return "", nil, fmt.Errorf("one sandbox name, not %s and %s", name, a)
+		default:
+			name = a
+		}
+	}
+	if name == "" {
+		return "", nil, fmt.Errorf("no sandbox name")
+	}
+	return name, specs, nil
+}
+
+// rmArgs reads rm's arguments: one name, and -f or --force.
+func rmArgs(args []string) (name string, force bool, err error) {
+	for _, a := range args {
+		switch {
+		case a == "-f" || a == "--force":
+			force = true
+		case strings.HasPrefix(a, "-") || name != "":
+			return "", false, fmt.Errorf("rm [-f] <name>")
+		default:
+			name = a
+		}
+	}
+	if name == "" {
+		return "", false, fmt.Errorf("rm [-f] <name>")
+	}
+	return name, force, nil
 }
 
 // agentCmd is the command that runs the track's agent CLI.
@@ -198,69 +259,16 @@ func agentCmd() string { return track.Agent.Command() }
 
 // commands are mono-jig's own commands, which the agent's and the
 // editor's can't be.
-var commands = []string{"ssh-setup", "allowlist", "setup", "login", "logout", "image", "ca", "uninstall", "cp",
-	"up", "run", "down", "shell", "editor", "agent", "open", "stop", "ssh-config", "denied", "rm", "help"}
-
-func defaultState() string {
-	if d := os.Getenv("JIG_STATE"); d != "" {
-		return d
-	}
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".local", "state", "mono-jig")
-}
-
-func sshSetup(args []string) {
-	fs := flag.NewFlagSet("ssh-setup", flag.ExitOnError)
-	name := fs.String("name", "", "sandbox name")
-	user := fs.String("user", "agent", "user in the sandbox")
-	proxy := fs.String("proxy-command", "", "ProxyCommand that reaches the sandbox's sshd (e.g. 'docker exec -i <ctr> nc localhost 22')")
-	host := fs.String("host", "", "host name or address, when there's no ProxyCommand")
-	port := fs.Int("port", 22, "port, with -host")
-	state := fs.String("state", defaultState(), "state directory")
-	_ = fs.Parse(args)
-	if *name == "" {
-		fmt.Fprintln(os.Stderr, "ssh-setup: -name is required")
-		os.Exit(2)
-	}
-	p := editor.PathsFor(filepath.Join(*state, "sandboxes", *name))
-	if err := editor.GenerateKeys(p, *name); err != nil {
-		fmt.Fprintln(os.Stderr, "ssh-setup:", err)
-		os.Exit(1)
-	}
-	e := editor.HostEntry{Alias: editor.HostAlias(*name), User: *user, ProxyCommand: *proxy, HostName: *host, Port: *port, Paths: p}
-	if err := editor.WriteConfig(e); err != nil {
-		fmt.Fprintln(os.Stderr, "ssh-setup:", err)
-		os.Exit(1)
-	}
-	vs, err := editor.WriteVSCodeSettings(filepath.Join(*state, "vscode"), p.Config, []string{e.Alias}, track.Agent.EditorExtensions())
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "ssh-setup:", err)
-		os.Exit(1)
-	}
-	fmt.Printf("config=%s\nhost=%s\nsandbox-keys=%s\nvscode-settings=%s\n", p.Config, e.Alias, p.SandboxDir, vs)
-	fmt.Printf("open with: code --user-data-dir %q --extensions-dir %q --remote ssh-remote+%s /home/%s\n",
-		filepath.Join(*state, "vscode"), filepath.Join(*state, "vscode-ext"), e.Alias, *user)
-}
+var commands = []string{"create", "start", "ssh", "stop", "rm", "setup", "login", "logout", "build",
+	"denied", "allowlist", "ca", "ssh-config", "self", "editor", "agent", "help"}
 
 // allowlistCmd prints the hosts a new sandbox would reach: the base, the
 // JIG_LAYERS files and the user's layer, less the hosts of the providers
 // you're logged in to (allowed).
-func allowlistCmd(args []string) {
-	fs := flag.NewFlagSet("allowlist", flag.ExitOnError)
-	format := fs.String("format", "list", "list (one host per line, with its layer and group) or sbx (sbx policy commands)")
-	_ = fs.Parse(args)
+func allowlistCmd() {
 	es, err := allowed(brokerConfig())
-	if err == nil {
-		switch *format {
-		case "list":
-			fmt.Print(allowlist.Format(es))
-		case "sbx":
-			fmt.Print(allowlist.FormatSbx(es))
-		default:
-			err = fmt.Errorf("unknown format %q", *format)
-		}
-	}
 	if err != nil {
 		fail("allowlist: %v", err)
 	}
+	fmt.Print(allowlist.Format(es))
 }

@@ -144,11 +144,10 @@ func sshHosts(root string) []string {
 // code opens the harness's own editor instance (its own settings and
 // extensions, under <root>; for VS Code, the settings that close the
 // credential bridges, editor.VSCodeSettings) on the sandbox, on dir
-// (relative to the guest user's home) or the home itself.
+// (relative to the guest user's home) or the home itself, starting the
+// sandbox first if it's stopped.
 func code(name, state string, args []string) {
-	if pidOf(state) == 0 {
-		fail("%s isn't up: mono-jig up %s", name, name)
-	}
+	ensureStarted(name, state)
 	sshConfig(name, state)
 	root := filepath.Dir(state)
 	fail("%v", track.Editor.Open(root, editorProfile(root), sshHost(name), guestDir(args)))

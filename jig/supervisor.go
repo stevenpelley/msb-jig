@@ -20,7 +20,8 @@ import (
 	"github.com/stevenpelley/msb-jig/sandbox"
 )
 
-// The supervisor (mono-jig run): one process per sandbox that serves
+// The supervisor (started by mono-jig start or create, as this executable
+// with JIG_SUPERVISOR=<name>): one process per sandbox that serves
 // the broker and owns the VM (docs/microsandbox.md, "Tying the broker's
 // lifecycle to the sandbox's").
 //
@@ -34,8 +35,8 @@ import (
 // policy allows goes through it, and it terminates the providers' real
 // hosts; the guest has no route or bridge. Other egress is microsandbox's
 // policy, compiled from the allowlist. Network rules, mounts, the vsock
-// route and the proxy are set when the sandbox is created; rm and open
-// again to change them.
+// route and the proxy are set when the sandbox is created; rm and
+// create again to change them.
 //
 // The providers come from mono-jig login (settings.json and the
 // Keychain; registry.go and login_<provider>.go); the JIG_* variables
@@ -44,7 +45,7 @@ import (
 // Environment:
 //
 //	JIG_STATE                 state directories (default ~/.mono-jig)
-//	JIG_IMAGE                 the OCI image (default: the one mono-jig image build made, else JIG_BASE_IMAGE)
+//	JIG_IMAGE                 the OCI image (default: the one mono-jig build made, else JIG_BASE_IMAGE)
 //	JIG_BASE_IMAGE            what the base image builds on (default ubuntu:26.04; base uses apt)
 //	JIG_MEMORY                MiB (default 4096)
 //	JIG_CPUS                  vCPUs (default 4)

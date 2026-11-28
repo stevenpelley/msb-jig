@@ -85,7 +85,7 @@ func login(args []string) {
 		}
 		p.Login(args[1:])
 	}
-	fmt.Println("sandboxes pick this up when they next start (mono-jig stop, then open)")
+	fmt.Println("sandboxes pick this up when they next start (mono-jig stop, then start)")
 }
 
 // loginAll asks about each provider in turn and logs in to those you

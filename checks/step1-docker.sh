@@ -30,10 +30,8 @@ if ! docker image inspect "$image" >/dev/null 2>&1; then
 fi
 docker run -d --name "$name" "$image" >/dev/null
 
-# The personal track's mono-jig (or $MONO_JIG): this repository has no
-# command of its own.
-"${MONO_JIG:-mono-jig}" ssh-setup -name "$name" -state "$state" \
-  -proxy-command "docker exec -i $name nc localhost 22" >/dev/null
+(cd "$here" && go run ./checks/ssh-setup -name "$name" -state "$state" \
+  -proxy-command "docker exec -i $name nc localhost 22") >/dev/null
 sb="$state/sandboxes/$name/ssh"
 tar -C "$sb/sandbox" -cf - . | docker exec -i "$name" /opt/mono-jig/install-keys.sh agent >/dev/null
 docker cp "$here/checks/bridges.sh" "$name:/usr/local/bin/bridges.sh" >/dev/null

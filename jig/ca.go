@@ -15,7 +15,7 @@ import (
 // (their paths, so a rotated file is read again); JIG_EXTRA_CAS
 // overrides them (space-separated paths; empty: none).
 //
-// They go in the base image (mono-jig image build: the build's own
+// They go in the base image (mono-jig build: the build's own
 // downloads need them) and in every sandbox at every start (provision.sh's
 // ca component), before anything else is installed. The broker on the Mac
 // verifies with the Mac's own trust settings, so the proxy's root belongs
@@ -123,5 +123,5 @@ func caCmd(args []string) {
 		fmt.Printf("%d CA certificates from %s\n", len(cas), strings.Join(files, " "))
 	}
 	SaveSettings(s)
-	fmt.Println("sandboxes pick this up when they next start; rebuild the base image too (mono-jig image build)")
+	fmt.Println("sandboxes pick this up when they next start; rebuild the base image too (mono-jig build)")
 }

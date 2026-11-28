@@ -498,7 +498,7 @@ What a track can't change without a library change:
    one new provider at a time, each with tests from `brokertest`.
 6. The agent and editor, if not Claude Code and VS Code.
 7. Components for tools that need installing.
-8. `mono-jig open` a sandbox; `mono-jig denied` for what's missing.
+8. `mono-jig create` a sandbox; `mono-jig denied` for what's missing.
 
 ## Sources
 
